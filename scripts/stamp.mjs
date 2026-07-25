@@ -18,6 +18,18 @@ if (!fs.existsSync(bundle)) {
 }
 const dest = path.join(root, 'plugin', 'bin', 'agentchat')
 fs.mkdirSync(path.dirname(dest), { recursive: true })
-fs.copyFileSync(bundle, dest)
+
+// Normalise the bundler's source-path annotations before committing. esbuild
+// writes the RESOLVED path of each input, so a local symlinked engine
+// (`../agentchat-agent-core`) and CI's sibling checkout (`.agent-core`)
+// produce byte-different bundles from identical source — which would make the
+// drift check fail on every push for no real reason. Canonicalising keeps the
+// check meaningful: it then fails only when the CODE actually changed.
+const normalised = fs
+  .readFileSync(bundle, 'utf-8')
+  .replaceAll('../agentchat-agent-core/dist/', '@agentchatme/agent-core/dist/')
+  .replaceAll('.agent-core/dist/', '@agentchatme/agent-core/dist/')
+
+fs.writeFileSync(dest, normalised)
 fs.chmodSync(dest, 0o755)
 console.log('stamp: plugin/bin/agentchat')

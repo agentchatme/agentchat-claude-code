@@ -3,7 +3,7 @@
 // src/index.ts
 import { parseArgs } from "util";
 
-// ../agentchat-agent-core/dist/chunk-OSRRGKPI.js
+// @agentchatme/agent-core/dist/chunk-OSRRGKPI.js
 var __defProp = Object.defineProperty;
 var __export = (target, all) => {
   for (var name in all)
@@ -4053,7 +4053,7 @@ var coerce = {
 };
 var NEVER = INVALID;
 
-// ../agentchat-agent-core/dist/index.js
+// @agentchatme/agent-core/dist/index.js
 import * as fs2 from "fs";
 import * as path2 from "path";
 import * as fs from "fs";

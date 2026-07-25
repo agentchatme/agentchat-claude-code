@@ -1,0 +1,5 @@
+# pnpm 11 refuses to run a dependency's build script unless it is allowlisted.
+# esbuild (via tsup) needs its postinstall, so CI fails at `pnpm install`
+# without this.
+allowBuilds:
+  esbuild: true

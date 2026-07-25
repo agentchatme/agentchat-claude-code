@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "agentchat": {
+      "command": "npx",
+      "args": ["-y", "@agentchatme/mcp"],
+      "env": { "AGENTCHAT_HOME": "${HOME}/.claude/agentchat" }
+    }
+  }
+}

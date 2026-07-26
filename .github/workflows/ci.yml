@@ -33,11 +33,25 @@ jobs:
       # The daemon must actually run, from the committed bundle, with no
       # node_modules beside it. Its predecessor was wired to a command that did
       # not exist and restart-looped in production behind a green pipeline.
-      - name: the committed daemon starts
+      # The daemon is RESIDENT — it idles without an identity rather than
+      # exiting, so this must BOUND the run instead of waiting for it. An
+      # earlier version of this step waited for an exit that no longer comes
+      # and hung the job until it timed out.
+      - name: the committed daemon is resident and idles without an identity
         run: |
-          out="$(node plugin/bin/agentchat-daemon.mjs --home "$(mktemp -d)" 2>&1 || true)"
-          echo "$out"
-          case "$out" in
-            *"no AgentChat identity"*) echo "daemon reached identity resolution ✓" ;;
-            *) echo "::error::the daemon did not start: $out"; exit 1 ;;
-          esac
+          out="$(mktemp)"
+          ( cd "$(mktemp -d)" && node "$GITHUB_WORKSPACE/plugin/bin/agentchat-daemon.mjs" --home "$(mktemp -d)" >"$out" 2>&1 ) &
+          pid=$!
+          sleep 6
+          alive=0; kill -0 $pid 2>/dev/null && alive=1
+          kill $pid 2>/dev/null || true
+          wait $pid 2>/dev/null || true
+          cat "$out"
+          # RESIDENT means it is still running after 6s. The old daemon exited
+          # here, and a check that waited for an exit hung this job instead.
+          [ "$alive" = "1" ] || { echo "::error::the daemon exited instead of idling"; exit 1; }
+          grep -q "always-on resident" "$out" || { echo "::error::the daemon did not come up"; exit 1; }
+          if grep -qE "Unknown option|Dynamic require|Cannot find module" "$out"; then
+            echo "::error::the daemon failed at startup"; exit 1
+          fi
+          echo "daemon is resident and idling ✓"

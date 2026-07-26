@@ -37,7 +37,10 @@ function run(
   env: Record<string, string> = {},
 ): Promise<{ code: number | null; out: string }> {
   return new Promise((resolve) => {
-    execFile(
+    // Close stdin. The hook subcommands read a JSON payload from it, so a child
+    // left with an open pipe waits forever — which is also exactly what a host
+    // does NOT do: it writes the payload and closes.
+    const child = execFile(
       process.execPath,
       [script, ...args],
       {
@@ -61,6 +64,7 @@ function run(
         })
       },
     )
+    child.stdin?.end()
   })
 }
 
@@ -166,5 +170,45 @@ describe('daemon install points the service at the daemon, not the CLI', () => {
     expect(fs.existsSync(stable)).toBe(true)
     expect(fs.readFileSync(stable, 'utf-8')).toBe(fs.readFileSync(DAEMON, 'utf-8'))
     expect(stable.includes('plugins/cache')).toBe(false)
+  })
+})
+
+// ─── The committed hooks.json must invoke commands this CLI accepts ─────────
+//
+// The Codex integration shipped 0.0.13 with every session hook broken: its
+// installer wrote `hook <event> --platform codex`, a leftover from the shared
+// CLI, and this generation of the binary rejects that flag. Each hook exited on
+// "Unknown option" and printed usage — no digest, no pickup, no acks.
+//
+// This plugin's hooks.json is COMMITTED, so the same drift is possible and
+// would ship to every user with no build step in between. Run what it declares.
+describe('the committed hooks.json runs', () => {
+  it('every declared hook command is accepted by the bundle', { timeout: 30_000 }, async () => {
+    const hooksFile = path.join(__dirname, '..', 'plugin', 'hooks', 'hooks.json')
+    const declared = JSON.parse(fs.readFileSync(hooksFile, 'utf-8')) as Record<string, any>
+    const events = (declared['hooks'] ?? declared) as Record<string, Array<Record<string, any>>>
+
+    const commands: string[] = []
+    for (const groups of Object.values(events)) {
+      for (const group of groups) {
+        for (const h of group['hooks'] ?? []) {
+          if (typeof h?.command === 'string') commands.push(h.command)
+        }
+      }
+    }
+    expect(commands.length).toBe(3) // SessionStart + UserPromptSubmit + Stop
+
+    for (const command of commands) {
+      // `node "${CLAUDE_PLUGIN_ROOT}/bin/agentchat" hook <event>` — resolve the
+      // placeholder the way Claude Code does, then run it.
+      const resolved = command.replace('${CLAUDE_PLUGIN_ROOT}', path.join(__dirname, '..', 'plugin'))
+      const m = resolved.match(/^node "([^"]+)" (.+)$/)
+      expect(m, `unexpected hook command shape: ${command}`).not.toBeNull()
+      const { out } = await run(m![1] as string, (m![2] as string).split(/\s+/), {
+        AGENTCHAT_HOOKS_ENABLED: '0',
+      })
+      expect(out, `hook rejected its own arguments: ${command}\n${out}`).not.toMatch(/Unknown option/i)
+      expect(out, `hook printed usage instead of running: ${command}\n${out}`).not.toMatch(/^Usage:/im)
+    }
   })
 })

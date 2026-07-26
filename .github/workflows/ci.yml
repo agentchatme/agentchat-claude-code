@@ -55,3 +55,41 @@ jobs:
             echo "::error::the daemon failed at startup"; exit 1
           fi
           echo "daemon is resident and idling ✓"
+
+  # ── main IS production for this repo ──
+  #
+  # A plugin install is a git clone of this repository, so whatever is on main
+  # is what the next `/plugin install` fetches. There is no publish step to act
+  # as the moment someone decides to ship.
+  #
+  # Claude Code records an install as version + commit sha. So the failure to
+  # prevent is two different bundles both claiming to be 0.0.1392 — a user's
+  # recorded version would no longer identify what they actually have, and
+  # "which build is this?" becomes unanswerable.
+  #
+  # Changing the shipped artifact therefore has to declare a new version. That
+  # makes the version bump the deliberate act, enforced rather than remembered.
+  release-declared:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: a change under plugin/ must come with a new version
+        run: |
+          git rev-parse HEAD~1 >/dev/null 2>&1 || { echo "no previous commit; nothing to compare"; exit 0; }
+          if [ -z "$(git diff --name-only HEAD~1 HEAD -- plugin/)" ]; then
+            echo "plugin/ unchanged — no version bump needed ✓"; exit 0
+          fi
+          echo "changed under plugin/:"
+          git diff --name-only HEAD~1 HEAD -- plugin/ | sed 's/^/  /'
+          git show HEAD~1:package.json > /tmp/prev-package.json
+          prev="$(node -p "require('/tmp/prev-package.json').version")"
+          curr="$(node -p "require('./package.json').version")"
+          echo "version: $prev -> $curr"
+          if [ "$prev" = "$curr" ]; then
+            echo "::error::plugin/ changed but the version is still $curr. Users install by cloning main, and an install is recorded as version+sha — two different bundles must never share a version."
+            exit 1
+          fi
+          echo "a new version was declared ✓"

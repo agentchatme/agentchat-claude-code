@@ -28,8 +28,15 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 // (`<engine>/node_modules/.pnpm/ws@x/...`), and normalising only `dist/` left
 // those paths host-specific — which broke the drift check on the first push
 // that bundled a socket.
+//
+// The engine is a published dependency now, so its real path is a pnpm virtual
+// store entry. That layout is a function of the pnpm MAJOR, and CI does not
+// necessarily run the same major as a contributor's machine — so it gets
+// collapsed to the same canonical form. The bundle still changes when the
+// engine's CODE changes; it just stops changing when only the store layout does.
 const normalise = (text) =>
   text
+    .replace(/node_modules\/\.pnpm\/@agentchatme\+agent-core@[^/]+\/node_modules\//g, '')
     .replaceAll('../agentchat-agent-core/', '@agentchatme/agent-core/')
     .replaceAll('.agent-core/', '@agentchatme/agent-core/')
 

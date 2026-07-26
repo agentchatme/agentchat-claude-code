@@ -4,16 +4,21 @@
   "private": true,
   "description": "AgentChat for Claude Code — the official plugin. Distributed via the Claude Code plugin marketplace (this repo IS the artifact), not npm.",
   "type": "module",
-  "engines": { "node": ">=20.0.0" },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "build:cli": "tsup",
     "build": "pnpm run build:cli && node scripts/stamp.mjs",
     "type-check": "tsc --noEmit",
     "test": "vitest run"
   },
-  "dependencies": { "agentchatme": "^1.0.22", "zod": "^3.23.0" },
+  "dependencies": {
+    "@agentchatme/agent-core": "0.0.1",
+    "agentchatme": "^1.0.22",
+    "zod": "^3.23.0"
+  },
   "devDependencies": {
-    "@agentchatme/agent-core": "link:.agent-core",
     "@types/node": "^22.19.17",
     "tsup": "^8.5.1",
     "typescript": "^5.7.0",

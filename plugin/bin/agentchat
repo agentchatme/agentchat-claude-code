@@ -4320,7 +4320,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
 
-// @agentchatme/agent-core/node_modules/.pnpm/agentchatme@1.0.22_ws@8.21.1/node_modules/agentchatme/dist/index.js
+// node_modules/.pnpm/agentchatme@1.0.22_ws@8.21.1/node_modules/agentchatme/dist/index.js
 var ErrorCode = {
   AGENT_NOT_FOUND: "AGENT_NOT_FOUND",
   AGENT_SUSPENDED: "AGENT_SUSPENDED",

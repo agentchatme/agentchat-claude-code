@@ -36,7 +36,14 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 // engine's CODE changes; it just stops changing when only the store layout does.
 const normalise = (text) =>
   text
-    .replace(/node_modules\/\.pnpm\/@agentchatme\+agent-core@[^/]+\/node_modules\//g, '')
+    // Any pnpm virtual-store prefix, for any package. The store layout is a
+    // function of the pnpm MAJOR (CI pins 11, a contributor may be on 10), and
+    // whether a dependency is reached directly or through another package —
+    // `ws` moved from `<engine>/node_modules/.pnpm/ws@x/…` to
+    // `node_modules/.pnpm/ws@x/…` the moment the engine became a published
+    // dependency instead of a linked directory. Neither is a code change, and
+    // neither should fail a drift check.
+    .replace(/(?:[^"'\s]*\/)?node_modules\/\.pnpm\/[^/]+\/node_modules\//g, '')
     .replaceAll('../agentchat-agent-core/', '@agentchatme/agent-core/')
     .replaceAll('.agent-core/', '@agentchatme/agent-core/')
 

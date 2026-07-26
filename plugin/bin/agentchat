@@ -4320,8 +4320,8 @@ function readState(home) {
 function writeState(home, state) {
   atomicWriteFile(statePath(home), JSON.stringify(state, null, 2) + "\n", 384);
 }
-function prune(state, now) {
-  const cutoff = now.getTime() - SESSION_TTL_MS;
+function prune(state, now2) {
+  const cutoff = now2.getTime() - SESSION_TTL_MS;
   for (const [key, entry] of Object.entries(state.sessions)) {
     const t = Date.parse(entry.updated_at);
     if (Number.isNaN(t) || t < cutoff) {
@@ -4332,12 +4332,12 @@ function prune(state, now) {
 function getContinuations(home, sessionKey) {
   return readState(home).sessions[sessionKey]?.continuations ?? 0;
 }
-function recordContinuation(home, sessionKey, now = /* @__PURE__ */ new Date()) {
+function recordContinuation(home, sessionKey, now2 = /* @__PURE__ */ new Date()) {
   const state = readState(home);
-  prune(state, now);
+  prune(state, now2);
   const current = state.sessions[sessionKey]?.continuations ?? 0;
   const next = current + 1;
-  state.sessions[sessionKey] = { continuations: next, updated_at: now.toISOString() };
+  state.sessions[sessionKey] = { continuations: next, updated_at: now2.toISOString() };
   writeState(home, state);
   return next;
 }
@@ -4347,37 +4347,37 @@ function resetSession(home, sessionKey) {
   delete state.sessions[sessionKey];
   writeState(home, state);
 }
-function setPendingAck(home, sessionKey, cursor, now = /* @__PURE__ */ new Date()) {
+function setPendingAck(home, sessionKey, cursor, now2 = /* @__PURE__ */ new Date()) {
   const state = readState(home);
-  prune(state, now);
+  prune(state, now2);
   const existing = state.sessions[sessionKey];
   state.sessions[sessionKey] = {
     continuations: existing?.continuations ?? 0,
-    updated_at: now.toISOString(),
+    updated_at: now2.toISOString(),
     pending_ack: cursor
   };
   writeState(home, state);
 }
-function takePendingAck(home, sessionKey, now = /* @__PURE__ */ new Date()) {
+function takePendingAck(home, sessionKey, now2 = /* @__PURE__ */ new Date()) {
   const state = readState(home);
   const entry = state.sessions[sessionKey];
   if (entry?.pending_ack === void 0) return null;
   const cursor = entry.pending_ack;
   delete entry.pending_ack;
-  entry.updated_at = now.toISOString();
+  entry.updated_at = now2.toISOString();
   writeState(home, state);
   return cursor;
 }
 var OFFER_COOLDOWN_MS = 24 * 60 * 60 * 1e3;
-function shouldOfferRegistration(home, now = /* @__PURE__ */ new Date()) {
+function shouldOfferRegistration(home, now2 = /* @__PURE__ */ new Date()) {
   const last = readState(home).last_offer_at;
   if (last === void 0) return true;
   const t = Date.parse(last);
-  return Number.isNaN(t) || now.getTime() - t >= OFFER_COOLDOWN_MS;
+  return Number.isNaN(t) || now2.getTime() - t >= OFFER_COOLDOWN_MS;
 }
-function recordRegistrationOffer(home, now = /* @__PURE__ */ new Date()) {
+function recordRegistrationOffer(home, now2 = /* @__PURE__ */ new Date()) {
   const state = readState(home);
-  state.last_offer_at = now.toISOString();
+  state.last_offer_at = now2.toISOString();
   writeState(home, state);
 }
 var SEC = 1e3;
@@ -4393,11 +4393,11 @@ function relativeAge(ms) {
   if (ms < 36 * HOUR) return "1 day ago";
   return `${Math.round(ms / DAY)} days ago`;
 }
-function relativeWhen(createdAt, now = Date.now()) {
+function relativeWhen(createdAt, now2 = Date.now()) {
   if (!createdAt) return "";
   const t = Date.parse(createdAt);
   if (Number.isNaN(t)) return "";
-  return relativeAge(Math.max(0, now - t));
+  return relativeAge(Math.max(0, now2 - t));
 }
 var SNIPPET_MAX = 140;
 function snippetOf(row) {
@@ -5079,7 +5079,1291 @@ function serviceEnv() {
 
 // src/identity.ts
 import * as readline from "readline/promises";
-import { AgentChatClient } from "agentchatme";
+
+// node_modules/.pnpm/agentchatme@1.0.22/node_modules/agentchatme/dist/index.js
+var ErrorCode = {
+  AGENT_NOT_FOUND: "AGENT_NOT_FOUND",
+  AGENT_SUSPENDED: "AGENT_SUSPENDED",
+  AGENT_PAUSED_BY_OWNER: "AGENT_PAUSED_BY_OWNER",
+  HANDLE_TAKEN: "HANDLE_TAKEN",
+  INVALID_HANDLE: "INVALID_HANDLE",
+  EMAIL_EXHAUSTED: "EMAIL_EXHAUSTED",
+  SUSPENDED: "SUSPENDED",
+  RESTRICTED: "RESTRICTED",
+  CONVERSATION_NOT_FOUND: "CONVERSATION_NOT_FOUND",
+  MESSAGE_NOT_FOUND: "MESSAGE_NOT_FOUND",
+  GROUP_DELETED: "GROUP_DELETED",
+  RATE_LIMITED: "RATE_LIMITED",
+  RECIPIENT_BACKLOGGED: "RECIPIENT_BACKLOGGED",
+  AWAITING_REPLY: "AWAITING_REPLY",
+  BLOCKED: "BLOCKED",
+  UNAUTHORIZED: "UNAUTHORIZED",
+  FORBIDDEN: "FORBIDDEN",
+  VALIDATION_ERROR: "VALIDATION_ERROR",
+  INTERNAL_ERROR: "INTERNAL_ERROR",
+  WEBHOOK_DELIVERY_FAILED: "WEBHOOK_DELIVERY_FAILED",
+  OWNER_NOT_FOUND: "OWNER_NOT_FOUND",
+  INVALID_API_KEY: "INVALID_API_KEY",
+  ALREADY_CLAIMED: "ALREADY_CLAIMED",
+  CLAIM_NOT_FOUND: "CLAIM_NOT_FOUND"
+};
+function parseRetryAfter(raw) {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (/^\d+$/.test(trimmed)) {
+    const seconds = Number(trimmed);
+    return Number.isFinite(seconds) ? seconds * 1e3 : null;
+  }
+  if (!/[a-zA-Z]/.test(trimmed)) return null;
+  const epoch = Date.parse(trimmed);
+  if (!Number.isFinite(epoch)) return null;
+  return Math.max(0, epoch - Date.now());
+}
+var AgentChatError = class extends Error {
+  code;
+  status;
+  details;
+  /**
+   * The server's `x-request-id` for the failing request, when present.
+   * Include it in bug reports — the operator can look up the full
+   * server-side trace in seconds.
+   */
+  requestId;
+  constructor(response, status, requestId = null) {
+    super(response.message);
+    this.name = "AgentChatError";
+    this.code = response.code;
+    this.status = status;
+    this.details = response.details;
+    this.requestId = requestId;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+};
+var RateLimitedError = class extends AgentChatError {
+  retryAfterMs;
+  constructor(response, status, retryAfterMs, requestId = null) {
+    super(response, status, requestId);
+    this.name = "RateLimitedError";
+    this.retryAfterMs = retryAfterMs;
+  }
+};
+var SuspendedError = class extends AgentChatError {
+  constructor(response, status, requestId = null) {
+    super(response, status, requestId);
+    this.name = "SuspendedError";
+  }
+};
+var RestrictedError = class extends AgentChatError {
+  constructor(response, status, requestId = null) {
+    super(response, status, requestId);
+    this.name = "RestrictedError";
+  }
+};
+var RecipientBackloggedError = class extends AgentChatError {
+  recipientHandle;
+  undeliveredCount;
+  constructor(response, status, requestId = null) {
+    super(response, status, requestId);
+    this.name = "RecipientBackloggedError";
+    const d = response.details;
+    this.recipientHandle = typeof d?.recipient_handle === "string" ? d.recipient_handle : null;
+    this.undeliveredCount = typeof d?.undelivered_count === "number" ? d.undelivered_count : null;
+  }
+};
+var AwaitingReplyError = class extends AgentChatError {
+  recipientHandle;
+  waitingSince;
+  constructor(response, status, requestId = null) {
+    super(response, status, requestId);
+    this.name = "AwaitingReplyError";
+    const d = response.details;
+    this.recipientHandle = typeof d?.recipient_handle === "string" ? d.recipient_handle : null;
+    this.waitingSince = typeof d?.waiting_since === "string" ? d.waiting_since : null;
+  }
+};
+var BlockedError = class extends AgentChatError {
+  constructor(response, status, requestId = null) {
+    super(response, status, requestId);
+    this.name = "BlockedError";
+  }
+};
+var ValidationError = class extends AgentChatError {
+  constructor(response, status, requestId = null) {
+    super(response, status, requestId);
+    this.name = "ValidationError";
+  }
+};
+var UnauthorizedError = class extends AgentChatError {
+  constructor(response, status, requestId = null) {
+    super(response, status, requestId);
+    this.name = "UnauthorizedError";
+  }
+};
+var ForbiddenError = class extends AgentChatError {
+  constructor(response, status, requestId = null) {
+    super(response, status, requestId);
+    this.name = "ForbiddenError";
+  }
+};
+var NotFoundError = class extends AgentChatError {
+  constructor(response, status, requestId = null) {
+    super(response, status, requestId);
+    this.name = "NotFoundError";
+  }
+};
+var GroupDeletedError = class extends AgentChatError {
+  groupId;
+  deletedByHandle;
+  deletedAt;
+  constructor(response, status, requestId = null) {
+    super(response, status, requestId);
+    this.name = "GroupDeletedError";
+    const d = response.details;
+    this.groupId = typeof d?.group_id === "string" ? d.group_id : null;
+    this.deletedByHandle = typeof d?.deleted_by_handle === "string" ? d.deleted_by_handle : null;
+    this.deletedAt = typeof d?.deleted_at === "string" ? d.deleted_at : null;
+  }
+};
+var ServerError = class extends AgentChatError {
+  constructor(response, status, requestId = null) {
+    super(response, status, requestId);
+    this.name = "ServerError";
+  }
+};
+var ConnectionError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ConnectionError";
+  }
+};
+function createAgentChatError(body, status, headers) {
+  const requestId = headers?.get("x-request-id") ?? null;
+  switch (body.code) {
+    case ErrorCode.RATE_LIMITED: {
+      const fromHeader = headers ? parseRetryAfter(headers.get("retry-after")) : null;
+      const fromBody = typeof body.details?.retry_after_ms === "number" ? body.details.retry_after_ms : null;
+      return new RateLimitedError(body, status, fromHeader ?? fromBody, requestId);
+    }
+    case ErrorCode.SUSPENDED:
+    case ErrorCode.AGENT_SUSPENDED:
+      return new SuspendedError(body, status, requestId);
+    case ErrorCode.RESTRICTED:
+      return new RestrictedError(body, status, requestId);
+    case ErrorCode.RECIPIENT_BACKLOGGED:
+      return new RecipientBackloggedError(body, status, requestId);
+    case ErrorCode.AWAITING_REPLY:
+      return new AwaitingReplyError(body, status, requestId);
+    case ErrorCode.BLOCKED:
+      return new BlockedError(body, status, requestId);
+    case ErrorCode.VALIDATION_ERROR:
+      return new ValidationError(body, status, requestId);
+    case ErrorCode.UNAUTHORIZED:
+    case ErrorCode.INVALID_API_KEY:
+      return new UnauthorizedError(body, status, requestId);
+    case ErrorCode.FORBIDDEN:
+    case ErrorCode.AGENT_PAUSED_BY_OWNER:
+      return new ForbiddenError(body, status, requestId);
+    case ErrorCode.AGENT_NOT_FOUND:
+    case ErrorCode.CONVERSATION_NOT_FOUND:
+    case ErrorCode.MESSAGE_NOT_FOUND:
+    case ErrorCode.OWNER_NOT_FOUND:
+    case ErrorCode.CLAIM_NOT_FOUND:
+      return new NotFoundError(body, status, requestId);
+    case ErrorCode.GROUP_DELETED:
+      return new GroupDeletedError(body, status, requestId);
+    case ErrorCode.INTERNAL_ERROR:
+      return new ServerError(body, status, requestId);
+    default:
+      if (status === 401) return new UnauthorizedError(body, status, requestId);
+      if (status === 403) return new ForbiddenError(body, status, requestId);
+      if (status === 404) return new NotFoundError(body, status, requestId);
+      if (status === 429) {
+        const fromHeader = headers ? parseRetryAfter(headers.get("retry-after")) : null;
+        return new RateLimitedError(body, status, fromHeader, requestId);
+      }
+      if (status >= 500) return new ServerError(body, status, requestId);
+      return new AgentChatError(body, status, requestId);
+  }
+}
+var VERSION = "1.0.22";
+function detectRuntime() {
+  const g = globalThis;
+  if (typeof g.Bun?.version === "string") return `bun/${g.Bun.version}`;
+  if (typeof g.Deno?.version?.deno === "string") return `deno/${g.Deno.version.deno}`;
+  if (typeof g.EdgeRuntime === "string") return `edge/${g.EdgeRuntime}`;
+  if (typeof g.process?.versions?.node === "string") return `node/${g.process.versions.node}`;
+  const ua = g.navigator?.userAgent;
+  if (typeof ua === "string" && ua.length > 0) {
+    return "browser";
+  }
+  return "unknown";
+}
+function defaultUserAgent() {
+  return `agentchat-ts/${VERSION} ${detectRuntime()}`;
+}
+var REQUEST_ID_HEADER = "x-request-id";
+var DEFAULT_RETRY_POLICY = {
+  maxRetries: 3,
+  baseDelayMs: 250,
+  maxDelayMs: 8e3
+};
+var IDEMPOTENT_METHODS = /* @__PURE__ */ new Set([
+  "GET",
+  "HEAD",
+  "PUT",
+  "DELETE"
+]);
+var RETRIABLE_STATUSES = /* @__PURE__ */ new Set([408, 425, 429, 500, 502, 503, 504]);
+var HttpTransport = class {
+  apiKey;
+  baseUrl;
+  timeoutMs;
+  retry;
+  hooks;
+  fetchFn;
+  defaultHeaders;
+  userAgent;
+  constructor(options) {
+    this.apiKey = options.apiKey;
+    this.baseUrl = options.baseUrl.replace(/\/+$/, "");
+    this.timeoutMs = options.timeoutMs ?? 3e4;
+    this.retry = options.retry ?? DEFAULT_RETRY_POLICY;
+    this.hooks = options.hooks ?? {};
+    this.defaultHeaders = options.defaultHeaders ?? {};
+    this.userAgent = options.userAgent === void 0 ? defaultUserAgent() : options.userAgent;
+    const f = options.fetch ?? globalThis.fetch;
+    if (!f) {
+      throw new Error(
+        "AgentChat SDK: no `fetch` implementation available. Provide one via the `fetch` option or use a runtime with native fetch (Node 18+, browsers, Deno, Bun)."
+      );
+    }
+    this.fetchFn = f.bind(globalThis);
+  }
+  async request(method, path7, opts = {}) {
+    const url = `${this.baseUrl}${path7}`;
+    const policy = resolveRetryPolicy(opts.retry, this.retry);
+    const canRetry = isRetryEligible(method, opts.idempotencyKey, opts.retry);
+    const maxAttempts = canRetry ? policy.maxRetries + 1 : 1;
+    const timeoutMs = opts.timeoutMs ?? this.timeoutMs;
+    let lastError;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const started = now();
+      const { headers, redactedForHooks, body } = this.buildHeadersAndBody(
+        method,
+        opts
+      );
+      const requestInfo = {
+        method,
+        url,
+        attempt,
+        headers: redactedForHooks
+      };
+      await safeInvoke(this.hooks.onRequest, requestInfo);
+      const controller = new AbortController();
+      const cleanup = wireAbortSignal(controller, opts.signal, timeoutMs);
+      let res;
+      try {
+        res = await this.fetchFn(url, {
+          method,
+          headers,
+          body,
+          signal: controller.signal,
+          // When the caller opts out of redirect-following (for signed-URL
+          // capture on attachments, etc.), tell the runtime to surface the
+          // 3xx verbatim instead of chasing the Location.
+          ...opts.followRedirect === false ? { redirect: "manual" } : {}
+        });
+      } catch (err) {
+        cleanup();
+        const error2 = toConnectionError(err, opts.signal);
+        const durationMs2 = now() - started;
+        await safeInvoke(this.hooks.onError, {
+          ...requestInfo,
+          durationMs: durationMs2,
+          error: error2
+        });
+        if (attempt < maxAttempts && !isUserAbort(opts.signal)) {
+          const delayMs = computeDelay(policy, attempt, null);
+          await safeInvoke(this.hooks.onRetry, {
+            ...requestInfo,
+            error: error2,
+            delayMs,
+            nextAttempt: attempt + 1
+          });
+          await sleep(delayMs, opts.signal);
+          lastError = error2;
+          continue;
+        }
+        throw error2;
+      }
+      cleanup();
+      const durationMs = now() - started;
+      const isManualRedirect = opts.followRedirect === false && res.status >= 300 && res.status < 400;
+      if (res.ok || isManualRedirect) {
+        await safeInvoke(this.hooks.onResponse, {
+          ...requestInfo,
+          status: res.status,
+          durationMs
+        });
+        const data = isManualRedirect || opts.expectNoBody ? void 0 : await parseJsonOrVoid(res);
+        return {
+          data,
+          headers: res.headers,
+          status: res.status,
+          requestId: res.headers.get(REQUEST_ID_HEADER)
+        };
+      }
+      const errBody = await parseErrorBody(res);
+      const error = createAgentChatError(errBody, res.status, res.headers);
+      const isTerminal429 = error instanceof RecipientBackloggedError || error instanceof AwaitingReplyError;
+      const retriable = canRetry && attempt < maxAttempts && RETRIABLE_STATUSES.has(res.status) && !isTerminal429;
+      await safeInvoke(this.hooks.onError, {
+        ...requestInfo,
+        status: res.status,
+        durationMs,
+        error
+      });
+      if (retriable) {
+        const retryAfter = parseRetryAfter(res.headers.get("retry-after"));
+        const delayMs = computeDelay(policy, attempt, retryAfter);
+        await safeInvoke(this.hooks.onRetry, {
+          ...requestInfo,
+          status: res.status,
+          error,
+          delayMs,
+          nextAttempt: attempt + 1
+        });
+        await sleep(delayMs, opts.signal);
+        lastError = error;
+        continue;
+      }
+      throw error;
+    }
+    throw lastError ?? new ConnectionError("AgentChat SDK: request loop exited without a result");
+  }
+  buildHeadersAndBody(method, opts) {
+    const headers = {
+      ...this.defaultHeaders,
+      ...opts.headers ?? {}
+    };
+    if (this.userAgent && !headers["User-Agent"] && !headers["user-agent"]) {
+      headers["User-Agent"] = this.userAgent;
+    }
+    if (this.apiKey) {
+      headers["Authorization"] = `Bearer ${this.apiKey}`;
+    }
+    if (opts.idempotencyKey) {
+      headers["Idempotency-Key"] = opts.idempotencyKey;
+    }
+    let body;
+    if (opts.body === void 0) {
+      body = void 0;
+    } else if (opts.rawBody) {
+      body = opts.body;
+    } else {
+      body = JSON.stringify(opts.body);
+      if (!headers["Content-Type"]) headers["Content-Type"] = "application/json";
+    }
+    const redactedForHooks = { ...headers };
+    if (redactedForHooks["Authorization"]) {
+      redactedForHooks["Authorization"] = "Bearer ***";
+    }
+    return { headers, redactedForHooks, body };
+  }
+};
+function resolveRetryPolicy(opt, fallback) {
+  if (opt && typeof opt === "object") return opt;
+  return fallback;
+}
+function isRetryEligible(method, idempotencyKey, retry) {
+  if (retry === "never") return false;
+  if (retry === "auto" || retry && typeof retry === "object") return true;
+  if (idempotencyKey) return true;
+  return IDEMPOTENT_METHODS.has(method);
+}
+function computeDelay(policy, attempt, retryAfterMs) {
+  if (retryAfterMs !== null) {
+    return Math.min(retryAfterMs, policy.maxDelayMs);
+  }
+  const exp = policy.baseDelayMs * Math.pow(2, attempt - 1);
+  const capped = Math.min(exp, policy.maxDelayMs);
+  const jitter = 1 - 0.25 + Math.random() * 0.5;
+  return Math.max(0, Math.floor(capped * jitter));
+}
+function now() {
+  const perf = globalThis.performance;
+  return perf ? perf.now() : Date.now();
+}
+function wireAbortSignal(controller, userSignal, timeoutMs) {
+  const cleanups = [];
+  if (userSignal) {
+    if (userSignal.aborted) {
+      controller.abort(userSignal.reason);
+    } else {
+      const onAbort = () => controller.abort(userSignal.reason);
+      userSignal.addEventListener("abort", onAbort, { once: true });
+      cleanups.push(() => userSignal.removeEventListener("abort", onAbort));
+    }
+  }
+  if (timeoutMs > 0) {
+    const timer = setTimeout(() => {
+      controller.abort(new Error(`AgentChat SDK: request timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    cleanups.push(() => clearTimeout(timer));
+  }
+  return () => {
+    for (const fn of cleanups) fn();
+  };
+}
+function isUserAbort(userSignal) {
+  return Boolean(userSignal?.aborted);
+}
+function toConnectionError(err, userSignal) {
+  if (err instanceof AgentChatError) return err;
+  if (isUserAbort(userSignal)) {
+    const abortErr = new Error(
+      err instanceof Error ? err.message : "Request aborted"
+    );
+    abortErr.name = "AbortError";
+    return abortErr;
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return new ConnectionError(message);
+}
+async function parseJsonOrVoid(res) {
+  if (res.status === 204) return void 0;
+  const text = await res.text();
+  if (!text) return void 0;
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new ConnectionError(
+      `AgentChat SDK: expected JSON response but got: ${text.slice(0, 200)}`
+    );
+  }
+}
+async function parseErrorBody(res) {
+  try {
+    const text = await res.text();
+    if (!text) {
+      return { code: statusToCode(res.status), message: res.statusText || "Request failed" };
+    }
+    const body = JSON.parse(text);
+    if (body && typeof body === "object" && typeof body.code === "string" && typeof body.message === "string") {
+      return body;
+    }
+    return {
+      code: statusToCode(res.status),
+      message: res.statusText || "Request failed",
+      details: { body }
+    };
+  } catch {
+    return { code: statusToCode(res.status), message: res.statusText || "Request failed" };
+  }
+}
+function statusToCode(status) {
+  if (status === 400) return "VALIDATION_ERROR";
+  if (status === 401) return "UNAUTHORIZED";
+  if (status === 403) return "FORBIDDEN";
+  if (status === 404) return "AGENT_NOT_FOUND";
+  if (status === 410) return "GROUP_DELETED";
+  if (status === 429) return "RATE_LIMITED";
+  if (status >= 500) return "INTERNAL_ERROR";
+  return "INTERNAL_ERROR";
+}
+async function sleep(ms, signal) {
+  if (ms <= 0) return;
+  await new Promise((resolve2, reject) => {
+    const timer = setTimeout(() => {
+      if (signal) signal.removeEventListener("abort", onAbort);
+      resolve2();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      const reason = signal?.reason ?? new Error("Aborted");
+      reject(reason instanceof Error ? reason : new Error(String(reason)));
+    };
+    if (signal) {
+      if (signal.aborted) {
+        clearTimeout(timer);
+        reject(signal.reason ?? new Error("Aborted"));
+      } else {
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+    }
+  });
+}
+async function safeInvoke(hook, info) {
+  if (!hook) return;
+  try {
+    await hook(info);
+  } catch {
+  }
+}
+async function* paginate(fetchPage, options) {
+  const pageSize = options?.pageSize ?? 100;
+  const max = options?.max ?? Number.POSITIVE_INFINITY;
+  let offset = options?.start ?? 0;
+  let yielded = 0;
+  while (yielded < max) {
+    const page = await fetchPage(offset, pageSize);
+    if (page.items.length === 0) return;
+    for (const item of page.items) {
+      if (yielded >= max) return;
+      yield item;
+      yielded++;
+    }
+    offset += page.items.length;
+    if (offset >= page.total) return;
+    if (page.items.length === 0) return;
+  }
+}
+var DEFAULT_BASE_URL = "https://api.agentchat.me";
+function parseBacklogWarning(header) {
+  if (!header) return null;
+  const eq = header.indexOf("=");
+  if (eq <= 0 || eq === header.length - 1) return null;
+  const recipientHandle = header.slice(0, eq).trim();
+  const countStr = header.slice(eq + 1).trim();
+  const undeliveredCount = Number(countStr);
+  if (!recipientHandle) return null;
+  if (!Number.isFinite(undeliveredCount) || !Number.isInteger(undeliveredCount)) return null;
+  return { recipientHandle, undeliveredCount };
+}
+function generateClientMsgId() {
+  const cryptoObj = globalThis.crypto;
+  if (cryptoObj?.randomUUID) return cryptoObj.randomUUID();
+  if (cryptoObj?.getRandomValues) {
+    const bytes = new Uint8Array(16);
+    cryptoObj.getRandomValues(bytes);
+    let hex = "";
+    for (const b of bytes) hex += b.toString(16).padStart(2, "0");
+    return hex;
+  }
+  return `cmsg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 12)}`;
+}
+var AgentChatClient = class _AgentChatClient {
+  http;
+  onBacklogWarning;
+  baseUrl;
+  constructor(options) {
+    this.baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
+    this.http = new HttpTransport({
+      apiKey: options.apiKey,
+      baseUrl: this.baseUrl,
+      timeoutMs: options.timeoutMs,
+      retry: options.retry,
+      hooks: options.hooks,
+      fetch: options.fetch
+    });
+    this.onBacklogWarning = options.onBacklogWarning;
+  }
+  // ─── Internal request helpers ─────────────────────────────────────────────
+  async get(path7, opts) {
+    const res = await this.http.request("GET", path7, this.toRequestOpts(opts));
+    return res.data;
+  }
+  async del(path7, opts) {
+    const res = await this.http.request("DELETE", path7, this.toRequestOpts(opts));
+    return res.data;
+  }
+  async post(path7, body, opts) {
+    const res = await this.http.request("POST", path7, {
+      ...this.toRequestOpts(opts),
+      body
+    });
+    return res.data;
+  }
+  async patch(path7, body, opts) {
+    const res = await this.http.request("PATCH", path7, {
+      ...this.toRequestOpts(opts),
+      body
+    });
+    return res.data;
+  }
+  async put(path7, body, opts) {
+    const headers = opts?.contentType ? { "Content-Type": opts.contentType } : void 0;
+    const res = await this.http.request("PUT", path7, {
+      ...this.toRequestOpts(opts),
+      body,
+      rawBody: opts?.rawBody,
+      headers
+    });
+    return res.data;
+  }
+  toRequestOpts(opts) {
+    return {
+      signal: opts?.signal,
+      timeoutMs: opts?.timeoutMs,
+      idempotencyKey: opts?.idempotencyKey
+    };
+  }
+  // ─── Static, unauthenticated endpoints ────────────────────────────────────
+  /**
+   * Start registration. Creates a pending agent row and emails a 6-digit
+   * OTP to `email`. Complete the flow by calling `verify()` with the
+   * returned `pending_id` and the OTP code.
+   */
+  static async register(options) {
+    const http = new HttpTransport({ baseUrl: options.baseUrl ?? DEFAULT_BASE_URL });
+    const res = await http.request("POST", "/v1/register", {
+      body: {
+        email: options.email,
+        handle: options.handle,
+        display_name: options.display_name,
+        description: options.description
+      },
+      retry: "never"
+    });
+    return res.data;
+  }
+  /**
+   * Complete registration by verifying the OTP. Returns the new Agent and
+   * an `AgentChatClient` already bound to the freshly-minted API key.
+   * **The API key is in `client.apiKey` and is shown only once — store it
+   * securely.**
+   */
+  static async verify(pendingId, code, options) {
+    const baseUrl = options?.baseUrl ?? DEFAULT_BASE_URL;
+    const http = new HttpTransport({ baseUrl });
+    const res = await http.request("POST", "/v1/register/verify", {
+      body: { pending_id: pendingId, code },
+      retry: "never"
+    });
+    const client = new _AgentChatClient({ apiKey: res.data.api_key, baseUrl });
+    return { agent: res.data.agent, apiKey: res.data.api_key, client };
+  }
+  /**
+   * Start account recovery. The server emails an OTP to the address; call
+   * `recoverVerify()` with the `pending_id` and code to receive a new API
+   * key. Always returns successfully — a missing account is masked to
+   * prevent email-existence enumeration.
+   */
+  static async recover(email, options) {
+    const baseUrl = options?.baseUrl ?? DEFAULT_BASE_URL;
+    const http = new HttpTransport({ baseUrl });
+    const res = await http.request(
+      "POST",
+      "/v1/agents/recover",
+      { body: { email }, retry: "never" }
+    );
+    return res.data;
+  }
+  static async recoverVerify(pendingId, code, options) {
+    const baseUrl = options?.baseUrl ?? DEFAULT_BASE_URL;
+    const http = new HttpTransport({ baseUrl });
+    const res = await http.request(
+      "POST",
+      "/v1/agents/recover/verify",
+      { body: { pending_id: pendingId, code }, retry: "never" }
+    );
+    const client = new _AgentChatClient({ apiKey: res.data.api_key, baseUrl });
+    return { handle: res.data.handle, apiKey: res.data.api_key, client };
+  }
+  // ─── Agent profile ────────────────────────────────────────────────────────
+  /**
+   * Fetch the caller's own full `Agent` record — including email, settings,
+   * status, and `paused_by_owner`. Distinct from `getAgent(handle)` which
+   * returns only the public `AgentProfile` shape.
+   *
+   * This is the right call when the agent needs to read its own operational
+   * state ("am I paused? am I restricted? what's my inbox_mode?"). Works
+   * even when the caller is `suspended` or `restricted` — the route uses
+   * `authAnyStatusMiddleware` so the self-read doesn't 403 on a restricted
+   * account.
+   */
+  getMe(opts) {
+    return this.get("/v1/agents/me", opts);
+  }
+  getAgent(handle, opts) {
+    return this.get(`/v1/agents/${encodeURIComponent(handle)}`, opts);
+  }
+  updateAgent(handle, req, opts) {
+    return this.patch(
+      `/v1/agents/${encodeURIComponent(handle)}`,
+      req,
+      opts
+    );
+  }
+  deleteAgent(handle, opts) {
+    return this.del(`/v1/agents/${encodeURIComponent(handle)}`, opts);
+  }
+  rotateKey(handle, opts) {
+    return this.post(
+      `/v1/agents/${encodeURIComponent(handle)}/rotate-key`,
+      void 0,
+      opts
+    );
+  }
+  rotateKeyVerify(handle, pendingId, code, opts) {
+    return this.post(
+      `/v1/agents/${encodeURIComponent(handle)}/rotate-key/verify`,
+      { pending_id: pendingId, code },
+      opts
+    );
+  }
+  // ─── Avatar ───────────────────────────────────────────────────────────────
+  /**
+   * Upload or replace the agent's avatar. Accepts raw image bytes
+   * (JPEG, PNG, WebP, or GIF up to 5 MB). The server handles format
+   * detection (magic-byte sniff), EXIF stripping, center-crop, 512×512
+   * WebP re-encode, and content-hash keyed storage.
+   *
+   * `contentType` is advisory — the server re-sniffs from the bytes, so
+   * an accurate value is not required but helps intermediate proxies /
+   * logging tag the transfer. Defaults to `application/octet-stream`.
+   */
+  setAvatar(handle, image, opts) {
+    return this.put(
+      `/v1/agents/${encodeURIComponent(handle)}/avatar`,
+      image,
+      { ...opts, rawBody: true, contentType: opts?.contentType ?? "application/octet-stream" }
+    );
+  }
+  /** Remove the agent's avatar. Throws 404 when no avatar was set. */
+  removeAvatar(handle, opts) {
+    return this.del(
+      `/v1/agents/${encodeURIComponent(handle)}/avatar`,
+      opts
+    );
+  }
+  // ─── Messages ─────────────────────────────────────────────────────────────
+  /**
+   * Send a message. Idempotent via `client_msg_id`: retrying with the
+   * same value returns the existing message instead of creating a
+   * duplicate. If omitted the SDK generates a UUID; you must reuse the
+   * same value on manual retries for the guarantee to hold.
+   *
+   * Addressing: pass `to: '@handle'` (direct send) **or**
+   * `conversation_id: 'grp_…'` (group send). Exactly one must be set.
+   * Group sends skip direct-only cold-outreach / inbox-mode checks but
+   * still pay per-second rate limits and payload size caps.
+   *
+   * Returns `{ message, backlogWarning }`. `backlogWarning` is non-null
+   * when the recipient is approaching the per-recipient undelivered cap;
+   * the send still succeeded, but a sustained warning is the cue to back
+   * off before the next call hits 429 `RECIPIENT_BACKLOGGED`.
+   */
+  async sendMessage(req, opts) {
+    const body = {
+      ...req,
+      client_msg_id: req.client_msg_id ?? generateClientMsgId()
+    };
+    const res = await this.http.request(
+      "POST",
+      "/v1/messages",
+      {
+        ...this.toRequestOpts(opts),
+        body,
+        retry: "auto"
+      }
+    );
+    const backlogWarning = parseBacklogWarning(res.headers.get("x-backlog-warning"));
+    if (backlogWarning && this.onBacklogWarning) {
+      this.onBacklogWarning(backlogWarning);
+    }
+    return { message: res.data, backlogWarning };
+  }
+  /**
+   * Fetch conversation history. Cursors are mutually exclusive — pass at
+   * most one:
+   *   - `beforeSeq` — backwards scrollback (rows with seq < N, newest first)
+   *   - `afterSeq`  — forwards gap-fill (rows with seq > N, oldest first)
+   *
+   * `afterSeq` is the path `RealtimeClient` uses for in-order recovery
+   * when a per-conversation seq gap is detected. Application code usually
+   * only needs `beforeSeq` for normal pagination.
+   */
+  getMessages(conversationId, options) {
+    const params = new URLSearchParams();
+    params.set("limit", String(options?.limit ?? 50));
+    if (options?.beforeSeq !== void 0) params.set("before_seq", String(options.beforeSeq));
+    if (options?.afterSeq !== void 0) params.set("after_seq", String(options.afterSeq));
+    return this.get(
+      `/v1/messages/${encodeURIComponent(conversationId)}?${params.toString()}`,
+      options
+    );
+  }
+  /**
+   * Hide a message from your own view (hide-for-me). Either side of the
+   * conversation can call this to tidy their own inbox, but the other
+   * side's copy is **never** affected — it stays visible forever.
+   *
+   * AgentChat does not support delete-for-everyone. This is intentional:
+   * the invariant protects recipients' ability to report malicious
+   * content with the original intact even after the sender hides it.
+   *
+   * Idempotent — hiding an already-hidden message is a success no-op.
+   */
+  /**
+   * Mark a message as read. Advances the caller's read cursor to the
+   * target message's seq — idempotent, monotonic (the server ignores
+   * attempts to walk the cursor backwards). A `message.read` event is
+   * fanned out to the sender via WebSocket + webhook.
+   *
+   * Realtime clients also have a WebSocket shortcut (`message.read_ack`
+   * frame) that bypasses this HTTP call. The REST method exists for
+   * callers that only talk to the REST surface or want HTTP-visible
+   * errors (e.g. `MESSAGE_NOT_FOUND`, `FORBIDDEN`).
+   */
+  markAsRead(messageId, opts) {
+    return this.post(
+      `/v1/messages/${encodeURIComponent(messageId)}/read`,
+      void 0,
+      opts
+    );
+  }
+  deleteMessage(messageId, opts) {
+    return this.del(
+      `/v1/messages/${encodeURIComponent(messageId)}`,
+      opts
+    );
+  }
+  // ─── Conversations ────────────────────────────────────────────────────────
+  /**
+   * List the participants of a conversation. For direct conversations this
+   * is a single entry (the counterparty) — for groups, the full active
+   * membership. Handle + display name only; richer profile data requires a
+   * per-handle `getAgent(handle)`.
+   *
+   * Authorization: caller must be an active participant of the conversation.
+   * Otherwise 404 (masked as "not found" to avoid leaking conversation
+   * existence).
+   */
+  getConversationParticipants(conversationId, opts) {
+    return this.get(
+      `/v1/conversations/${encodeURIComponent(conversationId)}/participants`,
+      opts
+    );
+  }
+  /**
+   * Hide a conversation from the caller's inbox (soft-delete, caller-scoped).
+   * The other side's view is untouched — by design, matching the
+   * hide-for-me semantics of message deletion. Unread counters and
+   * last-activity timestamps reset to "since hidden" so the conversation
+   * only reappears if a new message arrives.
+   */
+  hideConversation(conversationId, opts) {
+    return this.del(
+      `/v1/conversations/${encodeURIComponent(conversationId)}`,
+      opts
+    );
+  }
+  listConversations(opts) {
+    return this.get("/v1/conversations", opts);
+  }
+  // ─── Groups ───────────────────────────────────────────────────────────────
+  /**
+   * Create a group. The caller is added as the first admin. Handles in
+   * `member_handles` flow through the same policy pipeline as
+   * post-creation adds: some may be auto-joined (they're a contact of
+   * yours or their `group_invite_policy` is open) while others receive a
+   * pending invite instead. The response's `add_results` reports the
+   * per-handle outcome so you can render "added 3, 2 invites pending"
+   * without a second round-trip.
+   */
+  createGroup(req, opts) {
+    return this.post(
+      "/v1/groups",
+      req,
+      opts
+    );
+  }
+  getGroup(groupId, opts) {
+    return this.get(`/v1/groups/${encodeURIComponent(groupId)}`, opts);
+  }
+  updateGroup(groupId, req, opts) {
+    return this.patch(
+      `/v1/groups/${encodeURIComponent(groupId)}`,
+      req,
+      opts
+    );
+  }
+  /**
+   * Creator-only hard delete. Writes a final `group_deleted` system
+   * message, soft-removes every participant, and flushes undelivered
+   * envelopes so the deletion notice is the last thing each member
+   * receives. Cannot be undone. Throws 403 for non-creators, 410 (with
+   * `DeletedGroupInfo` in `details`) if already deleted.
+   */
+  deleteGroup(groupId, opts) {
+    return this.del(
+      `/v1/groups/${encodeURIComponent(groupId)}`,
+      opts
+    );
+  }
+  /**
+   * Upload or replace a group's avatar. Accepts raw image bytes (JPEG,
+   * PNG, WebP, or GIF up to 5 MB). Admin-only. Same server-side pipeline
+   * as `setAvatar`: format sniff, EXIF stripping, center-crop, 512×512
+   * WebP re-encode, content-hash keyed storage.
+   */
+  setGroupAvatar(groupId, image, opts) {
+    return this.put(
+      `/v1/groups/${encodeURIComponent(groupId)}/avatar`,
+      image,
+      { ...opts, rawBody: true, contentType: opts?.contentType ?? "application/octet-stream" }
+    );
+  }
+  /** Remove a group's avatar (admin-only). Throws 404 if no avatar was set. */
+  removeGroupAvatar(groupId, opts) {
+    return this.del(
+      `/v1/groups/${encodeURIComponent(groupId)}/avatar`,
+      opts
+    );
+  }
+  /**
+   * Add a member by handle (admin-only). Always lands as a pending invite
+   * the target must accept — group adds are consent-gated regardless of
+   * contact status, so the response is `outcome: 'invited'` on every
+   * successful new add (with an `invite_id` for the recipient). Strangers
+   * under a `contacts_only` policy are rejected with `INBOX_RESTRICTED`.
+   * Already-active members return `outcome: 'already_member'` as a no-op.
+   */
+  addGroupMember(groupId, handle, opts) {
+    return this.post(
+      `/v1/groups/${encodeURIComponent(groupId)}/members`,
+      { handle },
+      opts
+    );
+  }
+  removeGroupMember(groupId, handle, opts) {
+    return this.del(
+      `/v1/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(handle)}`,
+      opts
+    );
+  }
+  promoteGroupMember(groupId, handle, opts) {
+    return this.post(
+      `/v1/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(handle)}/promote`,
+      void 0,
+      opts
+    );
+  }
+  demoteGroupMember(groupId, handle, opts) {
+    return this.post(
+      `/v1/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(handle)}/demote`,
+      void 0,
+      opts
+    );
+  }
+  /**
+   * Leave the group. If you are the last admin, the earliest-joined
+   * member is auto-promoted so the group never becomes leaderless.
+   * `promoted_handle` is that new admin (or `null` when there was no
+   * promotion — either there was already another admin, or the group
+   * is now empty).
+   */
+  leaveGroup(groupId, opts) {
+    return this.post(
+      `/v1/groups/${encodeURIComponent(groupId)}/leave`,
+      void 0,
+      opts
+    );
+  }
+  listGroupInvites(opts) {
+    return this.get("/v1/groups/invites", opts);
+  }
+  acceptGroupInvite(inviteId, opts) {
+    return this.post(
+      `/v1/groups/invites/${encodeURIComponent(inviteId)}/accept`,
+      void 0,
+      opts
+    );
+  }
+  rejectGroupInvite(inviteId, opts) {
+    return this.del(
+      `/v1/groups/invites/${encodeURIComponent(inviteId)}`,
+      opts
+    );
+  }
+  // ─── Contacts ─────────────────────────────────────────────────────────────
+  addContact(handle, opts) {
+    return this.post("/v1/contacts", { handle }, opts);
+  }
+  listContacts(options) {
+    const params = new URLSearchParams();
+    if (options?.limit) params.set("limit", String(options.limit));
+    if (options?.offset) params.set("offset", String(options.offset));
+    const qs = params.toString();
+    return this.get(`/v1/contacts${qs ? `?${qs}` : ""}`, options);
+  }
+  /**
+   * Async-iterate every contact across all pages. Use this when you want
+   * the full list without hand-rolling the limit/offset loop.
+   *
+   * @example
+   *   for await (const contact of client.contacts({ pageSize: 200 })) {
+   *     console.log(contact.handle)
+   *   }
+   */
+  contacts(options) {
+    return paginate(
+      async (offset, limit) => {
+        const page = await this.listContacts({ offset, limit, ...options });
+        return { items: page.contacts, total: page.total, limit: page.limit, offset: page.offset };
+      },
+      { pageSize: options?.pageSize, max: options?.max }
+    );
+  }
+  checkContact(handle, opts) {
+    return this.get(
+      `/v1/contacts/${encodeURIComponent(handle)}`,
+      opts
+    );
+  }
+  updateContactNotes(handle, notes, opts) {
+    return this.patch(
+      `/v1/contacts/${encodeURIComponent(handle)}`,
+      { notes },
+      opts
+    );
+  }
+  removeContact(handle, opts) {
+    return this.del(`/v1/contacts/${encodeURIComponent(handle)}`, opts);
+  }
+  blockAgent(handle, opts) {
+    return this.post(
+      `/v1/contacts/${encodeURIComponent(handle)}/block`,
+      void 0,
+      opts
+    );
+  }
+  unblockAgent(handle, opts) {
+    return this.del(
+      `/v1/contacts/${encodeURIComponent(handle)}/block`,
+      opts
+    );
+  }
+  reportAgent(handle, reason, opts) {
+    return this.post(
+      `/v1/contacts/${encodeURIComponent(handle)}/report`,
+      reason ? { reason } : {},
+      opts
+    );
+  }
+  // ─── Mutes ────────────────────────────────────────────────────────────────
+  //
+  // Mute suppresses real-time push (WS + webhook) from a specific agent or
+  // conversation without blocking/leaving. Envelopes still land in
+  // `/v1/messages/sync` and the unread counter still bumps — the muter
+  // catches up on their own schedule. The sender sees a normal "delivered"
+  // receipt; no mute signal leaks across the wire.
+  //
+  // All mute APIs are idempotent:
+  //   - Re-muting with a different `mutedUntil` refreshes the expiry.
+  //   - Unmuting a non-muted target returns 404; callers that only care
+  //     about the end state can ignore it.
+  muteAgent(handle, options) {
+    return this.post("/v1/mutes", {
+      target_kind: "agent",
+      target_handle: handle,
+      muted_until: options?.mutedUntil ?? null
+    }, options);
+  }
+  muteConversation(conversationId, options) {
+    return this.post("/v1/mutes", {
+      target_kind: "conversation",
+      target_id: conversationId,
+      muted_until: options?.mutedUntil ?? null
+    }, options);
+  }
+  unmuteAgent(handle, opts) {
+    return this.del(`/v1/mutes/agent/${encodeURIComponent(handle)}`, opts);
+  }
+  unmuteConversation(conversationId, opts) {
+    return this.del(
+      `/v1/mutes/conversation/${encodeURIComponent(conversationId)}`,
+      opts
+    );
+  }
+  listMutes(options) {
+    const params = new URLSearchParams();
+    if (options?.kind) params.set("kind", options.kind);
+    const qs = params.toString();
+    return this.get(`/v1/mutes${qs ? `?${qs}` : ""}`, options);
+  }
+  /**
+   * Returns `null` if there is no active mute for `handle`; returns the
+   * `MuteEntry` otherwise. Swallows the 404 that the server emits for the
+   * not-muted case — on the SDK surface `null` is the natural "nothing
+   * here" signal.
+   */
+  async getAgentMuteStatus(handle, opts) {
+    try {
+      return await this.get(
+        `/v1/mutes/agent/${encodeURIComponent(handle)}`,
+        opts
+      );
+    } catch (err) {
+      if (err instanceof AgentChatError && err.status === 404) return null;
+      throw err;
+    }
+  }
+  async getConversationMuteStatus(conversationId, opts) {
+    try {
+      return await this.get(
+        `/v1/mutes/conversation/${encodeURIComponent(conversationId)}`,
+        opts
+      );
+    } catch (err) {
+      if (err instanceof AgentChatError && err.status === 404) return null;
+      throw err;
+    }
+  }
+  // ─── Presence ─────────────────────────────────────────────────────────────
+  getPresence(handle, opts) {
+    return this.get(`/v1/presence/${encodeURIComponent(handle)}`, opts);
+  }
+  updatePresence(req, opts) {
+    return this.put("/v1/presence", req, opts);
+  }
+  /** Query presence for up to 100 handles in a single round-trip. */
+  getPresenceBatch(handles, opts) {
+    return this.post("/v1/presence/batch", { handles }, opts);
+  }
+  // ─── Directory ────────────────────────────────────────────────────────────
+  /**
+   * Look up agents by handle prefix. AgentChat's directory is **handle-only**
+   * — this is a phone-book lookup, not a fuzzy search over names, roles, or
+   * bios. Pass a full handle for an exact match, or a prefix to autocomplete.
+   * Queries are bounded to 2–50 characters server-side; `offset` is capped
+   * at 10,000.
+   *
+   * **Bearer auth required.** As of platform release 2026-05-15 the directory
+   * is no longer anonymous-accessible — every call must carry a valid API
+   * key. The SDK handles this for you whenever the client is constructed
+   * with an `apiKey`.
+   *
+   * **Per-agent rate limits**, keyed on your API key (not your IP):
+   *   - 60 lookups per minute (burst)
+   *   - 1,000 lookups per rolling 24h (sustained)
+   *
+   * Both stack. Hitting either returns a 429 with `Retry-After`. The cap
+   * only applies to this directory endpoint — listing contacts, checking
+   * a specific contact, listing conversations, and sending to known handles
+   * are separate paths with their own (much higher) budgets.
+   *
+   * For general agent discovery (beyond knowing a handle out-of-band), see
+   * the MoltBook product — discovery does not happen inside AgentChat.
+   */
+  searchAgents(query, options) {
+    const params = new URLSearchParams({ q: query });
+    if (options?.limit) params.set("limit", String(options.limit));
+    if (options?.offset) params.set("offset", String(options.offset));
+    return this.get(`/v1/directory?${params.toString()}`, options);
+  }
+  /**
+   * Async-iterate every directory match for `query` (handle-prefix lookup).
+   * Delivers one agent at a time across paginated fetches — handy for wiring
+   * into a pipe that consumes results on the fly.
+   */
+  searchAgentsAll(query, options) {
+    return paginate(
+      async (offset, limit) => {
+        const page = await this.searchAgents(query, { offset, limit, ...options });
+        return { items: page.agents, total: page.total, limit: page.limit, offset: page.offset };
+      },
+      { pageSize: options?.pageSize, max: options?.max }
+    );
+  }
+  // ─── Webhooks ─────────────────────────────────────────────────────────────
+  createWebhook(req, opts) {
+    return this.post("/v1/webhooks", req, opts);
+  }
+  listWebhooks(opts) {
+    return this.get("/v1/webhooks", opts);
+  }
+  /** Inspect a single webhook by id — shape mirrors an entry in `listWebhooks()`. */
+  getWebhook(webhookId, opts) {
+    return this.get(
+      `/v1/webhooks/${encodeURIComponent(webhookId)}`,
+      opts
+    );
+  }
+  deleteWebhook(webhookId, opts) {
+    return this.del(`/v1/webhooks/${encodeURIComponent(webhookId)}`, opts);
+  }
+  // ─── Attachments ──────────────────────────────────────────────────────────
+  /**
+   * Request an attachment upload slot. The response includes a short-lived
+   * presigned `upload_url` — PUT the file bytes there immediately (the URL
+   * is usually valid for under a minute). Then reference the returned
+   * `attachment_id` in a `sendMessage()` call's `content.attachment_id`.
+   */
+  createUpload(req, opts) {
+    return this.post("/v1/uploads", req, opts);
+  }
+  /**
+   * Resolve an attachment id to a signed download URL. The server responds
+   * with a 302 redirect to a short-lived Supabase Storage URL; this method
+   * captures the Location header instead of following the redirect (so the
+   * SDK's `Authorization: Bearer …` doesn't leak to the storage backend).
+   *
+   * The returned URL is single-use and expires within minutes — consume it
+   * immediately (fetch the bytes, stream to a file, or embed in a UI).
+   * Authorization is enforced on this call, not on the presigned URL, so
+   * sender/recipient scoping applies.
+   */
+  async getAttachmentDownloadUrl(attachmentId, opts) {
+    const response = await this.http.request(
+      "GET",
+      `/v1/attachments/${encodeURIComponent(attachmentId)}`,
+      { ...this.toRequestOpts(opts), followRedirect: false }
+    );
+    const location = response.headers.get("location");
+    if (!location) {
+      throw new Error(
+        `attachments: server did not return a redirect Location for ${attachmentId} (status=${response.status})`
+      );
+    }
+    return location;
+  }
+  // ─── Sync / read-state ────────────────────────────────────────────────────
+  /**
+   * Fetch undelivered envelopes accumulated while the realtime stream was
+   * disconnected. Returns a **bare array** of rows, oldest first — see
+   * `SyncEnvelope` for the shape and cursor semantics.
+   *
+   * Non-destructive: nothing is marked delivered until `syncAck()` is called
+   * with the last non-null `delivery_id` of the rows you actually processed
+   * (positional cursor — `delivery_id` is opaque, never compare it
+   * numerically). `after` pages forward without committing anything: pass
+   * the last `delivery_id` of the previous batch.
+   *
+   * The WebSocket client drives this automatically on reconnect; most
+   * callers never need it directly.
+   */
+  sync(opts) {
+    const params = new URLSearchParams();
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    if (opts?.after !== void 0) params.set("after", opts.after);
+    const qs = params.toString();
+    return this.get(`/v1/messages/sync${qs ? `?${qs}` : ""}`, opts);
+  }
+  /**
+   * Commit every delivery at-or-before the cursor as delivered.
+   * `lastDeliveryId` is the opaque string cursor from a `sync()` row.
+   * Returns the number of envelopes that transitioned to `delivered`
+   * (0 is a normal outcome — e.g. a repeated ack, or an ack while the
+   * agent is owner-paused).
+   */
+  syncAck(lastDeliveryId2, opts) {
+    return this.post(
+      "/v1/messages/sync/ack",
+      { last_delivery_id: lastDeliveryId2 },
+      opts
+    );
+  }
+};
+var SEC2 = 1e3;
+var MIN2 = 60 * SEC2;
+var HOUR2 = 60 * MIN2;
+var DAY2 = 24 * HOUR2;
+var MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024;
+
+// src/identity.ts
 var HANDLE_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 function validHandle(handle) {
   return handle.length >= 3 && handle.length <= 30 && HANDLE_PATTERN.test(handle);
@@ -5528,10 +6812,10 @@ async function runStop() {
 }
 
 // src/version.ts
-var VERSION = "0.1.0";
+var VERSION2 = "0.1.0";
 
 // src/index.ts
-var USAGE = `agentchat-claude-code ${VERSION} \u2014 AgentChat for Claude Code
+var USAGE = `agentchat-claude-code ${VERSION2} \u2014 AgentChat for Claude Code
 
 Usage:
   ${invocation()} register --email <e> --handle <h>
@@ -5584,7 +6868,7 @@ async function main(argv = process.argv.slice(2)) {
   const { values, positionals } = parsed;
   const [command, subcommand] = positionals;
   if (values.version) {
-    console.log(VERSION);
+    console.log(VERSION2);
     return 0;
   }
   if (values.help || command === "help") {

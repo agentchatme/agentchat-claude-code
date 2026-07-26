@@ -12,5 +12,9 @@ export default defineConfig({
   splitting: false,
   target: 'node20',
   banner: { js: '#!/usr/bin/env node' },
-  noExternal: ['@agentchatme/agent-core', 'zod'],
+  // EVERY dependency is inlined. This artifact runs from a bare git clone
+  // (Claude Code plugins are installed by cloning, with no install step) or
+  // straight out of an npx cache — there is no node_modules beside it, so a
+  // single external import is a hard crash at startup for every user.
+  noExternal: ['@agentchatme/agent-core', 'agentchatme', 'zod'],
 })

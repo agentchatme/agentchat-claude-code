@@ -169,3 +169,28 @@ describe('every hint is a runnable command', () => {
     })
   }
 })
+
+describe('the committed bundle runs from a bare clone', () => {
+  it('has no external imports left to resolve', async () => {
+    // A Claude Code plugin is installed by git-cloning this repo — there is no
+    // install step and no node_modules beside the bundle. A single external
+    // import is a hard crash at startup for every user, which is exactly what
+    // shipped before `agentchatme` was added to noExternal.
+    const bundle = fs.readFileSync(BIN, 'utf-8')
+    expect(bundle).not.toMatch(/^import .* from ["'](agentchatme|@agentchatme\/|zod)/m)
+  })
+
+  it('executes when copied somewhere with no node_modules at all', async () => {
+    const isolated = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-isolated-'))
+    try {
+      const copy = path.join(isolated, 'agentchat')
+      fs.copyFileSync(BIN, copy)
+      const { stdout } = await exec(process.execPath, [copy, '--version'], {
+        env: { ...process.env, HOME: isolated, AGENTCHAT_API_KEY: '' },
+      })
+      expect(stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/)
+    } finally {
+      fs.rmSync(isolated, { recursive: true, force: true })
+    }
+  })
+})

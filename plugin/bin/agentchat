@@ -6577,6 +6577,10 @@ function run(cmd, args) {
   const r = spawnSync(cmd, args, { encoding: "utf-8" });
   return { ok: !r.error && r.status === 0, out: `${r.stdout ?? ""}${r.stderr ?? ""}`.trim() };
 }
+function registrationSkipped() {
+  const v = process.env["AGENTCHAT_SERVICE_DRY_RUN"];
+  return v !== void 0 && v !== "" && v !== "0";
+}
 function systemdUnitPath(label) {
   return path22.join(os.homedir(), ".config", "systemd", "user", `${label}.service`);
 }
@@ -6605,6 +6609,7 @@ function installSystemd(p) {
   fs22.mkdirSync(path22.dirname(unitPath), { recursive: true });
   fs22.writeFileSync(unitPath, systemdUnit(p));
   log.info(`wrote ${unitPath}`);
+  if (registrationSkipped()) return;
   run("systemctl", ["--user", "daemon-reload"]);
   const linger = run("loginctl", ["enable-linger", os.userInfo().username]);
   if (!linger.ok) {
@@ -6657,6 +6662,7 @@ function installLaunchd(p) {
   fs22.mkdirSync(path22.dirname(plistPath), { recursive: true });
   fs22.writeFileSync(plistPath, launchdPlist(p));
   log.info(`wrote ${plistPath}`);
+  if (registrationSkipped()) return;
   run("launchctl", ["unload", plistPath]);
   const loaded = run("launchctl", ["load", "-w", plistPath]);
   if (!loaded.ok) throw new Error(`launchctl load failed: ${loaded.out}`);
@@ -6764,6 +6770,7 @@ function enableWindows(label, mode) {
   fs22.mkdirSync(startup, { recursive: true });
   const startupVbs = path22.join(startup, `${label}.vbs`);
   fs22.copyFileSync(masterVbs, startupVbs);
+  if (registrationSkipped()) return;
   if (mode === "win32") startDetached("wscript.exe", [startupVbs]);
   else startDetached("cmd.exe", ["/c", "start", "", "/b", "wscript.exe", winPathFromWsl(startupVbs)]);
 }

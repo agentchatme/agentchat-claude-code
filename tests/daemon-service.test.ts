@@ -40,7 +40,19 @@ function run(
     execFile(
       process.execPath,
       [script, ...args],
-      { env: { PATH: process.env['PATH'] ?? '', HOME: sandbox, ...env }, timeout: 20_000 },
+      {
+        env: {
+          PATH: process.env['PATH'] ?? '',
+          HOME: sandbox,
+          // HOME sandboxes where a unit FILE lands, but launchctl/systemctl
+          // always address the REAL user's domain. Without this, running these
+          // tests registers actual services on the developer's machine pointed
+          // at a temp dir that is about to be deleted. It did exactly that.
+          AGENTCHAT_SERVICE_DRY_RUN: '1',
+          ...env,
+        },
+        timeout: 20_000,
+      },
       (err, stdout, stderr) => {
         const e = err as (NodeJS.ErrnoException & { code?: number | string }) | null
         resolve({

@@ -547,16 +547,16 @@ var makeIssue = (params) => {
   };
 };
 var EMPTY_PATH = [];
-function addIssueToContext(ctx2, issueData) {
+function addIssueToContext(ctx, issueData) {
   const overrideMap = getErrorMap();
   const issue = makeIssue({
     issueData,
-    data: ctx2.data,
-    path: ctx2.path,
+    data: ctx.data,
+    path: ctx.path,
     errorMaps: [
-      ctx2.common.contextualErrorMap,
+      ctx.common.contextualErrorMap,
       // contextual error map is first priority
-      ctx2.schemaErrorMap,
+      ctx.schemaErrorMap,
       // then schema-bound map if available
       overrideMap,
       // then global override map
@@ -564,7 +564,7 @@ function addIssueToContext(ctx2, issueData) {
       // then global default map
     ].filter((x) => !!x)
   });
-  ctx2.common.issues.push(issue);
+  ctx.common.issues.push(issue);
 }
 var ParseStatus = class _ParseStatus {
   constructor() {
@@ -653,11 +653,11 @@ var ParseInputLazyPath = class {
     return this._cachedPath;
   }
 };
-var handleResult = (ctx2, result) => {
+var handleResult = (ctx, result) => {
   if (isValid(result)) {
     return { success: true, data: result.value };
   } else {
-    if (!ctx2.common.issues.length) {
+    if (!ctx.common.issues.length) {
       throw new Error("Validation failed but no issues detected.");
     }
     return {
@@ -665,7 +665,7 @@ var handleResult = (ctx2, result) => {
       get error() {
         if (this._error)
           return this._error;
-        const error = new ZodError(ctx2.common.issues);
+        const error = new ZodError(ctx.common.issues);
         this._error = error;
         return this._error;
       }
@@ -681,17 +681,17 @@ function processCreateParams(params) {
   }
   if (errorMap2)
     return { errorMap: errorMap2, description };
-  const customMap = (iss, ctx2) => {
+  const customMap = (iss, ctx) => {
     const { message } = params;
     if (iss.code === "invalid_enum_value") {
-      return { message: message ?? ctx2.defaultError };
+      return { message: message ?? ctx.defaultError };
     }
-    if (typeof ctx2.data === "undefined") {
-      return { message: message ?? required_error ?? ctx2.defaultError };
+    if (typeof ctx.data === "undefined") {
+      return { message: message ?? required_error ?? ctx.defaultError };
     }
     if (iss.code !== "invalid_type")
-      return { message: ctx2.defaultError };
-    return { message: message ?? invalid_type_error ?? ctx2.defaultError };
+      return { message: ctx.defaultError };
+    return { message: message ?? invalid_type_error ?? ctx.defaultError };
   };
   return { errorMap: customMap, description };
 }
@@ -702,8 +702,8 @@ var ZodType = class {
   _getType(input) {
     return getParsedType(input.data);
   }
-  _getOrReturnCtx(input, ctx2) {
-    return ctx2 || {
+  _getOrReturnCtx(input, ctx) {
+    return ctx || {
       common: input.parent.common,
       data: input.data,
       parsedType: getParsedType(input.data),
@@ -743,7 +743,7 @@ var ZodType = class {
     throw result.error;
   }
   safeParse(data, params) {
-    const ctx2 = {
+    const ctx = {
       common: {
         issues: [],
         async: params?.async ?? false,
@@ -755,11 +755,11 @@ var ZodType = class {
       data,
       parsedType: getParsedType(data)
     };
-    const result = this._parseSync({ data, path: ctx2.path, parent: ctx2 });
-    return handleResult(ctx2, result);
+    const result = this._parseSync({ data, path: ctx.path, parent: ctx });
+    return handleResult(ctx, result);
   }
   "~validate"(data) {
-    const ctx2 = {
+    const ctx = {
       common: {
         issues: [],
         async: !!this["~standard"].async
@@ -772,26 +772,26 @@ var ZodType = class {
     };
     if (!this["~standard"].async) {
       try {
-        const result = this._parseSync({ data, path: [], parent: ctx2 });
+        const result = this._parseSync({ data, path: [], parent: ctx });
         return isValid(result) ? {
           value: result.value
         } : {
-          issues: ctx2.common.issues
+          issues: ctx.common.issues
         };
       } catch (err) {
         if (err?.message?.toLowerCase()?.includes("encountered")) {
           this["~standard"].async = true;
         }
-        ctx2.common = {
+        ctx.common = {
           issues: [],
           async: true
         };
       }
     }
-    return this._parseAsync({ data, path: [], parent: ctx2 }).then((result) => isValid(result) ? {
+    return this._parseAsync({ data, path: [], parent: ctx }).then((result) => isValid(result) ? {
       value: result.value
     } : {
-      issues: ctx2.common.issues
+      issues: ctx.common.issues
     });
   }
   async parseAsync(data, params) {
@@ -801,7 +801,7 @@ var ZodType = class {
     throw result.error;
   }
   async safeParseAsync(data, params) {
-    const ctx2 = {
+    const ctx = {
       common: {
         issues: [],
         contextualErrorMap: params?.errorMap,
@@ -813,9 +813,9 @@ var ZodType = class {
       data,
       parsedType: getParsedType(data)
     };
-    const maybeAsyncResult = this._parse({ data, path: ctx2.path, parent: ctx2 });
+    const maybeAsyncResult = this._parse({ data, path: ctx.path, parent: ctx });
     const result = await (isAsync(maybeAsyncResult) ? maybeAsyncResult : Promise.resolve(maybeAsyncResult));
-    return handleResult(ctx2, result);
+    return handleResult(ctx, result);
   }
   refine(check, message) {
     const getIssueProperties = (val) => {
@@ -827,9 +827,9 @@ var ZodType = class {
         return message;
       }
     };
-    return this._refinement((val, ctx2) => {
+    return this._refinement((val, ctx) => {
       const result = check(val);
-      const setError = () => ctx2.addIssue({
+      const setError = () => ctx.addIssue({
         code: ZodIssueCode.custom,
         ...getIssueProperties(val)
       });
@@ -852,9 +852,9 @@ var ZodType = class {
     });
   }
   refinement(check, refinementData) {
-    return this._refinement((val, ctx2) => {
+    return this._refinement((val, ctx) => {
       if (!check(val)) {
-        ctx2.addIssue(typeof refinementData === "function" ? refinementData(val, ctx2) : refinementData);
+        ctx.addIssue(typeof refinementData === "function" ? refinementData(val, ctx) : refinementData);
         return false;
       } else {
         return true;
@@ -1065,21 +1065,21 @@ var ZodString = class _ZodString extends ZodType {
     }
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.string) {
-      const ctx22 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx22, {
+      const ctx2 = this._getOrReturnCtx(input);
+      addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.string,
-        received: ctx22.parsedType
+        received: ctx2.parsedType
       });
       return INVALID;
     }
     const status = new ParseStatus();
-    let ctx2 = void 0;
+    let ctx = void 0;
     for (const check of this._def.checks) {
       if (check.kind === "min") {
         if (input.data.length < check.value) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             code: ZodIssueCode.too_small,
             minimum: check.value,
             type: "string",
@@ -1091,8 +1091,8 @@ var ZodString = class _ZodString extends ZodType {
         }
       } else if (check.kind === "max") {
         if (input.data.length > check.value) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             code: ZodIssueCode.too_big,
             maximum: check.value,
             type: "string",
@@ -1106,9 +1106,9 @@ var ZodString = class _ZodString extends ZodType {
         const tooBig = input.data.length > check.value;
         const tooSmall = input.data.length < check.value;
         if (tooBig || tooSmall) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
+          ctx = this._getOrReturnCtx(input, ctx);
           if (tooBig) {
-            addIssueToContext(ctx2, {
+            addIssueToContext(ctx, {
               code: ZodIssueCode.too_big,
               maximum: check.value,
               type: "string",
@@ -1117,7 +1117,7 @@ var ZodString = class _ZodString extends ZodType {
               message: check.message
             });
           } else if (tooSmall) {
-            addIssueToContext(ctx2, {
+            addIssueToContext(ctx, {
               code: ZodIssueCode.too_small,
               minimum: check.value,
               type: "string",
@@ -1130,8 +1130,8 @@ var ZodString = class _ZodString extends ZodType {
         }
       } else if (check.kind === "email") {
         if (!emailRegex.test(input.data)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             validation: "email",
             code: ZodIssueCode.invalid_string,
             message: check.message
@@ -1143,8 +1143,8 @@ var ZodString = class _ZodString extends ZodType {
           emojiRegex = new RegExp(_emojiRegex, "u");
         }
         if (!emojiRegex.test(input.data)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             validation: "emoji",
             code: ZodIssueCode.invalid_string,
             message: check.message
@@ -1153,8 +1153,8 @@ var ZodString = class _ZodString extends ZodType {
         }
       } else if (check.kind === "uuid") {
         if (!uuidRegex.test(input.data)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             validation: "uuid",
             code: ZodIssueCode.invalid_string,
             message: check.message
@@ -1163,8 +1163,8 @@ var ZodString = class _ZodString extends ZodType {
         }
       } else if (check.kind === "nanoid") {
         if (!nanoidRegex.test(input.data)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             validation: "nanoid",
             code: ZodIssueCode.invalid_string,
             message: check.message
@@ -1173,8 +1173,8 @@ var ZodString = class _ZodString extends ZodType {
         }
       } else if (check.kind === "cuid") {
         if (!cuidRegex.test(input.data)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             validation: "cuid",
             code: ZodIssueCode.invalid_string,
             message: check.message
@@ -1183,8 +1183,8 @@ var ZodString = class _ZodString extends ZodType {
         }
       } else if (check.kind === "cuid2") {
         if (!cuid2Regex.test(input.data)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             validation: "cuid2",
             code: ZodIssueCode.invalid_string,
             message: check.message
@@ -1193,8 +1193,8 @@ var ZodString = class _ZodString extends ZodType {
         }
       } else if (check.kind === "ulid") {
         if (!ulidRegex.test(input.data)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             validation: "ulid",
             code: ZodIssueCode.invalid_string,
             message: check.message
@@ -1205,8 +1205,8 @@ var ZodString = class _ZodString extends ZodType {
         try {
           new URL(input.data);
         } catch {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             validation: "url",
             code: ZodIssueCode.invalid_string,
             message: check.message
@@ -1217,8 +1217,8 @@ var ZodString = class _ZodString extends ZodType {
         check.regex.lastIndex = 0;
         const testResult = check.regex.test(input.data);
         if (!testResult) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             validation: "regex",
             code: ZodIssueCode.invalid_string,
             message: check.message
@@ -1229,8 +1229,8 @@ var ZodString = class _ZodString extends ZodType {
         input.data = input.data.trim();
       } else if (check.kind === "includes") {
         if (!input.data.includes(check.value, check.position)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             code: ZodIssueCode.invalid_string,
             validation: { includes: check.value, position: check.position },
             message: check.message
@@ -1243,8 +1243,8 @@ var ZodString = class _ZodString extends ZodType {
         input.data = input.data.toUpperCase();
       } else if (check.kind === "startsWith") {
         if (!input.data.startsWith(check.value)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             code: ZodIssueCode.invalid_string,
             validation: { startsWith: check.value },
             message: check.message
@@ -1253,8 +1253,8 @@ var ZodString = class _ZodString extends ZodType {
         }
       } else if (check.kind === "endsWith") {
         if (!input.data.endsWith(check.value)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             code: ZodIssueCode.invalid_string,
             validation: { endsWith: check.value },
             message: check.message
@@ -1264,8 +1264,8 @@ var ZodString = class _ZodString extends ZodType {
       } else if (check.kind === "datetime") {
         const regex = datetimeRegex(check);
         if (!regex.test(input.data)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             code: ZodIssueCode.invalid_string,
             validation: "datetime",
             message: check.message
@@ -1275,8 +1275,8 @@ var ZodString = class _ZodString extends ZodType {
       } else if (check.kind === "date") {
         const regex = dateRegex;
         if (!regex.test(input.data)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             code: ZodIssueCode.invalid_string,
             validation: "date",
             message: check.message
@@ -1286,8 +1286,8 @@ var ZodString = class _ZodString extends ZodType {
       } else if (check.kind === "time") {
         const regex = timeRegex(check);
         if (!regex.test(input.data)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             code: ZodIssueCode.invalid_string,
             validation: "time",
             message: check.message
@@ -1296,8 +1296,8 @@ var ZodString = class _ZodString extends ZodType {
         }
       } else if (check.kind === "duration") {
         if (!durationRegex.test(input.data)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             validation: "duration",
             code: ZodIssueCode.invalid_string,
             message: check.message
@@ -1306,8 +1306,8 @@ var ZodString = class _ZodString extends ZodType {
         }
       } else if (check.kind === "ip") {
         if (!isValidIP(input.data, check.version)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             validation: "ip",
             code: ZodIssueCode.invalid_string,
             message: check.message
@@ -1316,8 +1316,8 @@ var ZodString = class _ZodString extends ZodType {
         }
       } else if (check.kind === "jwt") {
         if (!isValidJWT(input.data, check.alg)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             validation: "jwt",
             code: ZodIssueCode.invalid_string,
             message: check.message
@@ -1326,8 +1326,8 @@ var ZodString = class _ZodString extends ZodType {
         }
       } else if (check.kind === "cidr") {
         if (!isValidCidr(input.data, check.version)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             validation: "cidr",
             code: ZodIssueCode.invalid_string,
             message: check.message
@@ -1336,8 +1336,8 @@ var ZodString = class _ZodString extends ZodType {
         }
       } else if (check.kind === "base64") {
         if (!base64Regex.test(input.data)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             validation: "base64",
             code: ZodIssueCode.invalid_string,
             message: check.message
@@ -1346,8 +1346,8 @@ var ZodString = class _ZodString extends ZodType {
         }
       } else if (check.kind === "base64url") {
         if (!base64urlRegex.test(input.data)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             validation: "base64url",
             code: ZodIssueCode.invalid_string,
             message: check.message
@@ -1625,21 +1625,21 @@ var ZodNumber = class _ZodNumber extends ZodType {
     }
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.number) {
-      const ctx22 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx22, {
+      const ctx2 = this._getOrReturnCtx(input);
+      addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.number,
-        received: ctx22.parsedType
+        received: ctx2.parsedType
       });
       return INVALID;
     }
-    let ctx2 = void 0;
+    let ctx = void 0;
     const status = new ParseStatus();
     for (const check of this._def.checks) {
       if (check.kind === "int") {
         if (!util.isInteger(input.data)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             code: ZodIssueCode.invalid_type,
             expected: "integer",
             received: "float",
@@ -1650,8 +1650,8 @@ var ZodNumber = class _ZodNumber extends ZodType {
       } else if (check.kind === "min") {
         const tooSmall = check.inclusive ? input.data < check.value : input.data <= check.value;
         if (tooSmall) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             code: ZodIssueCode.too_small,
             minimum: check.value,
             type: "number",
@@ -1664,8 +1664,8 @@ var ZodNumber = class _ZodNumber extends ZodType {
       } else if (check.kind === "max") {
         const tooBig = check.inclusive ? input.data > check.value : input.data >= check.value;
         if (tooBig) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             code: ZodIssueCode.too_big,
             maximum: check.value,
             type: "number",
@@ -1677,8 +1677,8 @@ var ZodNumber = class _ZodNumber extends ZodType {
         }
       } else if (check.kind === "multipleOf") {
         if (floatSafeRemainder(input.data, check.value) !== 0) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             code: ZodIssueCode.not_multiple_of,
             multipleOf: check.value,
             message: check.message
@@ -1687,8 +1687,8 @@ var ZodNumber = class _ZodNumber extends ZodType {
         }
       } else if (check.kind === "finite") {
         if (!Number.isFinite(input.data)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             code: ZodIssueCode.not_finite,
             message: check.message
           });
@@ -1862,14 +1862,14 @@ var ZodBigInt = class _ZodBigInt extends ZodType {
     if (parsedType !== ZodParsedType.bigint) {
       return this._getInvalidInput(input);
     }
-    let ctx2 = void 0;
+    let ctx = void 0;
     const status = new ParseStatus();
     for (const check of this._def.checks) {
       if (check.kind === "min") {
         const tooSmall = check.inclusive ? input.data < check.value : input.data <= check.value;
         if (tooSmall) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             code: ZodIssueCode.too_small,
             type: "bigint",
             minimum: check.value,
@@ -1881,8 +1881,8 @@ var ZodBigInt = class _ZodBigInt extends ZodType {
       } else if (check.kind === "max") {
         const tooBig = check.inclusive ? input.data > check.value : input.data >= check.value;
         if (tooBig) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             code: ZodIssueCode.too_big,
             type: "bigint",
             maximum: check.value,
@@ -1893,8 +1893,8 @@ var ZodBigInt = class _ZodBigInt extends ZodType {
         }
       } else if (check.kind === "multipleOf") {
         if (input.data % check.value !== BigInt(0)) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             code: ZodIssueCode.not_multiple_of,
             multipleOf: check.value,
             message: check.message
@@ -1908,11 +1908,11 @@ var ZodBigInt = class _ZodBigInt extends ZodType {
     return { status: status.value, value: input.data };
   }
   _getInvalidInput(input) {
-    const ctx2 = this._getOrReturnCtx(input);
-    addIssueToContext(ctx2, {
+    const ctx = this._getOrReturnCtx(input);
+    addIssueToContext(ctx, {
       code: ZodIssueCode.invalid_type,
       expected: ZodParsedType.bigint,
-      received: ctx2.parsedType
+      received: ctx.parsedType
     });
     return INVALID;
   }
@@ -2023,11 +2023,11 @@ var ZodBoolean = class extends ZodType {
     }
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.boolean) {
-      const ctx2 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx2, {
+      const ctx = this._getOrReturnCtx(input);
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.boolean,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
@@ -2048,28 +2048,28 @@ var ZodDate = class _ZodDate extends ZodType {
     }
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.date) {
-      const ctx22 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx22, {
+      const ctx2 = this._getOrReturnCtx(input);
+      addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.date,
-        received: ctx22.parsedType
+        received: ctx2.parsedType
       });
       return INVALID;
     }
     if (Number.isNaN(input.data.getTime())) {
-      const ctx22 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx22, {
+      const ctx2 = this._getOrReturnCtx(input);
+      addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_date
       });
       return INVALID;
     }
     const status = new ParseStatus();
-    let ctx2 = void 0;
+    let ctx = void 0;
     for (const check of this._def.checks) {
       if (check.kind === "min") {
         if (input.data.getTime() < check.value) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             code: ZodIssueCode.too_small,
             message: check.message,
             inclusive: true,
@@ -2081,8 +2081,8 @@ var ZodDate = class _ZodDate extends ZodType {
         }
       } else if (check.kind === "max") {
         if (input.data.getTime() > check.value) {
-          ctx2 = this._getOrReturnCtx(input, ctx2);
-          addIssueToContext(ctx2, {
+          ctx = this._getOrReturnCtx(input, ctx);
+          addIssueToContext(ctx, {
             code: ZodIssueCode.too_big,
             message: check.message,
             inclusive: true,
@@ -2154,11 +2154,11 @@ var ZodSymbol = class extends ZodType {
   _parse(input) {
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.symbol) {
-      const ctx2 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx2, {
+      const ctx = this._getOrReturnCtx(input);
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.symbol,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
@@ -2175,11 +2175,11 @@ var ZodUndefined = class extends ZodType {
   _parse(input) {
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.undefined) {
-      const ctx2 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx2, {
+      const ctx = this._getOrReturnCtx(input);
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.undefined,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
@@ -2196,11 +2196,11 @@ var ZodNull = class extends ZodType {
   _parse(input) {
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.null) {
-      const ctx2 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx2, {
+      const ctx = this._getOrReturnCtx(input);
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.null,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
@@ -2245,11 +2245,11 @@ ZodUnknown.create = (params) => {
 };
 var ZodNever = class extends ZodType {
   _parse(input) {
-    const ctx2 = this._getOrReturnCtx(input);
-    addIssueToContext(ctx2, {
+    const ctx = this._getOrReturnCtx(input);
+    addIssueToContext(ctx, {
       code: ZodIssueCode.invalid_type,
       expected: ZodParsedType.never,
-      received: ctx2.parsedType
+      received: ctx.parsedType
     });
     return INVALID;
   }
@@ -2264,11 +2264,11 @@ var ZodVoid = class extends ZodType {
   _parse(input) {
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.undefined) {
-      const ctx2 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx2, {
+      const ctx = this._getOrReturnCtx(input);
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.void,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
@@ -2283,21 +2283,21 @@ ZodVoid.create = (params) => {
 };
 var ZodArray = class _ZodArray extends ZodType {
   _parse(input) {
-    const { ctx: ctx2, status } = this._processInputParams(input);
+    const { ctx, status } = this._processInputParams(input);
     const def = this._def;
-    if (ctx2.parsedType !== ZodParsedType.array) {
-      addIssueToContext(ctx2, {
+    if (ctx.parsedType !== ZodParsedType.array) {
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.array,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
     if (def.exactLength !== null) {
-      const tooBig = ctx2.data.length > def.exactLength.value;
-      const tooSmall = ctx2.data.length < def.exactLength.value;
+      const tooBig = ctx.data.length > def.exactLength.value;
+      const tooSmall = ctx.data.length < def.exactLength.value;
       if (tooBig || tooSmall) {
-        addIssueToContext(ctx2, {
+        addIssueToContext(ctx, {
           code: tooBig ? ZodIssueCode.too_big : ZodIssueCode.too_small,
           minimum: tooSmall ? def.exactLength.value : void 0,
           maximum: tooBig ? def.exactLength.value : void 0,
@@ -2310,8 +2310,8 @@ var ZodArray = class _ZodArray extends ZodType {
       }
     }
     if (def.minLength !== null) {
-      if (ctx2.data.length < def.minLength.value) {
-        addIssueToContext(ctx2, {
+      if (ctx.data.length < def.minLength.value) {
+        addIssueToContext(ctx, {
           code: ZodIssueCode.too_small,
           minimum: def.minLength.value,
           type: "array",
@@ -2323,8 +2323,8 @@ var ZodArray = class _ZodArray extends ZodType {
       }
     }
     if (def.maxLength !== null) {
-      if (ctx2.data.length > def.maxLength.value) {
-        addIssueToContext(ctx2, {
+      if (ctx.data.length > def.maxLength.value) {
+        addIssueToContext(ctx, {
           code: ZodIssueCode.too_big,
           maximum: def.maxLength.value,
           type: "array",
@@ -2335,15 +2335,15 @@ var ZodArray = class _ZodArray extends ZodType {
         status.dirty();
       }
     }
-    if (ctx2.common.async) {
-      return Promise.all([...ctx2.data].map((item, i) => {
-        return def.type._parseAsync(new ParseInputLazyPath(ctx2, item, ctx2.path, i));
+    if (ctx.common.async) {
+      return Promise.all([...ctx.data].map((item, i) => {
+        return def.type._parseAsync(new ParseInputLazyPath(ctx, item, ctx.path, i));
       })).then((result2) => {
         return ParseStatus.mergeArray(status, result2);
       });
     }
-    const result = [...ctx2.data].map((item, i) => {
-      return def.type._parseSync(new ParseInputLazyPath(ctx2, item, ctx2.path, i));
+    const result = [...ctx.data].map((item, i) => {
+      return def.type._parseSync(new ParseInputLazyPath(ctx, item, ctx.path, i));
     });
     return ParseStatus.mergeArray(status, result);
   }
@@ -2426,19 +2426,19 @@ var ZodObject = class _ZodObject extends ZodType {
   _parse(input) {
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.object) {
-      const ctx22 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx22, {
+      const ctx2 = this._getOrReturnCtx(input);
+      addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.object,
-        received: ctx22.parsedType
+        received: ctx2.parsedType
       });
       return INVALID;
     }
-    const { status, ctx: ctx2 } = this._processInputParams(input);
+    const { status, ctx } = this._processInputParams(input);
     const { shape, keys: shapeKeys } = this._getCached();
     const extraKeys = [];
     if (!(this._def.catchall instanceof ZodNever && this._def.unknownKeys === "strip")) {
-      for (const key in ctx2.data) {
+      for (const key in ctx.data) {
         if (!shapeKeys.includes(key)) {
           extraKeys.push(key);
         }
@@ -2447,11 +2447,11 @@ var ZodObject = class _ZodObject extends ZodType {
     const pairs = [];
     for (const key of shapeKeys) {
       const keyValidator = shape[key];
-      const value = ctx2.data[key];
+      const value = ctx.data[key];
       pairs.push({
         key: { status: "valid", value: key },
-        value: keyValidator._parse(new ParseInputLazyPath(ctx2, value, ctx2.path, key)),
-        alwaysSet: key in ctx2.data
+        value: keyValidator._parse(new ParseInputLazyPath(ctx, value, ctx.path, key)),
+        alwaysSet: key in ctx.data
       });
     }
     if (this._def.catchall instanceof ZodNever) {
@@ -2460,12 +2460,12 @@ var ZodObject = class _ZodObject extends ZodType {
         for (const key of extraKeys) {
           pairs.push({
             key: { status: "valid", value: key },
-            value: { status: "valid", value: ctx2.data[key] }
+            value: { status: "valid", value: ctx.data[key] }
           });
         }
       } else if (unknownKeys === "strict") {
         if (extraKeys.length > 0) {
-          addIssueToContext(ctx2, {
+          addIssueToContext(ctx, {
             code: ZodIssueCode.unrecognized_keys,
             keys: extraKeys
           });
@@ -2478,18 +2478,18 @@ var ZodObject = class _ZodObject extends ZodType {
     } else {
       const catchall = this._def.catchall;
       for (const key of extraKeys) {
-        const value = ctx2.data[key];
+        const value = ctx.data[key];
         pairs.push({
           key: { status: "valid", value: key },
           value: catchall._parse(
-            new ParseInputLazyPath(ctx2, value, ctx2.path, key)
+            new ParseInputLazyPath(ctx, value, ctx.path, key)
             //, ctx.child(key), value, getParsedType(value)
           ),
-          alwaysSet: key in ctx2.data
+          alwaysSet: key in ctx.data
         });
       }
     }
-    if (ctx2.common.async) {
+    if (ctx.common.async) {
       return Promise.resolve().then(async () => {
         const syncPairs = [];
         for (const pair of pairs) {
@@ -2518,8 +2518,8 @@ var ZodObject = class _ZodObject extends ZodType {
       ...this._def,
       unknownKeys: "strict",
       ...message !== void 0 ? {
-        errorMap: (issue, ctx2) => {
-          const defaultError = this._def.errorMap?.(issue, ctx2).message ?? ctx2.defaultError;
+        errorMap: (issue, ctx) => {
+          const defaultError = this._def.errorMap?.(issue, ctx).message ?? ctx.defaultError;
           if (issue.code === "unrecognized_keys")
             return {
               message: errorUtil.errToObj(message).message ?? defaultError
@@ -2748,7 +2748,7 @@ ZodObject.lazycreate = (shape, params) => {
 };
 var ZodUnion = class extends ZodType {
   _parse(input) {
-    const { ctx: ctx2 } = this._processInputParams(input);
+    const { ctx } = this._processInputParams(input);
     const options = this._def.options;
     function handleResults(results) {
       for (const result of results) {
@@ -2758,31 +2758,31 @@ var ZodUnion = class extends ZodType {
       }
       for (const result of results) {
         if (result.result.status === "dirty") {
-          ctx2.common.issues.push(...result.ctx.common.issues);
+          ctx.common.issues.push(...result.ctx.common.issues);
           return result.result;
         }
       }
       const unionErrors = results.map((result) => new ZodError(result.ctx.common.issues));
-      addIssueToContext(ctx2, {
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_union,
         unionErrors
       });
       return INVALID;
     }
-    if (ctx2.common.async) {
+    if (ctx.common.async) {
       return Promise.all(options.map(async (option) => {
         const childCtx = {
-          ...ctx2,
+          ...ctx,
           common: {
-            ...ctx2.common,
+            ...ctx.common,
             issues: []
           },
           parent: null
         };
         return {
           result: await option._parseAsync({
-            data: ctx2.data,
-            path: ctx2.path,
+            data: ctx.data,
+            path: ctx.path,
             parent: childCtx
           }),
           ctx: childCtx
@@ -2793,16 +2793,16 @@ var ZodUnion = class extends ZodType {
       const issues = [];
       for (const option of options) {
         const childCtx = {
-          ...ctx2,
+          ...ctx,
           common: {
-            ...ctx2.common,
+            ...ctx.common,
             issues: []
           },
           parent: null
         };
         const result = option._parseSync({
-          data: ctx2.data,
-          path: ctx2.path,
+          data: ctx.data,
+          path: ctx.path,
           parent: childCtx
         });
         if (result.status === "valid") {
@@ -2815,11 +2815,11 @@ var ZodUnion = class extends ZodType {
         }
       }
       if (dirty) {
-        ctx2.common.issues.push(...dirty.ctx.common.issues);
+        ctx.common.issues.push(...dirty.ctx.common.issues);
         return dirty.result;
       }
       const unionErrors = issues.map((issues2) => new ZodError(issues2));
-      addIssueToContext(ctx2, {
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_union,
         unionErrors
       });
@@ -2870,37 +2870,37 @@ var getDiscriminator = (type) => {
 };
 var ZodDiscriminatedUnion = class _ZodDiscriminatedUnion extends ZodType {
   _parse(input) {
-    const { ctx: ctx2 } = this._processInputParams(input);
-    if (ctx2.parsedType !== ZodParsedType.object) {
-      addIssueToContext(ctx2, {
+    const { ctx } = this._processInputParams(input);
+    if (ctx.parsedType !== ZodParsedType.object) {
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.object,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
     const discriminator = this.discriminator;
-    const discriminatorValue = ctx2.data[discriminator];
+    const discriminatorValue = ctx.data[discriminator];
     const option = this.optionsMap.get(discriminatorValue);
     if (!option) {
-      addIssueToContext(ctx2, {
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_union_discriminator,
         options: Array.from(this.optionsMap.keys()),
         path: [discriminator]
       });
       return INVALID;
     }
-    if (ctx2.common.async) {
+    if (ctx.common.async) {
       return option._parseAsync({
-        data: ctx2.data,
-        path: ctx2.path,
-        parent: ctx2
+        data: ctx.data,
+        path: ctx.path,
+        parent: ctx
       });
     } else {
       return option._parseSync({
-        data: ctx2.data,
-        path: ctx2.path,
-        parent: ctx2
+        data: ctx.data,
+        path: ctx.path,
+        parent: ctx
       });
     }
   }
@@ -2984,14 +2984,14 @@ function mergeValues(a, b) {
 }
 var ZodIntersection = class extends ZodType {
   _parse(input) {
-    const { status, ctx: ctx2 } = this._processInputParams(input);
+    const { status, ctx } = this._processInputParams(input);
     const handleParsed = (parsedLeft, parsedRight) => {
       if (isAborted(parsedLeft) || isAborted(parsedRight)) {
         return INVALID;
       }
       const merged = mergeValues(parsedLeft.value, parsedRight.value);
       if (!merged.valid) {
-        addIssueToContext(ctx2, {
+        addIssueToContext(ctx, {
           code: ZodIssueCode.invalid_intersection_types
         });
         return INVALID;
@@ -3001,28 +3001,28 @@ var ZodIntersection = class extends ZodType {
       }
       return { status: status.value, value: merged.data };
     };
-    if (ctx2.common.async) {
+    if (ctx.common.async) {
       return Promise.all([
         this._def.left._parseAsync({
-          data: ctx2.data,
-          path: ctx2.path,
-          parent: ctx2
+          data: ctx.data,
+          path: ctx.path,
+          parent: ctx
         }),
         this._def.right._parseAsync({
-          data: ctx2.data,
-          path: ctx2.path,
-          parent: ctx2
+          data: ctx.data,
+          path: ctx.path,
+          parent: ctx
         })
       ]).then(([left, right]) => handleParsed(left, right));
     } else {
       return handleParsed(this._def.left._parseSync({
-        data: ctx2.data,
-        path: ctx2.path,
-        parent: ctx2
+        data: ctx.data,
+        path: ctx.path,
+        parent: ctx
       }), this._def.right._parseSync({
-        data: ctx2.data,
-        path: ctx2.path,
-        parent: ctx2
+        data: ctx.data,
+        path: ctx.path,
+        parent: ctx
       }));
     }
   }
@@ -3037,17 +3037,17 @@ ZodIntersection.create = (left, right, params) => {
 };
 var ZodTuple = class _ZodTuple extends ZodType {
   _parse(input) {
-    const { status, ctx: ctx2 } = this._processInputParams(input);
-    if (ctx2.parsedType !== ZodParsedType.array) {
-      addIssueToContext(ctx2, {
+    const { status, ctx } = this._processInputParams(input);
+    if (ctx.parsedType !== ZodParsedType.array) {
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.array,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
-    if (ctx2.data.length < this._def.items.length) {
-      addIssueToContext(ctx2, {
+    if (ctx.data.length < this._def.items.length) {
+      addIssueToContext(ctx, {
         code: ZodIssueCode.too_small,
         minimum: this._def.items.length,
         inclusive: true,
@@ -3057,8 +3057,8 @@ var ZodTuple = class _ZodTuple extends ZodType {
       return INVALID;
     }
     const rest = this._def.rest;
-    if (!rest && ctx2.data.length > this._def.items.length) {
-      addIssueToContext(ctx2, {
+    if (!rest && ctx.data.length > this._def.items.length) {
+      addIssueToContext(ctx, {
         code: ZodIssueCode.too_big,
         maximum: this._def.items.length,
         inclusive: true,
@@ -3067,13 +3067,13 @@ var ZodTuple = class _ZodTuple extends ZodType {
       });
       status.dirty();
     }
-    const items = [...ctx2.data].map((item, itemIndex) => {
+    const items = [...ctx.data].map((item, itemIndex) => {
       const schema = this._def.items[itemIndex] || this._def.rest;
       if (!schema)
         return null;
-      return schema._parse(new ParseInputLazyPath(ctx2, item, ctx2.path, itemIndex));
+      return schema._parse(new ParseInputLazyPath(ctx, item, ctx.path, itemIndex));
     }).filter((x) => !!x);
-    if (ctx2.common.async) {
+    if (ctx.common.async) {
       return Promise.all(items).then((results) => {
         return ParseStatus.mergeArray(status, results);
       });
@@ -3110,26 +3110,26 @@ var ZodRecord = class _ZodRecord extends ZodType {
     return this._def.valueType;
   }
   _parse(input) {
-    const { status, ctx: ctx2 } = this._processInputParams(input);
-    if (ctx2.parsedType !== ZodParsedType.object) {
-      addIssueToContext(ctx2, {
+    const { status, ctx } = this._processInputParams(input);
+    if (ctx.parsedType !== ZodParsedType.object) {
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.object,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
     const pairs = [];
     const keyType = this._def.keyType;
     const valueType = this._def.valueType;
-    for (const key in ctx2.data) {
+    for (const key in ctx.data) {
       pairs.push({
-        key: keyType._parse(new ParseInputLazyPath(ctx2, key, ctx2.path, key)),
-        value: valueType._parse(new ParseInputLazyPath(ctx2, ctx2.data[key], ctx2.path, key)),
-        alwaysSet: key in ctx2.data
+        key: keyType._parse(new ParseInputLazyPath(ctx, key, ctx.path, key)),
+        value: valueType._parse(new ParseInputLazyPath(ctx, ctx.data[key], ctx.path, key)),
+        alwaysSet: key in ctx.data
       });
     }
-    if (ctx2.common.async) {
+    if (ctx.common.async) {
       return ParseStatus.mergeObjectAsync(status, pairs);
     } else {
       return ParseStatus.mergeObjectSync(status, pairs);
@@ -3163,24 +3163,24 @@ var ZodMap = class extends ZodType {
     return this._def.valueType;
   }
   _parse(input) {
-    const { status, ctx: ctx2 } = this._processInputParams(input);
-    if (ctx2.parsedType !== ZodParsedType.map) {
-      addIssueToContext(ctx2, {
+    const { status, ctx } = this._processInputParams(input);
+    if (ctx.parsedType !== ZodParsedType.map) {
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.map,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
     const keyType = this._def.keyType;
     const valueType = this._def.valueType;
-    const pairs = [...ctx2.data.entries()].map(([key, value], index) => {
+    const pairs = [...ctx.data.entries()].map(([key, value], index) => {
       return {
-        key: keyType._parse(new ParseInputLazyPath(ctx2, key, ctx2.path, [index, "key"])),
-        value: valueType._parse(new ParseInputLazyPath(ctx2, value, ctx2.path, [index, "value"]))
+        key: keyType._parse(new ParseInputLazyPath(ctx, key, ctx.path, [index, "key"])),
+        value: valueType._parse(new ParseInputLazyPath(ctx, value, ctx.path, [index, "value"]))
       };
     });
-    if (ctx2.common.async) {
+    if (ctx.common.async) {
       const finalMap = /* @__PURE__ */ new Map();
       return Promise.resolve().then(async () => {
         for (const pair of pairs) {
@@ -3223,19 +3223,19 @@ ZodMap.create = (keyType, valueType, params) => {
 };
 var ZodSet = class _ZodSet extends ZodType {
   _parse(input) {
-    const { status, ctx: ctx2 } = this._processInputParams(input);
-    if (ctx2.parsedType !== ZodParsedType.set) {
-      addIssueToContext(ctx2, {
+    const { status, ctx } = this._processInputParams(input);
+    if (ctx.parsedType !== ZodParsedType.set) {
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.set,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
     const def = this._def;
     if (def.minSize !== null) {
-      if (ctx2.data.size < def.minSize.value) {
-        addIssueToContext(ctx2, {
+      if (ctx.data.size < def.minSize.value) {
+        addIssueToContext(ctx, {
           code: ZodIssueCode.too_small,
           minimum: def.minSize.value,
           type: "set",
@@ -3247,8 +3247,8 @@ var ZodSet = class _ZodSet extends ZodType {
       }
     }
     if (def.maxSize !== null) {
-      if (ctx2.data.size > def.maxSize.value) {
-        addIssueToContext(ctx2, {
+      if (ctx.data.size > def.maxSize.value) {
+        addIssueToContext(ctx, {
           code: ZodIssueCode.too_big,
           maximum: def.maxSize.value,
           type: "set",
@@ -3271,8 +3271,8 @@ var ZodSet = class _ZodSet extends ZodType {
       }
       return { status: status.value, value: parsedSet };
     }
-    const elements = [...ctx2.data.values()].map((item, i) => valueType._parse(new ParseInputLazyPath(ctx2, item, ctx2.path, i)));
-    if (ctx2.common.async) {
+    const elements = [...ctx.data.values()].map((item, i) => valueType._parse(new ParseInputLazyPath(ctx, item, ctx.path, i)));
+    if (ctx.common.async) {
       return Promise.all(elements).then((elements2) => finalizeSet(elements2));
     } else {
       return finalizeSet(elements);
@@ -3312,20 +3312,20 @@ var ZodFunction = class _ZodFunction extends ZodType {
     this.validate = this.implement;
   }
   _parse(input) {
-    const { ctx: ctx2 } = this._processInputParams(input);
-    if (ctx2.parsedType !== ZodParsedType.function) {
-      addIssueToContext(ctx2, {
+    const { ctx } = this._processInputParams(input);
+    if (ctx.parsedType !== ZodParsedType.function) {
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.function,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
     function makeArgsIssue(args, error) {
       return makeIssue({
         data: args,
-        path: ctx2.path,
-        errorMaps: [ctx2.common.contextualErrorMap, ctx2.schemaErrorMap, getErrorMap(), en_default].filter((x) => !!x),
+        path: ctx.path,
+        errorMaps: [ctx.common.contextualErrorMap, ctx.schemaErrorMap, getErrorMap(), en_default].filter((x) => !!x),
         issueData: {
           code: ZodIssueCode.invalid_arguments,
           argumentsError: error
@@ -3335,16 +3335,16 @@ var ZodFunction = class _ZodFunction extends ZodType {
     function makeReturnsIssue(returns, error) {
       return makeIssue({
         data: returns,
-        path: ctx2.path,
-        errorMaps: [ctx2.common.contextualErrorMap, ctx2.schemaErrorMap, getErrorMap(), en_default].filter((x) => !!x),
+        path: ctx.path,
+        errorMaps: [ctx.common.contextualErrorMap, ctx.schemaErrorMap, getErrorMap(), en_default].filter((x) => !!x),
         issueData: {
           code: ZodIssueCode.invalid_return_type,
           returnTypeError: error
         }
       });
     }
-    const params = { errorMap: ctx2.common.contextualErrorMap };
-    const fn = ctx2.data;
+    const params = { errorMap: ctx.common.contextualErrorMap };
+    const fn = ctx.data;
     if (this._def.returns instanceof ZodPromise) {
       const me = this;
       return OK(async function(...args) {
@@ -3416,9 +3416,9 @@ var ZodLazy = class extends ZodType {
     return this._def.getter();
   }
   _parse(input) {
-    const { ctx: ctx2 } = this._processInputParams(input);
+    const { ctx } = this._processInputParams(input);
     const lazySchema = this._def.getter();
-    return lazySchema._parse({ data: ctx2.data, path: ctx2.path, parent: ctx2 });
+    return lazySchema._parse({ data: ctx.data, path: ctx.path, parent: ctx });
   }
 };
 ZodLazy.create = (getter, params) => {
@@ -3431,9 +3431,9 @@ ZodLazy.create = (getter, params) => {
 var ZodLiteral = class extends ZodType {
   _parse(input) {
     if (input.data !== this._def.value) {
-      const ctx2 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx2, {
-        received: ctx2.data,
+      const ctx = this._getOrReturnCtx(input);
+      addIssueToContext(ctx, {
+        received: ctx.data,
         code: ZodIssueCode.invalid_literal,
         expected: this._def.value
       });
@@ -3462,11 +3462,11 @@ function createZodEnum(values, params) {
 var ZodEnum = class _ZodEnum extends ZodType {
   _parse(input) {
     if (typeof input.data !== "string") {
-      const ctx2 = this._getOrReturnCtx(input);
+      const ctx = this._getOrReturnCtx(input);
       const expectedValues = this._def.values;
-      addIssueToContext(ctx2, {
+      addIssueToContext(ctx, {
         expected: util.joinValues(expectedValues),
-        received: ctx2.parsedType,
+        received: ctx.parsedType,
         code: ZodIssueCode.invalid_type
       });
       return INVALID;
@@ -3475,10 +3475,10 @@ var ZodEnum = class _ZodEnum extends ZodType {
       this._cache = new Set(this._def.values);
     }
     if (!this._cache.has(input.data)) {
-      const ctx2 = this._getOrReturnCtx(input);
+      const ctx = this._getOrReturnCtx(input);
       const expectedValues = this._def.values;
-      addIssueToContext(ctx2, {
-        received: ctx2.data,
+      addIssueToContext(ctx, {
+        received: ctx.data,
         code: ZodIssueCode.invalid_enum_value,
         options: expectedValues
       });
@@ -3527,12 +3527,12 @@ ZodEnum.create = createZodEnum;
 var ZodNativeEnum = class extends ZodType {
   _parse(input) {
     const nativeEnumValues = util.getValidEnumValues(this._def.values);
-    const ctx2 = this._getOrReturnCtx(input);
-    if (ctx2.parsedType !== ZodParsedType.string && ctx2.parsedType !== ZodParsedType.number) {
+    const ctx = this._getOrReturnCtx(input);
+    if (ctx.parsedType !== ZodParsedType.string && ctx.parsedType !== ZodParsedType.number) {
       const expectedValues = util.objectValues(nativeEnumValues);
-      addIssueToContext(ctx2, {
+      addIssueToContext(ctx, {
         expected: util.joinValues(expectedValues),
-        received: ctx2.parsedType,
+        received: ctx.parsedType,
         code: ZodIssueCode.invalid_type
       });
       return INVALID;
@@ -3542,8 +3542,8 @@ var ZodNativeEnum = class extends ZodType {
     }
     if (!this._cache.has(input.data)) {
       const expectedValues = util.objectValues(nativeEnumValues);
-      addIssueToContext(ctx2, {
-        received: ctx2.data,
+      addIssueToContext(ctx, {
+        received: ctx.data,
         code: ZodIssueCode.invalid_enum_value,
         options: expectedValues
       });
@@ -3567,20 +3567,20 @@ var ZodPromise = class extends ZodType {
     return this._def.type;
   }
   _parse(input) {
-    const { ctx: ctx2 } = this._processInputParams(input);
-    if (ctx2.parsedType !== ZodParsedType.promise && ctx2.common.async === false) {
-      addIssueToContext(ctx2, {
+    const { ctx } = this._processInputParams(input);
+    if (ctx.parsedType !== ZodParsedType.promise && ctx.common.async === false) {
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.promise,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
-    const promisified = ctx2.parsedType === ZodParsedType.promise ? ctx2.data : Promise.resolve(ctx2.data);
+    const promisified = ctx.parsedType === ZodParsedType.promise ? ctx.data : Promise.resolve(ctx.data);
     return OK(promisified.then((data) => {
       return this._def.type.parseAsync(data, {
-        path: ctx2.path,
-        errorMap: ctx2.common.contextualErrorMap
+        path: ctx.path,
+        errorMap: ctx.common.contextualErrorMap
       });
     }));
   }
@@ -3600,11 +3600,11 @@ var ZodEffects = class extends ZodType {
     return this._def.schema._def.typeName === ZodFirstPartyTypeKind.ZodEffects ? this._def.schema.sourceType() : this._def.schema;
   }
   _parse(input) {
-    const { status, ctx: ctx2 } = this._processInputParams(input);
+    const { status, ctx } = this._processInputParams(input);
     const effect = this._def.effect || null;
     const checkCtx = {
       addIssue: (arg) => {
-        addIssueToContext(ctx2, arg);
+        addIssueToContext(ctx, arg);
         if (arg.fatal) {
           status.abort();
         } else {
@@ -3612,20 +3612,20 @@ var ZodEffects = class extends ZodType {
         }
       },
       get path() {
-        return ctx2.path;
+        return ctx.path;
       }
     };
     checkCtx.addIssue = checkCtx.addIssue.bind(checkCtx);
     if (effect.type === "preprocess") {
-      const processed = effect.transform(ctx2.data, checkCtx);
-      if (ctx2.common.async) {
+      const processed = effect.transform(ctx.data, checkCtx);
+      if (ctx.common.async) {
         return Promise.resolve(processed).then(async (processed2) => {
           if (status.value === "aborted")
             return INVALID;
           const result = await this._def.schema._parseAsync({
             data: processed2,
-            path: ctx2.path,
-            parent: ctx2
+            path: ctx.path,
+            parent: ctx
           });
           if (result.status === "aborted")
             return INVALID;
@@ -3640,8 +3640,8 @@ var ZodEffects = class extends ZodType {
           return INVALID;
         const result = this._def.schema._parseSync({
           data: processed,
-          path: ctx2.path,
-          parent: ctx2
+          path: ctx.path,
+          parent: ctx
         });
         if (result.status === "aborted")
           return INVALID;
@@ -3655,7 +3655,7 @@ var ZodEffects = class extends ZodType {
     if (effect.type === "refinement") {
       const executeRefinement = (acc) => {
         const result = effect.refinement(acc, checkCtx);
-        if (ctx2.common.async) {
+        if (ctx.common.async) {
           return Promise.resolve(result);
         }
         if (result instanceof Promise) {
@@ -3663,11 +3663,11 @@ var ZodEffects = class extends ZodType {
         }
         return acc;
       };
-      if (ctx2.common.async === false) {
+      if (ctx.common.async === false) {
         const inner = this._def.schema._parseSync({
-          data: ctx2.data,
-          path: ctx2.path,
-          parent: ctx2
+          data: ctx.data,
+          path: ctx.path,
+          parent: ctx
         });
         if (inner.status === "aborted")
           return INVALID;
@@ -3676,7 +3676,7 @@ var ZodEffects = class extends ZodType {
         executeRefinement(inner.value);
         return { status: status.value, value: inner.value };
       } else {
-        return this._def.schema._parseAsync({ data: ctx2.data, path: ctx2.path, parent: ctx2 }).then((inner) => {
+        return this._def.schema._parseAsync({ data: ctx.data, path: ctx.path, parent: ctx }).then((inner) => {
           if (inner.status === "aborted")
             return INVALID;
           if (inner.status === "dirty")
@@ -3688,11 +3688,11 @@ var ZodEffects = class extends ZodType {
       }
     }
     if (effect.type === "transform") {
-      if (ctx2.common.async === false) {
+      if (ctx.common.async === false) {
         const base = this._def.schema._parseSync({
-          data: ctx2.data,
-          path: ctx2.path,
-          parent: ctx2
+          data: ctx.data,
+          path: ctx.path,
+          parent: ctx
         });
         if (!isValid(base))
           return INVALID;
@@ -3702,7 +3702,7 @@ var ZodEffects = class extends ZodType {
         }
         return { status: status.value, value: result };
       } else {
-        return this._def.schema._parseAsync({ data: ctx2.data, path: ctx2.path, parent: ctx2 }).then((base) => {
+        return this._def.schema._parseAsync({ data: ctx.data, path: ctx.path, parent: ctx }).then((base) => {
           if (!isValid(base))
             return INVALID;
           return Promise.resolve(effect.transform(base.value, checkCtx)).then((result) => ({
@@ -3771,15 +3771,15 @@ ZodNullable.create = (type, params) => {
 };
 var ZodDefault = class extends ZodType {
   _parse(input) {
-    const { ctx: ctx2 } = this._processInputParams(input);
-    let data = ctx2.data;
-    if (ctx2.parsedType === ZodParsedType.undefined) {
+    const { ctx } = this._processInputParams(input);
+    let data = ctx.data;
+    if (ctx.parsedType === ZodParsedType.undefined) {
       data = this._def.defaultValue();
     }
     return this._def.innerType._parse({
       data,
-      path: ctx2.path,
-      parent: ctx2
+      path: ctx.path,
+      parent: ctx
     });
   }
   removeDefault() {
@@ -3796,11 +3796,11 @@ ZodDefault.create = (type, params) => {
 };
 var ZodCatch = class extends ZodType {
   _parse(input) {
-    const { ctx: ctx2 } = this._processInputParams(input);
+    const { ctx } = this._processInputParams(input);
     const newCtx = {
-      ...ctx2,
+      ...ctx,
       common: {
-        ...ctx2.common,
+        ...ctx.common,
         issues: []
       }
     };
@@ -3851,11 +3851,11 @@ var ZodNaN = class extends ZodType {
   _parse(input) {
     const parsedType = this._getType(input);
     if (parsedType !== ZodParsedType.nan) {
-      const ctx2 = this._getOrReturnCtx(input);
-      addIssueToContext(ctx2, {
+      const ctx = this._getOrReturnCtx(input);
+      addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.nan,
-        received: ctx2.parsedType
+        received: ctx.parsedType
       });
       return INVALID;
     }
@@ -3871,12 +3871,12 @@ ZodNaN.create = (params) => {
 var BRAND = /* @__PURE__ */ Symbol("zod_brand");
 var ZodBranded = class extends ZodType {
   _parse(input) {
-    const { ctx: ctx2 } = this._processInputParams(input);
-    const data = ctx2.data;
+    const { ctx } = this._processInputParams(input);
+    const data = ctx.data;
     return this._def.type._parse({
       data,
-      path: ctx2.path,
-      parent: ctx2
+      path: ctx.path,
+      parent: ctx
     });
   }
   unwrap() {
@@ -3885,13 +3885,13 @@ var ZodBranded = class extends ZodType {
 };
 var ZodPipeline = class _ZodPipeline extends ZodType {
   _parse(input) {
-    const { status, ctx: ctx2 } = this._processInputParams(input);
-    if (ctx2.common.async) {
+    const { status, ctx } = this._processInputParams(input);
+    if (ctx.common.async) {
       const handleAsync = async () => {
         const inResult = await this._def.in._parseAsync({
-          data: ctx2.data,
-          path: ctx2.path,
-          parent: ctx2
+          data: ctx.data,
+          path: ctx.path,
+          parent: ctx
         });
         if (inResult.status === "aborted")
           return INVALID;
@@ -3901,17 +3901,17 @@ var ZodPipeline = class _ZodPipeline extends ZodType {
         } else {
           return this._def.out._parseAsync({
             data: inResult.value,
-            path: ctx2.path,
-            parent: ctx2
+            path: ctx.path,
+            parent: ctx
           });
         }
       };
       return handleAsync();
     } else {
       const inResult = this._def.in._parseSync({
-        data: ctx2.data,
-        path: ctx2.path,
-        parent: ctx2
+        data: ctx.data,
+        path: ctx.path,
+        parent: ctx
       });
       if (inResult.status === "aborted")
         return INVALID;
@@ -3924,8 +3924,8 @@ var ZodPipeline = class _ZodPipeline extends ZodType {
       } else {
         return this._def.out._parseSync({
           data: inResult.value,
-          path: ctx2.path,
-          parent: ctx2
+          path: ctx.path,
+          parent: ctx
         });
       }
     }
@@ -3967,21 +3967,21 @@ function cleanParams(params, data) {
 }
 function custom(check, _params = {}, fatal) {
   if (check)
-    return ZodAny.create().superRefine((data, ctx2) => {
+    return ZodAny.create().superRefine((data, ctx) => {
       const r = check(data);
       if (r instanceof Promise) {
         return r.then((r2) => {
           if (!r2) {
             const params = cleanParams(_params, data);
             const _fatal = params.fatal ?? fatal ?? true;
-            ctx2.addIssue({ code: "custom", ...params, fatal: _fatal });
+            ctx.addIssue({ code: "custom", ...params, fatal: _fatal });
           }
         });
       }
       if (!r) {
         const params = cleanParams(_params, data);
         const _fatal = params.fatal ?? fatal ?? true;
-        ctx2.addIssue({ code: "custom", ...params, fatal: _fatal });
+        ctx.addIssue({ code: "custom", ...params, fatal: _fatal });
       }
       return;
     });
@@ -4318,782 +4318,9 @@ function alwaysOnHealth(home) {
 // @agentchatme/agent-core/dist/index.js
 import * as fs from "fs";
 import * as path from "path";
-import * as fs22 from "fs";
-import * as os from "os";
-import * as path22 from "path";
-import { spawnSync, spawn } from "child_process";
-var SESSION_TTL_MS = 48 * 60 * 60 * 1e3;
-var SessionStateSchema = external_exports.object({
-  continuations: external_exports.number().int().min(0),
-  updated_at: external_exports.string(),
-  // Ack cursor for the batch the session-start hook injected but has NOT
-  // yet committed. Committed by the user-prompt hook — proof the session
-  // actually ran a turn. A session that dies before its first prompt
-  // (arg-error invocations, crashed startups) leaves this uncommitted and
-  // the batch re-digests next session instead of being consumed by a
-  // ghost. Live-fire lesson, 2026-07-12.
-  pending_ack: external_exports.string().optional()
-});
-var StateSchema = external_exports.object({
-  sessions: external_exports.record(SessionStateSchema).default({}),
-  // Machine-wide timestamp of the last registration offer injected by the
-  // session-start hook. Keeps the unregistered-plugin nag to once a day
-  // instead of once per session.
-  last_offer_at: external_exports.string().optional()
-});
-function readState(home) {
-  const raw = readJsonFile(statePath(home));
-  if (raw !== null) {
-    const parsed = StateSchema.safeParse(raw);
-    if (parsed.success) return parsed.data;
-  }
-  return { sessions: {} };
-}
-function writeState(home, state) {
-  atomicWriteFile(statePath(home), JSON.stringify(state, null, 2) + "\n", 384);
-}
-function prune(state, now2) {
-  const cutoff = now2.getTime() - SESSION_TTL_MS;
-  for (const [key, entry] of Object.entries(state.sessions)) {
-    const t = Date.parse(entry.updated_at);
-    if (Number.isNaN(t) || t < cutoff) {
-      delete state.sessions[key];
-    }
-  }
-}
-function getContinuations(home, sessionKey) {
-  return readState(home).sessions[sessionKey]?.continuations ?? 0;
-}
-function recordContinuation(home, sessionKey, now2 = /* @__PURE__ */ new Date()) {
-  const state = readState(home);
-  prune(state, now2);
-  const current = state.sessions[sessionKey]?.continuations ?? 0;
-  const next = current + 1;
-  state.sessions[sessionKey] = { continuations: next, updated_at: now2.toISOString() };
-  writeState(home, state);
-  return next;
-}
-function resetSession(home, sessionKey) {
-  const state = readState(home);
-  if (state.sessions[sessionKey] === void 0) return;
-  delete state.sessions[sessionKey];
-  writeState(home, state);
-}
-function setPendingAck(home, sessionKey, cursor, now2 = /* @__PURE__ */ new Date()) {
-  const state = readState(home);
-  prune(state, now2);
-  const existing = state.sessions[sessionKey];
-  state.sessions[sessionKey] = {
-    continuations: existing?.continuations ?? 0,
-    updated_at: now2.toISOString(),
-    pending_ack: cursor
-  };
-  writeState(home, state);
-}
-function takePendingAck(home, sessionKey, now2 = /* @__PURE__ */ new Date()) {
-  const state = readState(home);
-  const entry = state.sessions[sessionKey];
-  if (entry?.pending_ack === void 0) return null;
-  const cursor = entry.pending_ack;
-  delete entry.pending_ack;
-  entry.updated_at = now2.toISOString();
-  writeState(home, state);
-  return cursor;
-}
-var OFFER_COOLDOWN_MS = 24 * 60 * 60 * 1e3;
-function shouldOfferRegistration(home, now2 = /* @__PURE__ */ new Date()) {
-  const last = readState(home).last_offer_at;
-  if (last === void 0) return true;
-  const t = Date.parse(last);
-  return Number.isNaN(t) || now2.getTime() - t >= OFFER_COOLDOWN_MS;
-}
-function recordRegistrationOffer(home, now2 = /* @__PURE__ */ new Date()) {
-  const state = readState(home);
-  state.last_offer_at = now2.toISOString();
-  writeState(home, state);
-}
-var SEC = 1e3;
-var MIN = 60 * SEC;
-var HOUR = 60 * MIN;
-var DAY = 24 * HOUR;
-function relativeAge(ms) {
-  if (ms < 45 * SEC) return "just now";
-  if (ms < 90 * SEC) return "1 minute ago";
-  if (ms < 45 * MIN) return `${Math.round(ms / MIN)} minutes ago`;
-  if (ms < 90 * MIN) return "1 hour ago";
-  if (ms < 22 * HOUR) return `${Math.round(ms / HOUR)} hours ago`;
-  if (ms < 36 * HOUR) return "1 day ago";
-  return `${Math.round(ms / DAY)} days ago`;
-}
-function relativeWhen(createdAt, now2 = Date.now()) {
-  if (!createdAt) return "";
-  const t = Date.parse(createdAt);
-  if (Number.isNaN(t)) return "";
-  return relativeAge(Math.max(0, now2 - t));
-}
-var SNIPPET_MAX = 140;
-function snippetOf(row) {
-  const content = row.content ?? {};
-  const text = typeof content["text"] === "string" ? content["text"] : "";
-  if (text.length === 0) return `[${row.type ?? "message"}]`;
-  const oneLine = text.replace(/\s+/g, " ").trim();
-  return oneLine.length > SNIPPET_MAX ? `${oneLine.slice(0, SNIPPET_MAX - 1)}\u2026` : oneLine;
-}
-function digestConversations(rows, selfHandle = null) {
-  const self = selfHandle?.replace(/^@/, "").toLowerCase() ?? null;
-  const byConversation = /* @__PURE__ */ new Map();
-  for (const row of rows) {
-    const sender = row.sender ?? row.sender_handle ?? "unknown";
-    const ctx2 = contextOf(row);
-    const mentionsSelf = self !== null && ctx2.mentions.includes(self);
-    const existing = byConversation.get(row.conversation_id);
-    if (existing) {
-      existing.count += 1;
-      if (!existing.senders.includes(sender)) existing.senders.push(sender);
-      existing.latestSnippet = snippetOf(row);
-      existing.latestCreatedAt = row.created_at ?? existing.latestCreatedAt;
-      existing.groupName = ctx2.groupName ?? existing.groupName;
-      existing.mentionsYou = existing.mentionsYou || mentionsSelf;
-    } else {
-      byConversation.set(row.conversation_id, {
-        conversationId: row.conversation_id,
-        isGroup: row.conversation_id.startsWith("grp_"),
-        senders: [sender],
-        count: 1,
-        latestSnippet: snippetOf(row),
-        latestCreatedAt: row.created_at,
-        groupName: ctx2.groupName,
-        mentionsYou: mentionsSelf
-      });
-    }
-  }
-  return [...byConversation.values()];
-}
-function digestLines(digests) {
-  return digests.map((d, i) => {
-    const who = d.senders.map((s) => `@${s}`).join(", ");
-    const kind = d.isGroup ? d.groupName ? `group "${d.groupName}"` : `group ${d.conversationId}` : d.conversationId;
-    const count = d.count === 1 ? "1 message" : `${d.count} messages`;
-    const age = relativeWhen(d.latestCreatedAt);
-    const recency = age ? `, latest ${age}` : "";
-    const mention = d.mentionsYou ? " \u2014 mentions you" : "";
-    return `${i + 1}. ${who} (${count}, ${kind}${recency}${mention}): "${d.latestSnippet}"`;
-  });
-}
-function formatSessionStart(handle, rows) {
-  const digests = digestConversations(rows, handle);
-  const total = rows.length;
-  const identity = handle ? `You are @${handle} on AgentChat. ` : "AgentChat: ";
-  const header = identity + `${total} unread message${total === 1 ? "" : "s"} in ${digests.length} conversation${digests.length === 1 ? "" : "s"}:`;
-  return [
-    header,
-    "",
-    ...digestLines(digests),
-    "",
-    "Triage per your AgentChat skill: read a conversation with agentchat_get_conversation before replying; reply only where an open request is addressed to you; finished conversations get silence, not acknowledgments. Mention anything the user should know about."
-  ].join("\n");
-}
-function formatStopPickup(handle, rows) {
-  const digests = digestConversations(rows, handle);
-  const total = rows.length;
-  const addressee = handle ? ` for @${handle}` : "";
-  return [
-    `While you were working, ${total} AgentChat message${total === 1 ? "" : "s"} arrived${addressee}:`,
-    "",
-    ...digestLines(digests),
-    "",
-    "Handle these per your AgentChat skill, then finish. Reply via agentchat_send_message only where warranted \u2014 if nothing is actionable, simply end the turn (silence is a valid outcome)."
-  ].join("\n");
-}
-function formatAlwaysOnDown(copy) {
-  return `\u26A0 Always-on is down \u2014 while you are away I won\u2019t be able to answer messages (they queue for your next session, nothing is lost). Turn it back on: \`${copy.invoke} daemon install\``;
-}
-function formatRegistrationOffer(copy) {
-  const { invoke, label } = copy;
-  return [
-    `The AgentChat plugin is installed but this ${label} agent has no AgentChat identity yet.`,
-    "",
-    "AgentChat gives you (the agent) a handle other agents can DM. If the user would like that, offer to set it up \u2014 and FIRST ask whether they already have an AgentChat account (e.g. from another machine, or a Hermes / OpenClaw agent), so you sign them in instead of creating a duplicate:",
-    `This ${label} agent gets its OWN handle \u2014 separate from any other coding agent on this machine, which is exactly what lets them DM each other. Use an email not already tied to another agent.`,
-    "",
-    "NEW to AgentChat (most people):",
-    "  1. Ask for their email + a desired handle (3\u201330 chars, lowercase letters/digits/hyphens, must start with a letter).",
-    `  2. Run: ${invoke} register --email <email> --handle <handle>`,
-    `  3. A 6-digit code lands in their email; ask for it, then run: ${invoke} register --code <code>`,
-    "",
-    "ALREADY have an AgentChat agent \u2014 sign in, do NOT register a second one:",
-    `  \u2022 They have its API key (ac_\u2026):  ${invoke} login --api-key <ac_\u2026>`,
-    `  \u2022 They lost the key:  ${invoke} recover --email <email>, then relay the emailed 6-digit code: ${invoke} recover --code <code>`,
-    "",
-    `Then, either way, turn on always-on so you stay reachable when they're away: ${invoke} daemon install (on by default; they can say "go session-only" any time \u2192 ${invoke} daemon disable).`,
-    "",
-    "Do not push the offer \u2014 one short ask is plenty. If declined, drop the topic for the rest of the session."
-  ].join("\n");
-}
-var ANCHOR_START = "<!-- agentchat:start -->";
-var ANCHOR_END = "<!-- agentchat:end -->";
-var LEGACY_ANCHOR_START = "<!-- agentchat-skill:start -->";
-var LEGACY_ANCHOR_END = "<!-- agentchat-skill:end -->";
-function renderAnchorBlock(handle) {
-  return [
-    ANCHOR_START,
-    "## On AgentChat",
-    "",
-    `You are **@${handle}** on AgentChat \u2014 a peer-to-peer messaging network for AI agents. Your handle is your address here, like a phone number, except the other end is always another agent.`,
-    "",
-    "- Other agents can DM you. You can DM them \u2014 any time, for anything that fits your context.",
-    `- Share \`@${handle}\` freely. Whenever and wherever you think you should share. It's how peers reach you.`,
-    "- When you need to send, search, or handle an error, your AgentChat skill has the full reference.",
-    "",
-    "This is an identity, not a tool you reach for occasionally.",
-    ANCHOR_END
-  ].join("\n");
-}
-function writeAnchor(filePath, block, expectHandle) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const existing = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8") : "";
-  fs.writeFileSync(filePath, upsertAnchorBlock(existing, block), "utf-8");
-  if (expectHandle !== void 0) {
-    const verify = fs.readFileSync(filePath, "utf-8");
-    if (!verify.includes(`@${expectHandle}`)) {
-      throw new Error(
-        `writeAnchor: handle @${expectHandle} did not land in ${filePath} \u2014 remove the agentchat block manually and re-run.`
-      );
-    }
-  }
-  return "written";
-}
-function removeAnchorAt(filePath) {
-  if (!fs.existsSync(filePath)) return "noop";
-  const existing = fs.readFileSync(filePath, "utf-8");
-  const next = stripAnchorBlock(existing);
-  if (next === existing) return "noop";
-  fs.writeFileSync(filePath, next, "utf-8");
-  return "removed";
-}
-function hasAnchorAt(filePath) {
-  if (!fs.existsSync(filePath)) return false;
-  return findBlock(fs.readFileSync(filePath, "utf-8"), ANCHOR_START, ANCHOR_END) !== null;
-}
-function readAnchorHandleAt(filePath) {
-  if (!fs.existsSync(filePath)) return null;
-  return readAnchorHandleFrom(fs.readFileSync(filePath, "utf-8"));
-}
-function readAnchorHandleFrom(text) {
-  const block = findBlock(text, ANCHOR_START, ANCHOR_END);
-  if (block === null) return null;
-  const match = /\*\*@([^*\s]+)\*\*/.exec(text.slice(block.from, block.to));
-  return match?.[1] ?? null;
-}
-function lineAnchoredIndex(text, marker, fromIndex = 0) {
-  let idx = text.indexOf(marker, fromIndex);
-  while (idx >= 0) {
-    const lineStart = text.lastIndexOf("\n", idx - 1) + 1;
-    const lineEndRaw = text.indexOf("\n", idx);
-    const lineEnd = lineEndRaw === -1 ? text.length : lineEndRaw;
-    if (text.slice(lineStart, lineEnd).trim() === marker) {
-      return { start: lineStart, end: lineEnd };
-    }
-    idx = text.indexOf(marker, idx + marker.length);
-  }
-  return null;
-}
-function findBlock(text, startMarker, endMarker) {
-  const start = lineAnchoredIndex(text, startMarker);
-  if (start === null) return null;
-  const end = lineAnchoredIndex(text, endMarker, start.end);
-  if (end === null) return null;
-  return { from: start.start, to: end.end };
-}
-function upsertAnchorBlock(existing, block) {
-  const cleaned = stripAnchorBlock(existing);
-  const trimmed = cleaned.replace(/\n+$/, "");
-  if (trimmed.length === 0) return block + "\n";
-  return trimmed + "\n\n" + block + "\n";
-}
-function stripAnchorBlock(existing) {
-  const afterUnified = stripAllBlocks(existing, ANCHOR_START, ANCHOR_END);
-  return stripAllBlocks(afterUnified, LEGACY_ANCHOR_START, LEGACY_ANCHOR_END);
-}
-function stripAllBlocks(existing, start, end) {
-  let text = existing;
-  for (let i = 0; i < 1e4; i++) {
-    const block = findBlock(text, start, end);
-    if (block === null) return text;
-    const before = text.slice(0, block.from).replace(/\n+$/, "");
-    const after = text.slice(block.to).replace(/^\n+/, "");
-    if (before.length === 0 && after.length === 0) return "";
-    if (before.length === 0) text = after.endsWith("\n") ? after : after + "\n";
-    else if (after.length === 0) text = before + "\n";
-    else text = before + "\n\n" + after + (after.endsWith("\n") ? "" : "\n");
-  }
-  return text;
-}
-var SESSION_START_PEEK_LIMIT = 100;
-var STOP_PEEK_LIMIT = 50;
-var DEFAULT_MAX_CONTINUATIONS = 5;
-function hooksDisabled() {
-  return process.env["AGENTCHAT_HOOKS_ENABLED"] === "0";
-}
-function maxContinuations() {
-  const raw = process.env["AGENTCHAT_HOOK_MAX_CONTINUATIONS"];
-  if (raw === void 0) return DEFAULT_MAX_CONTINUATIONS;
-  const n = Number.parseInt(raw, 10);
-  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_MAX_CONTINUATIONS;
-}
-async function resolveHandle(cfg, cachedHandle) {
-  if (cachedHandle) return cachedHandle;
-  const me = await getMeLite(cfg);
-  return me?.handle ?? null;
-}
-function ackableRows(rows) {
-  const usable = rows.filter((r) => typeof r.delivery_id === "string" && r.delivery_id.length > 0);
-  if (usable.length < rows.length) {
-    log.warn(`${rows.length - usable.length} sync row(s) without delivery_id excluded from digest`);
-  }
-  return usable;
-}
-async function claimContiguousPrefix(cfg, rows, holder) {
-  const won = await Promise.all(rows.map((r) => claimReply(cfg, r.id, holder)));
-  const prefix = [];
-  for (let i = 0; i < rows.length; i++) {
-    if (!won[i]) break;
-    prefix.push(rows[i]);
-  }
-  if (prefix.length < rows.length) {
-    log.info(
-      `coexistence: daemon owns ${rows.length - prefix.length} row(s); surfacing ${prefix.length}`
-    );
-  }
-  return prefix;
-}
-async function sessionStart(ctx2, input) {
-  const none = { context: null };
-  try {
-    if (hooksDisabled()) return none;
-    if (input.source === "compact") return none;
-    resetSession(ctx2.home, input.sessionId);
-    const identity = resolveIdentity(ctx2.home);
-    if (identity === null) {
-      if (shouldOfferRegistration(ctx2.home)) {
-        recordRegistrationOffer(ctx2.home);
-        return { context: formatRegistrationOffer(ctx2.copy) };
-      }
-      return none;
-    }
-    const cfg = { apiKey: identity.apiKey, apiBase: identity.apiBase };
-    await markSessionActive(cfg);
-    const h = alwaysOnHealth(ctx2.home);
-    const alert = h.wanted && !h.healthy ? formatAlwaysOnDown(ctx2.copy) : null;
-    const peeked = ackableRows(await syncPeek(cfg, { limit: SESSION_START_PEEK_LIMIT }));
-    const rows = peeked.length > 0 ? await claimContiguousPrefix(cfg, peeked, `session:${input.sessionId}`) : [];
-    if (rows.length === 0) return { context: alert };
-    const handle = await resolveHandle(cfg, identity.handle);
-    const digest = formatSessionStart(handle, rows);
-    const context = alert !== null ? `${alert}
+import * as readline from "readline";
 
-${digest}` : digest;
-    const cursor = lastDeliveryId(rows);
-    if (cursor !== null) setPendingAck(ctx2.home, input.sessionId, cursor);
-    return { context };
-  } catch (err) {
-    log.warn(`session-start hook degraded to no-op: ${String(err)}`);
-    return none;
-  }
-}
-async function userPrompt(ctx2, input) {
-  try {
-    if (hooksDisabled()) return;
-    const identity = resolveIdentity(ctx2.home);
-    if (identity === null) return;
-    const cursor = takePendingAck(ctx2.home, input.sessionId);
-    if (cursor === null) return;
-    const cfg = { apiKey: identity.apiKey, apiBase: identity.apiBase };
-    try {
-      await syncAck(cfg, cursor);
-    } catch (err) {
-      setPendingAck(ctx2.home, input.sessionId, cursor);
-      log.warn(`user-prompt ack failed (will retry next prompt): ${String(err)}`);
-    }
-  } catch (err) {
-    log.warn(`user-prompt hook degraded to no-op: ${String(err)}`);
-  }
-}
-async function stop(ctx2, input) {
-  const none = { reason: null, commit: async () => {
-  } };
-  try {
-    if (hooksDisabled()) return none;
-    const identity = resolveIdentity(ctx2.home);
-    if (identity === null) return none;
-    const cfg = { apiKey: identity.apiKey, apiBase: identity.apiBase };
-    await markSessionActive(cfg);
-    const cap = maxContinuations();
-    if (getContinuations(ctx2.home, input.sessionId) >= cap) {
-      log.info(
-        `stop hook: continuation cap (${cap}) reached for ${input.sessionId}; leaving inbox queued`
-      );
-      return none;
-    }
-    const peeked = ackableRows(await syncPeek(cfg, { limit: STOP_PEEK_LIMIT }));
-    if (peeked.length === 0) return none;
-    const rows = await claimContiguousPrefix(cfg, peeked, `session:${input.sessionId}`);
-    if (rows.length === 0) return none;
-    recordContinuation(ctx2.home, input.sessionId);
-    const handle = await resolveHandle(cfg, identity.handle);
-    const reason = formatStopPickup(handle, rows);
-    const cursor = lastDeliveryId(rows);
-    return {
-      reason,
-      commit: async () => {
-        if (cursor === null) return;
-        try {
-          await syncAck(cfg, cursor);
-        } catch (err) {
-          log.warn(`stop ack failed (messages stay queued): ${String(err)}`);
-        }
-      }
-    };
-  } catch (err) {
-    log.warn(`stop hook degraded to no-op: ${String(err)}`);
-    return none;
-  }
-}
-async function readHookInput(stream = process.stdin) {
-  let raw = "";
-  if (!stream.isTTY) {
-    try {
-      const chunks = [];
-      for await (const chunk of stream) {
-        chunks.push(Buffer.from(chunk));
-        if (Buffer.concat(chunks).length > 1e6) break;
-      }
-      raw = Buffer.concat(chunks).toString("utf-8");
-    } catch {
-      raw = "";
-    }
-  }
-  let parsed = {};
-  if (raw.trim().length > 0) {
-    try {
-      const value = JSON.parse(raw);
-      if (value && typeof value === "object" && !Array.isArray(value)) {
-        parsed = value;
-      }
-    } catch {
-      log.debug("hook stdin was not valid JSON; proceeding with defaults");
-    }
-  }
-  const sessionId = firstString(parsed, ["session_id", "sessionId", "thread_id", "conversation_id"]) ?? "unknown";
-  const source = firstString(parsed, ["source"]) ?? void 0;
-  return { sessionId, source };
-}
-function firstString(obj, keys) {
-  for (const key of keys) {
-    const value = obj[key];
-    if (typeof value === "string" && value.trim().length > 0) return value.trim();
-  }
-  return null;
-}
-function plan(opts) {
-  const env = {};
-  if (process.env["PATH"]) env["PATH"] = process.env["PATH"];
-  for (const [k, v] of Object.entries(opts.env ?? {})) {
-    if (typeof v === "string" && v.length > 0) env[k] = v;
-  }
-  return {
-    label: opts.label,
-    node: process.execPath,
-    bin: path22.resolve(opts.entry),
-    home: path22.resolve(opts.home),
-    env
-  };
-}
-function run(cmd, args) {
-  const r = spawnSync(cmd, args, { encoding: "utf-8" });
-  return { ok: !r.error && r.status === 0, out: `${r.stdout ?? ""}${r.stderr ?? ""}`.trim() };
-}
-function systemdUnitPath(label) {
-  return path22.join(os.homedir(), ".config", "systemd", "user", `${label}.service`);
-}
-function systemdUnit(p) {
-  const envLines = Object.entries(p.env).map(([k, v]) => `Environment=${k}=${v}`).join("\n");
-  return [
-    "[Unit]",
-    `Description=AgentChat always-on daemon (${p.label})`,
-    "After=network-online.target",
-    "Wants=network-online.target",
-    "",
-    "[Service]",
-    "Type=simple",
-    `ExecStart=${p.node} ${p.bin} --home ${p.home}`,
-    ...envLines ? [envLines] : [],
-    "Restart=on-failure",
-    "RestartSec=5",
-    "",
-    "[Install]",
-    "WantedBy=default.target",
-    ""
-  ].join("\n");
-}
-function installSystemd(p) {
-  const unitPath = systemdUnitPath(p.label);
-  fs22.mkdirSync(path22.dirname(unitPath), { recursive: true });
-  fs22.writeFileSync(unitPath, systemdUnit(p));
-  log.info(`wrote ${unitPath}`);
-  run("systemctl", ["--user", "daemon-reload"]);
-  const linger = run("loginctl", ["enable-linger", os.userInfo().username]);
-  if (!linger.ok) {
-    log.warn(`could not enable-linger (service won't survive logout until you run: sudo loginctl enable-linger ${os.userInfo().username})`);
-  }
-  const enabled = run("systemctl", ["--user", "enable", "--now", p.label]);
-  if (!enabled.ok) throw new Error(`systemctl enable failed: ${enabled.out}`);
-  log.info(`service ${p.label} enabled + started`);
-}
-function uninstallSystemd(label) {
-  run("systemctl", ["--user", "disable", "--now", label]);
-  const unitPath = systemdUnitPath(label);
-  if (fs22.existsSync(unitPath)) fs22.rmSync(unitPath);
-  run("systemctl", ["--user", "daemon-reload"]);
-  log.info(`service ${label} removed`);
-}
-function statusSystemd(label) {
-  const active = run("systemctl", ["--user", "is-active", label]).out || "unknown";
-  const enabled = run("systemctl", ["--user", "is-enabled", label]).out || "unknown";
-  return `systemd ${label}: ${active} (${enabled})`;
-}
-function launchdPlistPath(label) {
-  return path22.join(os.homedir(), "Library", "LaunchAgents", `${launchdLabel(label)}.plist`);
-}
-var launchdLabel = (label) => `me.agentchat.${label}`;
-function launchdPlist(p) {
-  const args = [p.node, p.bin, "--home", p.home];
-  const argXml = args.map((a) => `    <string>${a}</string>`).join("\n");
-  const envXml = Object.entries(p.env).map(([k, v]) => `    <key>${k}</key><string>${v}</string>`).join("\n");
-  const logPath = path22.join(p.home, "daemon.log");
-  return [
-    '<?xml version="1.0" encoding="UTF-8"?>',
-    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
-    '<plist version="1.0"><dict>',
-    `  <key>Label</key><string>${launchdLabel(p.label)}</string>`,
-    "  <key>ProgramArguments</key><array>",
-    argXml,
-    "  </array>",
-    ...envXml ? ["  <key>EnvironmentVariables</key><dict>", envXml, "  </dict>"] : [],
-    "  <key>RunAtLoad</key><true/>",
-    "  <key>KeepAlive</key><true/>",
-    `  <key>StandardErrorPath</key><string>${logPath}</string>`,
-    `  <key>StandardOutPath</key><string>${logPath}</string>`,
-    "</dict></plist>",
-    ""
-  ].join("\n");
-}
-function installLaunchd(p) {
-  const plistPath = launchdPlistPath(p.label);
-  fs22.mkdirSync(path22.dirname(plistPath), { recursive: true });
-  fs22.writeFileSync(plistPath, launchdPlist(p));
-  log.info(`wrote ${plistPath}`);
-  run("launchctl", ["unload", plistPath]);
-  const loaded = run("launchctl", ["load", "-w", plistPath]);
-  if (!loaded.ok) throw new Error(`launchctl load failed: ${loaded.out}`);
-  log.info(`service ${launchdLabel(p.label)} loaded + started`);
-}
-function uninstallLaunchd(label) {
-  const plistPath = launchdPlistPath(label);
-  run("launchctl", ["unload", "-w", plistPath]);
-  if (fs22.existsSync(plistPath)) fs22.rmSync(plistPath);
-  log.info(`service ${launchdLabel(label)} removed`);
-}
-function statusLaunchd(label) {
-  const r = run("launchctl", ["list", launchdLabel(label)]);
-  return `launchd ${launchdLabel(label)}: ${r.ok ? "loaded" : "not loaded"}`;
-}
-function isWslFromVersion(version) {
-  return /microsoft|wsl/i.test(version);
-}
-function isWsl() {
-  if (process.platform !== "linux") return false;
-  try {
-    return isWslFromVersion(fs22.readFileSync("/proc/version", "utf-8"));
-  } catch {
-    return false;
-  }
-}
-function winMode() {
-  if (process.platform === "win32") return "win32";
-  if (isWsl()) return "wsl";
-  return null;
-}
-function winMasterDir() {
-  return path22.join(os.homedir(), ".agentchat", "daemon");
-}
-function winStartupDir(mode) {
-  if (mode === "win32") {
-    return path22.join(os.homedir(), "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
-  }
-  const appdata = run("cmd.exe", ["/c", "echo %APPDATA%"]).out.split(/\r?\n/).pop()?.trim() ?? "";
-  const base = run("wslpath", ["-u", appdata]).out.trim();
-  if (!base) throw new Error("could not locate the Windows Startup folder from WSL (is /mnt/c mounted?)");
-  return path22.join(base, "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
-}
-var vbsEscape = (s) => s.replace(/"/g, '""');
-var shQuote = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
-function launcherVbs(command, env) {
-  const envLines = Object.entries(env).map(
-    ([k, v]) => `sh.Environment("Process").Item("${k}") = "${vbsEscape(v)}"`
-  );
-  return [
-    "' AgentChat always-on launcher \u2014 runs hidden, restarts on exit.",
-    'Set sh = CreateObject("WScript.Shell")',
-    ...envLines,
-    "Do",
-    `  sh.Run "${vbsEscape(command)}", 0, True`,
-    "  WScript.Sleep 5000",
-    "Loop"
-  ].join("\r\n") + "\r\n";
-}
-function winCommandNative(p) {
-  return `"${p.node}" "${p.bin}" --home "${p.home}"`;
-}
-function wslScriptContent(p) {
-  const exports = Object.entries(p.env).map(([k, v]) => `export ${k}=${shQuote(v)}`);
-  return ["#!/bin/bash", ...exports, `exec ${shQuote(p.node)} ${shQuote(p.bin)} --home ${shQuote(p.home)}`].join(
-    "\n"
-  ) + "\n";
-}
-function startDetached(cmd, args) {
-  if (process.env["AGENTCHATD_SERVICE_NO_START"] === "1") return;
-  try {
-    spawn(cmd, args, { detached: true, stdio: "ignore", windowsHide: true }).unref();
-  } catch (err) {
-    log.warn(`could not start the launcher now (it starts at next login): ${String(err)}`);
-  }
-}
-function winPathFromWsl(linuxPath) {
-  return run("wslpath", ["-w", linuxPath]).out.trim() || linuxPath;
-}
-function killLauncher(label, mode) {
-  const ps = `Get-CimInstance Win32_Process -Filter "Name='wscript.exe'" | Where-Object { $_.CommandLine -like '*${label}.vbs*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`;
-  run(mode === "win32" ? "powershell" : "powershell.exe", ["-NoProfile", "-Command", ps]);
-}
-function installWindows(p, mode) {
-  const master = winMasterDir();
-  fs22.mkdirSync(master, { recursive: true });
-  const masterVbs = path22.join(master, `${p.label}.vbs`);
-  if (mode === "win32") {
-    fs22.writeFileSync(masterVbs, launcherVbs(winCommandNative(p), p.env));
-  } else {
-    const scriptPath = path22.join(master, `${p.label}.sh`);
-    fs22.writeFileSync(scriptPath, wslScriptContent(p), { mode: 493 });
-    const distro = process.env["WSL_DISTRO_NAME"] ?? "";
-    if (!distro) throw new Error("WSL_DISTRO_NAME is not set \u2014 cannot target the right WSL distro");
-    fs22.writeFileSync(masterVbs, launcherVbs(`wsl.exe -d ${distro} -e bash "${scriptPath}"`, {}));
-  }
-  log.info(`wrote ${masterVbs}`);
-  enableWindows(p.label, mode);
-  log.info(`service ${p.label} installed (starts at login)`);
-}
-function enableWindows(label, mode) {
-  const masterVbs = path22.join(winMasterDir(), `${label}.vbs`);
-  if (!fs22.existsSync(masterVbs)) throw new Error(`no ${label} daemon installed \u2014 run install first`);
-  const startup = winStartupDir(mode);
-  fs22.mkdirSync(startup, { recursive: true });
-  const startupVbs = path22.join(startup, `${label}.vbs`);
-  fs22.copyFileSync(masterVbs, startupVbs);
-  if (mode === "win32") startDetached("wscript.exe", [startupVbs]);
-  else startDetached("cmd.exe", ["/c", "start", "", "/b", "wscript.exe", winPathFromWsl(startupVbs)]);
-}
-function disableWindows(label, mode) {
-  const startupVbs = path22.join(winStartupDir(mode), `${label}.vbs`);
-  if (fs22.existsSync(startupVbs)) fs22.rmSync(startupVbs);
-  killLauncher(label, mode);
-}
-function uninstallWindows(label, mode) {
-  try {
-    disableWindows(label, mode);
-  } catch {
-  }
-  for (const f of [`${label}.vbs`, `${label}.sh`]) {
-    const m = path22.join(winMasterDir(), f);
-    if (fs22.existsSync(m)) fs22.rmSync(m);
-  }
-}
-function statusWindows(label, mode) {
-  const installed = fs22.existsSync(path22.join(winMasterDir(), `${label}.vbs`));
-  let enabled = false;
-  try {
-    enabled = fs22.existsSync(path22.join(winStartupDir(mode), `${label}.vbs`));
-  } catch {
-  }
-  const host = mode === "wsl" ? "wsl" : "windows";
-  return `${host} ${label}: ${installed ? enabled ? "enabled" : "installed (disabled)" : "not installed"}`;
-}
-function installService(opts) {
-  const p = plan(opts);
-  if (!p.bin) throw new Error("no daemon entrypoint given (ServiceOpts.entry)");
-  const wm = winMode();
-  if (wm) return installWindows(p, wm);
-  if (process.platform === "linux") return installSystemd(p);
-  if (process.platform === "darwin") return installLaunchd(p);
-  throw new Error(`service install is not supported on ${process.platform} \u2014 run \`agentchatd start\` under your own supervisor`);
-}
-function uninstallService(opts) {
-  const label = opts.label;
-  const wm = winMode();
-  if (wm) return uninstallWindows(label, wm);
-  if (process.platform === "linux") return uninstallSystemd(label);
-  if (process.platform === "darwin") return uninstallLaunchd(label);
-  throw new Error(`service uninstall is not supported on ${process.platform}`);
-}
-function serviceStatus(opts) {
-  const label = opts.label;
-  const wm = winMode();
-  if (wm) return statusWindows(label, wm);
-  if (process.platform === "linux") return statusSystemd(label);
-  if (process.platform === "darwin") return statusLaunchd(label);
-  return `service management not supported on ${process.platform}`;
-}
-
-// src/host.ts
-import * as os2 from "os";
-import * as path5 from "path";
-function claudeHome() {
-  return path5.join(os2.homedir(), ".claude");
-}
-function identityHome() {
-  return path5.join(claudeHome(), "agentchat");
-}
-function anchorFile() {
-  return path5.join(claudeHome(), "CLAUDE.md");
-}
-var LABEL = "Claude Code";
-var SERVICE_LABEL = "agentchatd-claude-code";
-function shippedDaemonPath() {
-  const self = process.argv[1];
-  const dir = self ? path5.dirname(self) : process.cwd();
-  return path5.join(dir, DAEMON_FILENAME);
-}
-function stableDaemonPath() {
-  return path5.join(identityHome(), "bin", DAEMON_FILENAME);
-}
-var DAEMON_FILENAME = "agentchat-daemon.mjs";
-function invocation() {
-  const override = process.env["AGENTCHAT_CLI_NAME"]?.trim();
-  if (override !== void 0 && override.length > 0) return override;
-  const self = process.argv[1];
-  return self ? `node "${self}"` : "agentchat-claude-code";
-}
-function hostCopy() {
-  return { invoke: invocation(), label: LABEL };
-}
-function serviceEnv() {
-  return {};
-}
-
-// src/identity.ts
-import * as readline from "readline/promises";
-
-// node_modules/.pnpm/agentchatme@1.0.22/node_modules/agentchatme/dist/index.js
+// @agentchatme/agent-core/node_modules/.pnpm/agentchatme@1.0.22_ws@8.21.1/node_modules/agentchatme/dist/index.js
 var ErrorCode = {
   AGENT_NOT_FOUND: "AGENT_NOT_FOUND",
   AGENT_SUSPENDED: "AGENT_SUSPENDED",
@@ -6370,13 +5597,528 @@ var AgentChatClient = class _AgentChatClient {
     );
   }
 };
+var SEC = 1e3;
+var MIN = 60 * SEC;
+var HOUR = 60 * MIN;
+var DAY = 24 * HOUR;
+var MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024;
+
+// @agentchatme/agent-core/dist/index.js
+import * as fs22 from "fs";
+import * as os from "os";
+import * as path22 from "path";
+import { spawnSync, spawn } from "child_process";
+var SESSION_TTL_MS = 48 * 60 * 60 * 1e3;
+var SessionStateSchema = external_exports.object({
+  continuations: external_exports.number().int().min(0),
+  updated_at: external_exports.string(),
+  // Ack cursor for the batch the session-start hook injected but has NOT
+  // yet committed. Committed by the user-prompt hook — proof the session
+  // actually ran a turn. A session that dies before its first prompt
+  // (arg-error invocations, crashed startups) leaves this uncommitted and
+  // the batch re-digests next session instead of being consumed by a
+  // ghost. Live-fire lesson, 2026-07-12.
+  pending_ack: external_exports.string().optional()
+});
+var StateSchema = external_exports.object({
+  sessions: external_exports.record(SessionStateSchema).default({}),
+  // Machine-wide timestamp of the last registration offer injected by the
+  // session-start hook. Keeps the unregistered-plugin nag to once a day
+  // instead of once per session.
+  last_offer_at: external_exports.string().optional()
+});
+function readState(home) {
+  const raw = readJsonFile(statePath(home));
+  if (raw !== null) {
+    const parsed = StateSchema.safeParse(raw);
+    if (parsed.success) return parsed.data;
+  }
+  return { sessions: {} };
+}
+function writeState(home, state) {
+  atomicWriteFile(statePath(home), JSON.stringify(state, null, 2) + "\n", 384);
+}
+function prune(state, now2) {
+  const cutoff = now2.getTime() - SESSION_TTL_MS;
+  for (const [key, entry] of Object.entries(state.sessions)) {
+    const t = Date.parse(entry.updated_at);
+    if (Number.isNaN(t) || t < cutoff) {
+      delete state.sessions[key];
+    }
+  }
+}
+function getContinuations(home, sessionKey) {
+  return readState(home).sessions[sessionKey]?.continuations ?? 0;
+}
+function recordContinuation(home, sessionKey, now2 = /* @__PURE__ */ new Date()) {
+  const state = readState(home);
+  prune(state, now2);
+  const current = state.sessions[sessionKey]?.continuations ?? 0;
+  const next = current + 1;
+  state.sessions[sessionKey] = { continuations: next, updated_at: now2.toISOString() };
+  writeState(home, state);
+  return next;
+}
+function resetSession(home, sessionKey) {
+  const state = readState(home);
+  if (state.sessions[sessionKey] === void 0) return;
+  delete state.sessions[sessionKey];
+  writeState(home, state);
+}
+function setPendingAck(home, sessionKey, cursor, now2 = /* @__PURE__ */ new Date()) {
+  const state = readState(home);
+  prune(state, now2);
+  const existing = state.sessions[sessionKey];
+  state.sessions[sessionKey] = {
+    continuations: existing?.continuations ?? 0,
+    updated_at: now2.toISOString(),
+    pending_ack: cursor
+  };
+  writeState(home, state);
+}
+function takePendingAck(home, sessionKey, now2 = /* @__PURE__ */ new Date()) {
+  const state = readState(home);
+  const entry = state.sessions[sessionKey];
+  if (entry?.pending_ack === void 0) return null;
+  const cursor = entry.pending_ack;
+  delete entry.pending_ack;
+  entry.updated_at = now2.toISOString();
+  writeState(home, state);
+  return cursor;
+}
+var OFFER_COOLDOWN_MS = 24 * 60 * 60 * 1e3;
+function shouldOfferRegistration(home, now2 = /* @__PURE__ */ new Date()) {
+  const last = readState(home).last_offer_at;
+  if (last === void 0) return true;
+  const t = Date.parse(last);
+  return Number.isNaN(t) || now2.getTime() - t >= OFFER_COOLDOWN_MS;
+}
+function recordRegistrationOffer(home, now2 = /* @__PURE__ */ new Date()) {
+  const state = readState(home);
+  state.last_offer_at = now2.toISOString();
+  writeState(home, state);
+}
 var SEC2 = 1e3;
 var MIN2 = 60 * SEC2;
 var HOUR2 = 60 * MIN2;
 var DAY2 = 24 * HOUR2;
-var MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024;
+function relativeAge(ms) {
+  if (ms < 45 * SEC2) return "just now";
+  if (ms < 90 * SEC2) return "1 minute ago";
+  if (ms < 45 * MIN2) return `${Math.round(ms / MIN2)} minutes ago`;
+  if (ms < 90 * MIN2) return "1 hour ago";
+  if (ms < 22 * HOUR2) return `${Math.round(ms / HOUR2)} hours ago`;
+  if (ms < 36 * HOUR2) return "1 day ago";
+  return `${Math.round(ms / DAY2)} days ago`;
+}
+function relativeWhen(createdAt, now2 = Date.now()) {
+  if (!createdAt) return "";
+  const t = Date.parse(createdAt);
+  if (Number.isNaN(t)) return "";
+  return relativeAge(Math.max(0, now2 - t));
+}
+var SNIPPET_MAX = 140;
+function snippetOf(row) {
+  const content = row.content ?? {};
+  const text = typeof content["text"] === "string" ? content["text"] : "";
+  if (text.length === 0) return `[${row.type ?? "message"}]`;
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  return oneLine.length > SNIPPET_MAX ? `${oneLine.slice(0, SNIPPET_MAX - 1)}\u2026` : oneLine;
+}
+function digestConversations(rows, selfHandle = null) {
+  const self = selfHandle?.replace(/^@/, "").toLowerCase() ?? null;
+  const byConversation = /* @__PURE__ */ new Map();
+  for (const row of rows) {
+    const sender = row.sender ?? row.sender_handle ?? "unknown";
+    const ctx = contextOf(row);
+    const mentionsSelf = self !== null && ctx.mentions.includes(self);
+    const existing = byConversation.get(row.conversation_id);
+    if (existing) {
+      existing.count += 1;
+      if (!existing.senders.includes(sender)) existing.senders.push(sender);
+      existing.latestSnippet = snippetOf(row);
+      existing.latestCreatedAt = row.created_at ?? existing.latestCreatedAt;
+      existing.groupName = ctx.groupName ?? existing.groupName;
+      existing.mentionsYou = existing.mentionsYou || mentionsSelf;
+    } else {
+      byConversation.set(row.conversation_id, {
+        conversationId: row.conversation_id,
+        isGroup: row.conversation_id.startsWith("grp_"),
+        senders: [sender],
+        count: 1,
+        latestSnippet: snippetOf(row),
+        latestCreatedAt: row.created_at,
+        groupName: ctx.groupName,
+        mentionsYou: mentionsSelf
+      });
+    }
+  }
+  return [...byConversation.values()];
+}
+function digestLines(digests) {
+  return digests.map((d, i) => {
+    const who = d.senders.map((s) => `@${s}`).join(", ");
+    const kind = d.isGroup ? d.groupName ? `group "${d.groupName}"` : `group ${d.conversationId}` : d.conversationId;
+    const count = d.count === 1 ? "1 message" : `${d.count} messages`;
+    const age = relativeWhen(d.latestCreatedAt);
+    const recency = age ? `, latest ${age}` : "";
+    const mention = d.mentionsYou ? " \u2014 mentions you" : "";
+    return `${i + 1}. ${who} (${count}, ${kind}${recency}${mention}): "${d.latestSnippet}"`;
+  });
+}
+function formatSessionStart(handle, rows) {
+  const digests = digestConversations(rows, handle);
+  const total = rows.length;
+  const identity = handle ? `You are @${handle} on AgentChat. ` : "AgentChat: ";
+  const header = identity + `${total} unread message${total === 1 ? "" : "s"} in ${digests.length} conversation${digests.length === 1 ? "" : "s"}:`;
+  return [
+    header,
+    "",
+    ...digestLines(digests),
+    "",
+    "Triage per your AgentChat skill: read a conversation with agentchat_get_conversation before replying; reply only where an open request is addressed to you; finished conversations get silence, not acknowledgments. Mention anything the user should know about."
+  ].join("\n");
+}
+function formatStopPickup(handle, rows) {
+  const digests = digestConversations(rows, handle);
+  const total = rows.length;
+  const addressee = handle ? ` for @${handle}` : "";
+  return [
+    `While you were working, ${total} AgentChat message${total === 1 ? "" : "s"} arrived${addressee}:`,
+    "",
+    ...digestLines(digests),
+    "",
+    "Handle these per your AgentChat skill, then finish. Reply via agentchat_send_message only where warranted \u2014 if nothing is actionable, simply end the turn (silence is a valid outcome)."
+  ].join("\n");
+}
+function formatAlwaysOnDown(copy) {
+  return `\u26A0 Always-on is down \u2014 while you are away I won\u2019t be able to answer messages (they queue for your next session, nothing is lost). Turn it back on: \`${copy.invoke} daemon install\``;
+}
+function formatRegistrationOffer(copy) {
+  const { invoke, label } = copy;
+  return [
+    `The AgentChat plugin is installed but this ${label} agent has no AgentChat identity yet.`,
+    "",
+    "AgentChat gives you (the agent) a handle other agents can DM. If the user would like that, offer to set it up \u2014 and FIRST ask whether they already have an AgentChat account (e.g. from another machine, or a Hermes / OpenClaw agent), so you sign them in instead of creating a duplicate:",
+    `This ${label} agent gets its OWN handle \u2014 separate from any other coding agent on this machine, which is exactly what lets them DM each other. Use an email not already tied to another agent.`,
+    "",
+    "NEW to AgentChat (most people):",
+    "  1. Ask for their email + a desired handle (3\u201330 chars, lowercase letters/digits/hyphens, must start with a letter).",
+    `  2. Run: ${invoke} register --email <email> --handle <handle>`,
+    `  3. A 6-digit code lands in their email; ask for it, then run: ${invoke} register --code <code>`,
+    "",
+    "ALREADY have an AgentChat agent \u2014 sign in, do NOT register a second one:",
+    `  \u2022 They have its API key (ac_\u2026):  ${invoke} login --api-key <ac_\u2026>`,
+    `  \u2022 They lost the key:  ${invoke} recover --email <email>, then relay the emailed 6-digit code: ${invoke} recover --code <code>`,
+    "",
+    `Then, either way, turn on always-on so you stay reachable when they're away: ${invoke} daemon install (on by default; they can say "go session-only" any time \u2192 ${invoke} daemon disable).`,
+    "",
+    "Do not push the offer \u2014 one short ask is plenty. If declined, drop the topic for the rest of the session."
+  ].join("\n");
+}
+var ANCHOR_START = "<!-- agentchat:start -->";
+var ANCHOR_END = "<!-- agentchat:end -->";
+var LEGACY_ANCHOR_START = "<!-- agentchat-skill:start -->";
+var LEGACY_ANCHOR_END = "<!-- agentchat-skill:end -->";
+function renderAnchorBlock(handle) {
+  return [
+    ANCHOR_START,
+    "## On AgentChat",
+    "",
+    `You are **@${handle}** on AgentChat \u2014 a peer-to-peer messaging network for AI agents. Your handle is your address here, like a phone number, except the other end is always another agent.`,
+    "",
+    "- Other agents can DM you. You can DM them \u2014 any time, for anything that fits your context.",
+    `- Share \`@${handle}\` freely. Whenever and wherever you think you should share. It's how peers reach you.`,
+    "- When you need to send, search, or handle an error, your AgentChat skill has the full reference.",
+    "",
+    "This is an identity, not a tool you reach for occasionally.",
+    ANCHOR_END
+  ].join("\n");
+}
+function writeAnchor(filePath, block, expectHandle) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const existing = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8") : "";
+  fs.writeFileSync(filePath, upsertAnchorBlock(existing, block), "utf-8");
+  if (expectHandle !== void 0) {
+    const verify = fs.readFileSync(filePath, "utf-8");
+    if (!verify.includes(`@${expectHandle}`)) {
+      throw new Error(
+        `writeAnchor: handle @${expectHandle} did not land in ${filePath} \u2014 remove the agentchat block manually and re-run.`
+      );
+    }
+  }
+  return "written";
+}
+function removeAnchorAt(filePath) {
+  if (!fs.existsSync(filePath)) return "noop";
+  const existing = fs.readFileSync(filePath, "utf-8");
+  const next = stripAnchorBlock(existing);
+  if (next === existing) return "noop";
+  fs.writeFileSync(filePath, next, "utf-8");
+  return "removed";
+}
+function hasAnchorAt(filePath) {
+  if (!fs.existsSync(filePath)) return false;
+  return findBlock(fs.readFileSync(filePath, "utf-8"), ANCHOR_START, ANCHOR_END) !== null;
+}
+function readAnchorHandleAt(filePath) {
+  if (!fs.existsSync(filePath)) return null;
+  return readAnchorHandleFrom(fs.readFileSync(filePath, "utf-8"));
+}
+function readAnchorHandleFrom(text) {
+  const block = findBlock(text, ANCHOR_START, ANCHOR_END);
+  if (block === null) return null;
+  const match = /\*\*@([^*\s]+)\*\*/.exec(text.slice(block.from, block.to));
+  return match?.[1] ?? null;
+}
+function lineAnchoredIndex(text, marker, fromIndex = 0) {
+  let idx = text.indexOf(marker, fromIndex);
+  while (idx >= 0) {
+    const lineStart = text.lastIndexOf("\n", idx - 1) + 1;
+    const lineEndRaw = text.indexOf("\n", idx);
+    const lineEnd = lineEndRaw === -1 ? text.length : lineEndRaw;
+    if (text.slice(lineStart, lineEnd).trim() === marker) {
+      return { start: lineStart, end: lineEnd };
+    }
+    idx = text.indexOf(marker, idx + marker.length);
+  }
+  return null;
+}
+function findBlock(text, startMarker, endMarker) {
+  const start = lineAnchoredIndex(text, startMarker);
+  if (start === null) return null;
+  const end = lineAnchoredIndex(text, endMarker, start.end);
+  if (end === null) return null;
+  return { from: start.start, to: end.end };
+}
+function upsertAnchorBlock(existing, block) {
+  const cleaned = stripAnchorBlock(existing);
+  const trimmed = cleaned.replace(/\n+$/, "");
+  if (trimmed.length === 0) return block + "\n";
+  return trimmed + "\n\n" + block + "\n";
+}
+function stripAnchorBlock(existing) {
+  const afterUnified = stripAllBlocks(existing, ANCHOR_START, ANCHOR_END);
+  return stripAllBlocks(afterUnified, LEGACY_ANCHOR_START, LEGACY_ANCHOR_END);
+}
+function stripAllBlocks(existing, start, end) {
+  let text = existing;
+  for (let i = 0; i < 1e4; i++) {
+    const block = findBlock(text, start, end);
+    if (block === null) return text;
+    const before = text.slice(0, block.from).replace(/\n+$/, "");
+    const after = text.slice(block.to).replace(/^\n+/, "");
+    if (before.length === 0 && after.length === 0) return "";
+    if (before.length === 0) text = after.endsWith("\n") ? after : after + "\n";
+    else if (after.length === 0) text = before + "\n";
+    else text = before + "\n\n" + after + (after.endsWith("\n") ? "" : "\n");
+  }
+  return text;
+}
+var SESSION_START_PEEK_LIMIT = 100;
+var STOP_PEEK_LIMIT = 50;
+var DEFAULT_MAX_CONTINUATIONS = 5;
+function hooksDisabled() {
+  return process.env["AGENTCHAT_HOOKS_ENABLED"] === "0";
+}
+function maxContinuations() {
+  const raw = process.env["AGENTCHAT_HOOK_MAX_CONTINUATIONS"];
+  if (raw === void 0) return DEFAULT_MAX_CONTINUATIONS;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_MAX_CONTINUATIONS;
+}
+async function resolveHandle(cfg, cachedHandle) {
+  if (cachedHandle) return cachedHandle;
+  const me = await getMeLite(cfg);
+  return me?.handle ?? null;
+}
+function ackableRows(rows) {
+  const usable = rows.filter((r) => typeof r.delivery_id === "string" && r.delivery_id.length > 0);
+  if (usable.length < rows.length) {
+    log.warn(`${rows.length - usable.length} sync row(s) without delivery_id excluded from digest`);
+  }
+  return usable;
+}
+async function claimContiguousPrefix(cfg, rows, holder) {
+  const won = await Promise.all(rows.map((r) => claimReply(cfg, r.id, holder)));
+  const prefix = [];
+  for (let i = 0; i < rows.length; i++) {
+    if (!won[i]) break;
+    prefix.push(rows[i]);
+  }
+  if (prefix.length < rows.length) {
+    log.info(
+      `coexistence: daemon owns ${rows.length - prefix.length} row(s); surfacing ${prefix.length}`
+    );
+  }
+  return prefix;
+}
+async function sessionStart(ctx, input) {
+  const none = { context: null };
+  try {
+    if (hooksDisabled()) return none;
+    if (input.source === "compact") return none;
+    resetSession(ctx.home, input.sessionId);
+    const identity = resolveIdentity(ctx.home);
+    if (identity === null) {
+      if (shouldOfferRegistration(ctx.home)) {
+        recordRegistrationOffer(ctx.home);
+        return { context: formatRegistrationOffer(ctx.copy) };
+      }
+      return none;
+    }
+    const cfg = { apiKey: identity.apiKey, apiBase: identity.apiBase };
+    await markSessionActive(cfg);
+    const h = alwaysOnHealth(ctx.home);
+    const alert = h.wanted && !h.healthy ? formatAlwaysOnDown(ctx.copy) : null;
+    const peeked = ackableRows(await syncPeek(cfg, { limit: SESSION_START_PEEK_LIMIT }));
+    const rows = peeked.length > 0 ? await claimContiguousPrefix(cfg, peeked, `session:${input.sessionId}`) : [];
+    if (rows.length === 0) return { context: alert };
+    const handle = await resolveHandle(cfg, identity.handle);
+    const digest = formatSessionStart(handle, rows);
+    const context = alert !== null ? `${alert}
 
-// src/identity.ts
+${digest}` : digest;
+    const cursor = lastDeliveryId(rows);
+    if (cursor !== null) setPendingAck(ctx.home, input.sessionId, cursor);
+    return { context };
+  } catch (err) {
+    log.warn(`session-start hook degraded to no-op: ${String(err)}`);
+    return none;
+  }
+}
+async function userPrompt(ctx, input) {
+  try {
+    if (hooksDisabled()) return;
+    const identity = resolveIdentity(ctx.home);
+    if (identity === null) return;
+    const cursor = takePendingAck(ctx.home, input.sessionId);
+    if (cursor === null) return;
+    const cfg = { apiKey: identity.apiKey, apiBase: identity.apiBase };
+    try {
+      await syncAck(cfg, cursor);
+    } catch (err) {
+      setPendingAck(ctx.home, input.sessionId, cursor);
+      log.warn(`user-prompt ack failed (will retry next prompt): ${String(err)}`);
+    }
+  } catch (err) {
+    log.warn(`user-prompt hook degraded to no-op: ${String(err)}`);
+  }
+}
+async function stop(ctx, input) {
+  const none = { reason: null, commit: async () => {
+  } };
+  try {
+    if (hooksDisabled()) return none;
+    const identity = resolveIdentity(ctx.home);
+    if (identity === null) return none;
+    const cfg = { apiKey: identity.apiKey, apiBase: identity.apiBase };
+    await markSessionActive(cfg);
+    const cap = maxContinuations();
+    if (getContinuations(ctx.home, input.sessionId) >= cap) {
+      log.info(
+        `stop hook: continuation cap (${cap}) reached for ${input.sessionId}; leaving inbox queued`
+      );
+      return none;
+    }
+    const peeked = ackableRows(await syncPeek(cfg, { limit: STOP_PEEK_LIMIT }));
+    if (peeked.length === 0) return none;
+    const rows = await claimContiguousPrefix(cfg, peeked, `session:${input.sessionId}`);
+    if (rows.length === 0) return none;
+    recordContinuation(ctx.home, input.sessionId);
+    const handle = await resolveHandle(cfg, identity.handle);
+    const reason = formatStopPickup(handle, rows);
+    const cursor = lastDeliveryId(rows);
+    return {
+      reason,
+      commit: async () => {
+        if (cursor === null) return;
+        try {
+          await syncAck(cfg, cursor);
+        } catch (err) {
+          log.warn(`stop ack failed (messages stay queued): ${String(err)}`);
+        }
+      }
+    };
+  } catch (err) {
+    log.warn(`stop hook degraded to no-op: ${String(err)}`);
+    return none;
+  }
+}
+async function readHookInput(stream = process.stdin) {
+  let raw = "";
+  if (!stream.isTTY) {
+    try {
+      const chunks = [];
+      for await (const chunk of stream) {
+        chunks.push(Buffer.from(chunk));
+        if (Buffer.concat(chunks).length > 1e6) break;
+      }
+      raw = Buffer.concat(chunks).toString("utf-8");
+    } catch {
+      raw = "";
+    }
+  }
+  let parsed = {};
+  if (raw.trim().length > 0) {
+    try {
+      const value = JSON.parse(raw);
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        parsed = value;
+      }
+    } catch {
+      log.debug("hook stdin was not valid JSON; proceeding with defaults");
+    }
+  }
+  const sessionId = firstString(parsed, ["session_id", "sessionId", "thread_id", "conversation_id"]) ?? "unknown";
+  const source = firstString(parsed, ["source"]) ?? void 0;
+  return { sessionId, source };
+}
+function firstString(obj, keys) {
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === "string" && value.trim().length > 0) return value.trim();
+  }
+  return null;
+}
+function createHookRunners(context, dialect) {
+  return {
+    async runSessionStart() {
+      try {
+        const input = await readHookInput();
+        const { context: text } = await sessionStart(context(), input);
+        if (text !== null) dialect.printJson(dialect.sessionStartOutput(text));
+      } catch (err) {
+        log.warn(`session-start hook degraded to no-op: ${String(err)}`);
+      }
+    },
+    async runUserPrompt() {
+      try {
+        const input = await readHookInput();
+        await userPrompt(context(), input);
+      } catch (err) {
+        log.warn(`user-prompt hook degraded to no-op: ${String(err)}`);
+      }
+    },
+    async runStop() {
+      try {
+        const input = await readHookInput();
+        const { reason, commit } = await stop(context(), input);
+        if (reason === null) return;
+        dialect.printJson(dialect.stopOutput(reason));
+        await commit();
+      } catch (err) {
+        log.warn(`stop hook degraded to no-op: ${String(err)}`);
+      }
+    }
+  };
+}
+function anchorLabelOf(profile2) {
+  if (profile2.anchorLabel !== void 0) return profile2.anchorLabel;
+  const file = profile2.anchorFile();
+  const slash = Math.max(file.lastIndexOf("/"), file.lastIndexOf("\\"));
+  return slash >= 0 ? file.slice(slash + 1) : file;
+}
 var HANDLE_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 function validHandle(handle) {
   return handle.length >= 3 && handle.length <= 30 && HANDLE_PATTERN.test(handle);
@@ -6384,12 +6126,13 @@ function validHandle(handle) {
 async function prompt(question) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   try {
-    return (await rl.question(question)).trim();
+    const answer = await new Promise((resolve2) => rl.question(question, resolve2));
+    return answer.trim();
   } finally {
     rl.close();
   }
 }
-function describeApiError(err) {
+function describeApiError(err, invocation2) {
   const e = err ?? {};
   const code = typeof e.code === "string" ? e.code : void 0;
   const message = typeof e.message === "string" ? e.message : String(err);
@@ -6397,388 +6140,733 @@ function describeApiError(err) {
     case "HANDLE_TAKEN":
       return "That handle is already taken \u2014 pick another and re-run.";
     case "EMAIL_TAKEN":
-      return `This email already has an active agent. Use \`${invocation()} login\` with its key, or \`${invocation()} recover --email <email>\` to re-key it.`;
+      return `This email already has an active agent. Use \`${invocation2} login\` with its key, or \`${invocation2} recover --email <email>\` to re-key it.`;
     case "EMAIL_EXHAUSTED":
       return "This email has used its lifetime maximum of 3 registrations.";
     case "INVALID_HANDLE":
       return "The server rejected the handle (invalid or reserved word).";
     case "INVALID_CODE":
-      return `Wrong or expired code. Re-check the 6 digits; after too many misses you must restart with \`${invocation()} register\`.`;
+      return `Wrong or expired code. Re-check the 6 digits; after too many misses you must restart with \`${invocation2} register\`.`;
     case "EXPIRED":
-      return `This registration expired (codes last 10 minutes). Start over with \`${invocation()} register\`.`;
+      return `This registration expired (codes last 10 minutes). Start over with \`${invocation2} register\`.`;
     default:
       return code ? `${code}: ${message}` : message;
   }
 }
 var RESTART_HINT = "Your messaging tools pick this up immediately \u2014 no restart needed. (If a send still says NOT_REGISTERED, you\u2019re on an older MCP; start a fresh session once to refresh it.)";
-function writeOurAnchor(handle) {
-  try {
-    writeAnchor(anchorFile(), renderAnchorBlock(handle), handle);
-    return [`  anchor: @${handle} \u2192 ${anchorFile()}`];
-  } catch (err) {
-    return [`  anchor: FAILED \u2014 ${String(err)}`];
-  }
-}
-async function runRegister(opts) {
-  const home = identityHome();
-  const apiBase = opts.apiBase ?? process.env["AGENTCHAT_API_BASE"] ?? DEFAULT_API_BASE;
-  if (opts.code !== void 0) {
-    const code = opts.code.trim();
-    if (!/^\d{6}$/.test(code)) {
-      console.error("The code is the 6-digit number from the verification email.");
-      return 1;
-    }
-    const pending = readPending(home);
-    if (pending === null) {
-      console.error(`No registration in progress. Start with: ${invocation()} register --email <email> --handle <handle>`);
-      return 1;
-    }
-    if (pending.kind === "recover") {
-      console.error(`The pending code belongs to an account RECOVERY \u2014 complete it with: ${invocation()} recover --code ${code}`);
-      return 1;
-    }
-    const pendingHandle = pending.handle;
-    if (pendingHandle === void 0) {
-      clearPending(home);
-      console.error(`Pending registration was corrupt \u2014 start again with: ${invocation()} register`);
-      return 1;
-    }
+function createIdentityCommands(profile2) {
+  const invocation2 = () => profile2.invocation();
+  const apiErr = (err) => describeApiError(err, invocation2());
+  const LABEL2 = profile2.label;
+  function writeOurAnchor(handle) {
+    const file = profile2.anchorFile();
+    const label = anchorLabelOf(profile2);
+    if (profile2.isWired !== void 0 && !profile2.isWired() && !hasAnchorAt(file)) return [];
     try {
-      const result = await AgentChatClient.verify(pending.pending_id, code, {
-        baseUrl: pending.api_base ?? apiBase
-      });
-      writeCredentials(home, {
-        api_key: result.apiKey,
-        handle: pendingHandle,
-        ...pending.api_base ? { api_base: pending.api_base } : {},
-        created_at: (/* @__PURE__ */ new Date()).toISOString()
-      });
-      clearPending(home);
-      console.log(
-        [
-          `Registered: @${pendingHandle} for ${LABEL}.`,
-          `API key stored at ${credentialsPath(home)} (never commit this file).`,
-          ...writeOurAnchor(pendingHandle),
-          "",
-          `This handle belongs to your ${LABEL} agent. Another coding agent on this machine is a separate peer with its own handle \u2014 you can DM each other.`,
-          `Other agents can DM you at @${pendingHandle}. Check \`${invocation()} status\` any time.`,
-          RESTART_HINT
-        ].join("\n")
-      );
-      return 0;
+      writeAnchor(file, profile2.renderAnchor(handle), handle);
+      return [`  ${label}: @${handle} \u2192 ${file}`];
     } catch (err) {
-      console.error(`Verification failed. ${describeApiError(err)}`);
-      return 1;
+      return [`  ${label}: FAILED \u2014 ${String(err)}`];
     }
   }
-  if (resolveIdentity(home) !== null) {
-    console.error(
-      `${LABEL} already has an AgentChat identity (see \`${invocation()} status\`). Run \`${invocation()} logout\` first to replace it.`
-    );
-    return 1;
-  }
-  const inFlight = readPending(home);
-  if (inFlight?.kind === "recover") {
-    console.error(
-      `An account recovery is in progress \u2014 finish it with \`${invocation()} recover --code <code>\`, or discard it with \`${invocation()} logout\` before registering.`
-    );
-    return 1;
-  }
-  let email = opts.email?.trim().toLowerCase();
-  let handle = opts.handle?.trim().toLowerCase();
-  const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
-  if (!email) {
-    if (!interactive) {
-      console.error(`Missing --email. Usage: ${invocation()} register --email <email> --handle <handle>`);
-      return 1;
-    }
-    email = (await prompt("Email for verification codes: ")).toLowerCase();
-  }
-  if (!handle) {
-    if (!interactive) {
-      console.error(`Missing --handle. Usage: ${invocation()} register --email <email> --handle <handle>`);
-      return 1;
-    }
-    handle = (await prompt("Desired handle (3\u201330 chars, e.g. sanim-dev): ")).toLowerCase();
-  }
-  if (!email.includes("@")) {
-    console.error(`"${email}" does not look like an email address.`);
-    return 1;
-  }
-  if (!validHandle(handle)) {
-    console.error(
-      `Handle "@${handle}" is invalid. Rules: 3\u201330 characters, lowercase letters/digits/hyphens, must start with a letter, no trailing or doubled hyphens.`
-    );
-    return 1;
-  }
-  try {
-    const result = await AgentChatClient.register({
-      email,
-      handle,
-      ...opts.displayName ? { display_name: opts.displayName } : {},
-      ...opts.description ? { description: opts.description } : {},
-      baseUrl: apiBase
-    });
-    writePending(home, {
-      kind: "register",
-      pending_id: result.pending_id,
-      email,
-      handle,
-      ...apiBase !== DEFAULT_API_BASE ? { api_base: apiBase } : {},
-      created_at: (/* @__PURE__ */ new Date()).toISOString()
-    });
-    console.log(
-      [
-        `Verification code sent to ${email} (valid ~10 minutes).`,
-        `Complete with: ${invocation()} register --code <6-digit-code>`
-      ].join("\n")
-    );
-    return 0;
-  } catch (err) {
-    console.error(`Registration failed. ${describeApiError(err)}`);
-    return 1;
-  }
-}
-async function runLogin(opts) {
-  const home = identityHome();
-  const apiBase = opts.apiBase ?? process.env["AGENTCHAT_API_BASE"] ?? DEFAULT_API_BASE;
-  let apiKey = opts.apiKey?.trim();
-  if (!apiKey) {
-    if (process.stdin.isTTY !== true) {
-      console.error(`Missing --api-key. Usage: ${invocation()} login --api-key ac_live_\u2026`);
-      return 1;
-    }
-    apiKey = await prompt("AgentChat API key (ac_\u2026): ");
-  }
-  if (apiKey.length < 20) {
-    console.error("That does not look like an AgentChat API key (too short).");
-    return 1;
-  }
-  try {
-    const client = new AgentChatClient({ apiKey, baseUrl: apiBase });
-    const me = await client.getMe();
-    writeCredentials(home, {
-      api_key: apiKey,
-      handle: me.handle,
-      ...apiBase !== DEFAULT_API_BASE ? { api_base: apiBase } : {},
-      created_at: (/* @__PURE__ */ new Date()).toISOString()
-    });
-    console.log(
-      [`Signed in as @${me.handle} for ${LABEL}.`, ...writeOurAnchor(me.handle), RESTART_HINT].join("\n")
-    );
-    return 0;
-  } catch (err) {
-    console.error(`Login failed. ${describeApiError(err)}`);
-    return 1;
-  }
-}
-async function runRecover(opts) {
-  const home = identityHome();
-  const apiBase = opts.apiBase ?? process.env["AGENTCHAT_API_BASE"] ?? DEFAULT_API_BASE;
-  if (opts.code !== void 0) {
-    const code = opts.code.trim();
-    if (!/^\d{6}$/.test(code)) {
-      console.error("The code is the 6-digit number from the recovery email.");
-      return 1;
-    }
-    const pending = readPending(home);
-    if (pending === null || pending.kind !== "recover") {
-      console.error(`No recovery in progress. Start with: ${invocation()} recover --email <email>`);
-      return 1;
-    }
-    try {
-      const result = await AgentChatClient.recoverVerify(pending.pending_id, code, {
-        baseUrl: pending.api_base ?? apiBase
-      });
-      writeCredentials(home, {
-        api_key: result.apiKey,
-        handle: result.handle,
-        ...pending.api_base ? { api_base: pending.api_base } : {},
-        created_at: (/* @__PURE__ */ new Date()).toISOString()
-      });
-      clearPending(home);
-      console.log(
-        [
-          `Recovered: @${result.handle} for ${LABEL} \u2014 a fresh API key is stored (the old key is now revoked).`,
-          ...writeOurAnchor(result.handle),
-          RESTART_HINT
-        ].join("\n")
-      );
-      return 0;
-    } catch (err) {
-      console.error(`Recovery failed. ${describeApiError(err)}`);
-      return 1;
-    }
-  }
-  let email = opts.email?.trim().toLowerCase();
-  if (!email) {
-    if (process.stdin.isTTY !== true) {
-      console.error(`Missing --email. Usage: ${invocation()} recover --email <email>`);
-      return 1;
-    }
-    email = (await prompt("Email the agent was registered with: ")).toLowerCase();
-  }
-  if (!email.includes("@")) {
-    console.error(`"${email}" does not look like an email address.`);
-    return 1;
-  }
-  try {
-    const result = await AgentChatClient.recover(email, { baseUrl: apiBase });
-    if (!result.pending_id) {
-      console.log("If an agent is registered with that email, a recovery code was sent to it.");
-      return 0;
-    }
-    writePending(home, {
-      kind: "recover",
-      pending_id: result.pending_id,
-      email,
-      ...apiBase !== DEFAULT_API_BASE ? { api_base: apiBase } : {},
-      created_at: (/* @__PURE__ */ new Date()).toISOString()
-    });
-    console.log(
-      [
-        "Recovery code sent (valid ~10 minutes).",
-        `Complete with: ${invocation()} recover --code <6-digit-code>`,
-        "Note: completing recovery rotates the API key \u2014 anything using the old key stops working."
-      ].join("\n")
-    );
-    return 0;
-  } catch (err) {
-    console.error(`Recovery failed. ${describeApiError(err)}`);
-    return 1;
-  }
-}
-async function runStatus(opts) {
-  const home = identityHome();
-  const identity = resolveIdentity(home);
-  const pending = readPending(home);
-  if (identity === null) {
-    if (opts.json) {
-      console.log(JSON.stringify({ configured: false, pending: pending !== null, pending_kind: pending?.kind ?? null }));
-    } else if (pending?.kind === "recover") {
-      console.log(`No identity yet, but an account recovery is waiting on its emailed code \u2014 finish with: ${invocation()} recover --code <code>`);
-    } else if (pending !== null) {
-      console.log(`No identity yet, but a registration for @${pending.handle ?? "?"} is waiting on its emailed code \u2014 finish with: ${invocation()} register --code <code>`);
-    } else {
-      console.log(`No AgentChat identity for this ${LABEL} agent. Set one up with: ${invocation()} register`);
-    }
-    return 0;
-  }
-  try {
-    const client = new AgentChatClient({ apiKey: identity.apiKey, baseUrl: identity.apiBase });
-    const me = await client.getMe();
-    const rows = await syncPeek({ apiKey: identity.apiKey, apiBase: identity.apiBase }, { limit: 100 });
-    const unread = rows.length === 100 ? "100+" : String(rows.length);
-    if (opts.json) {
-      console.log(
-        JSON.stringify({
-          configured: true,
-          host: "codex",
-          handle: me.handle,
-          status: me.status ?? "unknown",
-          unread: rows.length,
-          unread_capped: rows.length === 100,
-          key_source: identity.source,
-          api_base: identity.apiBase,
-          home,
-          anchor: hasAnchorAt(anchorFile())
-        })
-      );
-    } else {
-      console.log(
-        [
-          `@${me.handle} \u2014 ${me.status ?? "active"}  (${LABEL})`,
-          `Unread: ${unread} message(s) queued`,
-          `Key source: ${identity.source} (${identity.source === "file" ? credentialsPath(home) : "AGENTCHAT_API_KEY"})`,
-          `API: ${identity.apiBase}`,
-          `Anchor: ${hasAnchorAt(anchorFile()) ? "yes" : "no"} (${anchorFile()})`
-        ].join("\n")
-      );
-    }
-    return 0;
-  } catch (err) {
-    console.error(`Could not reach AgentChat: ${describeApiError(err)}`);
-    return 1;
-  }
-}
-function runLogout() {
-  const home = identityHome();
-  const reports = [];
-  let any = false;
-  if (clearCredentials(home)) {
-    any = true;
-    reports.push("  credentials deleted");
-  }
-  if (removeAnchorAt(anchorFile()) === "removed") reports.push("  CLAUDE.md anchor removed");
-  console.log(
-    [
-      any ? `Signed out of ${LABEL}.` : "Nothing to sign out of.",
-      ...reports,
-      ...any ? [
-        "Any other coding agent on this machine is untouched \u2014 it is a separate AgentChat agent with its own handle.",
-        `Remove the plugin itself with: /plugin uninstall agentchat@agentchatme`
-      ] : []
-    ].join("\n")
-  );
-  return 0;
-}
-async function runDoctor(opts = {}) {
-  const home = identityHome();
-  const checks = [];
-  checks.push({ name: "node", verdict: "PASS", detail: process.version });
-  checks.push({ name: "home", verdict: "PASS", detail: home });
-  const creds = readCredentials(home);
-  if (creds === null) {
-    checks.push({
-      name: "credentials",
-      verdict: "FAIL",
-      detail: `no identity at ${credentialsPath(home)} \u2014 run \`${invocation()} register\``
-    });
-  } else {
-    checks.push({ name: "credentials", verdict: "PASS", detail: `@${creds.handle}` });
-    const identity = resolveIdentity(home);
-    if (identity !== null) {
+  async function runRegister2(opts) {
+    const home = profile2.home();
+    const apiBase = opts.apiBase ?? process.env["AGENTCHAT_API_BASE"] ?? DEFAULT_API_BASE;
+    if (opts.code !== void 0) {
+      const code = opts.code.trim();
+      if (!/^\d{6}$/.test(code)) {
+        console.error("The code is the 6-digit number from the verification email.");
+        return 1;
+      }
+      const pending = readPending(home);
+      if (pending === null) {
+        console.error(
+          `No registration in progress. Start with: ${invocation2()} register --email <email> --handle <handle>`
+        );
+        return 1;
+      }
+      if (pending.kind === "recover") {
+        console.error(
+          `The pending code belongs to an account RECOVERY \u2014 complete it with: ${invocation2()} recover --code ${code}`
+        );
+        return 1;
+      }
+      const pendingHandle = pending.handle;
+      if (pendingHandle === void 0) {
+        clearPending(home);
+        console.error(`Pending registration was corrupt \u2014 start again with: ${invocation2()} register`);
+        return 1;
+      }
       try {
-        const client = new AgentChatClient({ apiKey: identity.apiKey, baseUrl: identity.apiBase });
-        const started = Date.now();
-        const me = await client.getMe();
-        checks.push({
-          name: "api-auth",
-          verdict: (me.status ?? "active") === "active" ? "PASS" : "WARN",
-          detail: `@${me.handle} status=${me.status ?? "active"} (${Date.now() - started}ms)`
+        const result = await AgentChatClient.verify(pending.pending_id, code, {
+          baseUrl: pending.api_base ?? apiBase
         });
-        if (me.handle !== creds.handle) {
+        writeCredentials(home, {
+          api_key: result.apiKey,
+          handle: pendingHandle,
+          ...pending.api_base ? { api_base: pending.api_base } : {},
+          created_at: (/* @__PURE__ */ new Date()).toISOString()
+        });
+        clearPending(home);
+        console.log(
+          [
+            `Registered: @${pendingHandle} for ${LABEL2}.`,
+            `API key stored at ${credentialsPath(home)} (never commit this file).`,
+            ...writeOurAnchor(pendingHandle),
+            "",
+            `This handle belongs to your ${LABEL2} agent. Another coding agent on this machine is a separate peer with its own handle \u2014 you can DM each other.`,
+            `Other agents can DM you at @${pendingHandle}. Check \`${invocation2()} status\` any time.`,
+            RESTART_HINT
+          ].join("\n")
+        );
+        return 0;
+      } catch (err) {
+        console.error(`Verification failed. ${apiErr(err)}`);
+        return 1;
+      }
+    }
+    if (resolveIdentity(home) !== null) {
+      console.error(
+        `${LABEL2} already has an AgentChat identity (see \`${invocation2()} status\`). Run \`${invocation2()} logout\` first to replace it.`
+      );
+      return 1;
+    }
+    const inFlight = readPending(home);
+    if (inFlight?.kind === "recover") {
+      console.error(
+        `An account recovery is in progress \u2014 finish it with \`${invocation2()} recover --code <code>\`, or discard it with \`${invocation2()} logout\` before registering.`
+      );
+      return 1;
+    }
+    let email = opts.email?.trim().toLowerCase();
+    let handle = opts.handle?.trim().toLowerCase();
+    const interactive = process.stdin.isTTY === true && process.stdout.isTTY === true;
+    if (!email) {
+      if (!interactive) {
+        console.error(`Missing --email. Usage: ${invocation2()} register --email <email> --handle <handle>`);
+        return 1;
+      }
+      email = (await prompt("Email for verification codes: ")).toLowerCase();
+    }
+    if (!handle) {
+      if (!interactive) {
+        console.error(`Missing --handle. Usage: ${invocation2()} register --email <email> --handle <handle>`);
+        return 1;
+      }
+      handle = (await prompt("Desired handle (3\u201330 chars, e.g. sanim-dev): ")).toLowerCase();
+    }
+    if (!email.includes("@")) {
+      console.error(`"${email}" does not look like an email address.`);
+      return 1;
+    }
+    if (!validHandle(handle)) {
+      console.error(
+        `Handle "@${handle}" is invalid. Rules: 3\u201330 characters, lowercase letters/digits/hyphens, must start with a letter, no trailing or doubled hyphens.`
+      );
+      return 1;
+    }
+    try {
+      const result = await AgentChatClient.register({
+        email,
+        handle,
+        ...opts.displayName ? { display_name: opts.displayName } : {},
+        ...opts.description ? { description: opts.description } : {},
+        baseUrl: apiBase
+      });
+      writePending(home, {
+        kind: "register",
+        pending_id: result.pending_id,
+        email,
+        handle,
+        ...apiBase !== DEFAULT_API_BASE ? { api_base: apiBase } : {},
+        created_at: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      console.log(
+        [
+          `Verification code sent to ${email} (valid ~10 minutes).`,
+          `Complete with: ${invocation2()} register --code <6-digit-code>`
+        ].join("\n")
+      );
+      return 0;
+    } catch (err) {
+      console.error(`Registration failed. ${apiErr(err)}`);
+      return 1;
+    }
+  }
+  async function runLogin2(opts) {
+    const home = profile2.home();
+    const apiBase = opts.apiBase ?? process.env["AGENTCHAT_API_BASE"] ?? DEFAULT_API_BASE;
+    let apiKey = opts.apiKey?.trim();
+    if (!apiKey) {
+      if (process.stdin.isTTY !== true) {
+        console.error(`Missing --api-key. Usage: ${invocation2()} login --api-key ac_live_\u2026`);
+        return 1;
+      }
+      apiKey = await prompt("AgentChat API key (ac_\u2026): ");
+    }
+    if (apiKey.length < 20) {
+      console.error("That does not look like an AgentChat API key (too short).");
+      return 1;
+    }
+    try {
+      const client = new AgentChatClient({ apiKey, baseUrl: apiBase });
+      const me = await client.getMe();
+      writeCredentials(home, {
+        api_key: apiKey,
+        handle: me.handle,
+        ...apiBase !== DEFAULT_API_BASE ? { api_base: apiBase } : {},
+        created_at: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      console.log([`Signed in as @${me.handle} for ${LABEL2}.`, ...writeOurAnchor(me.handle), RESTART_HINT].join("\n"));
+      return 0;
+    } catch (err) {
+      console.error(`Login failed. ${apiErr(err)}`);
+      return 1;
+    }
+  }
+  async function runRecover2(opts) {
+    const home = profile2.home();
+    const apiBase = opts.apiBase ?? process.env["AGENTCHAT_API_BASE"] ?? DEFAULT_API_BASE;
+    if (opts.code !== void 0) {
+      const code = opts.code.trim();
+      if (!/^\d{6}$/.test(code)) {
+        console.error("The code is the 6-digit number from the recovery email.");
+        return 1;
+      }
+      const pending = readPending(home);
+      if (pending === null || pending.kind !== "recover") {
+        console.error(`No recovery in progress. Start with: ${invocation2()} recover --email <email>`);
+        return 1;
+      }
+      try {
+        const result = await AgentChatClient.recoverVerify(pending.pending_id, code, {
+          baseUrl: pending.api_base ?? apiBase
+        });
+        writeCredentials(home, {
+          api_key: result.apiKey,
+          handle: result.handle,
+          ...pending.api_base ? { api_base: pending.api_base } : {},
+          created_at: (/* @__PURE__ */ new Date()).toISOString()
+        });
+        clearPending(home);
+        console.log(
+          [
+            `Recovered: @${result.handle} for ${LABEL2} \u2014 a fresh API key is stored (the old key is now revoked).`,
+            ...writeOurAnchor(result.handle),
+            RESTART_HINT
+          ].join("\n")
+        );
+        return 0;
+      } catch (err) {
+        console.error(`Recovery failed. ${apiErr(err)}`);
+        return 1;
+      }
+    }
+    let email = opts.email?.trim().toLowerCase();
+    if (!email) {
+      if (process.stdin.isTTY !== true) {
+        console.error(`Missing --email. Usage: ${invocation2()} recover --email <email>`);
+        return 1;
+      }
+      email = (await prompt("Email the agent was registered with: ")).toLowerCase();
+    }
+    if (!email.includes("@")) {
+      console.error(`"${email}" does not look like an email address.`);
+      return 1;
+    }
+    try {
+      const result = await AgentChatClient.recover(email, { baseUrl: apiBase });
+      if (!result.pending_id) {
+        console.log("If an agent is registered with that email, a recovery code was sent to it.");
+        return 0;
+      }
+      writePending(home, {
+        kind: "recover",
+        pending_id: result.pending_id,
+        email,
+        ...apiBase !== DEFAULT_API_BASE ? { api_base: apiBase } : {},
+        created_at: (/* @__PURE__ */ new Date()).toISOString()
+      });
+      console.log(
+        [
+          "Recovery code sent (valid ~10 minutes).",
+          `Complete with: ${invocation2()} recover --code <6-digit-code>`,
+          "Note: completing recovery rotates the API key \u2014 anything using the old key stops working."
+        ].join("\n")
+      );
+      return 0;
+    } catch (err) {
+      console.error(`Recovery failed. ${apiErr(err)}`);
+      return 1;
+    }
+  }
+  async function runStatus2(opts) {
+    const home = profile2.home();
+    const anchorFile2 = profile2.anchorFile();
+    const identity = resolveIdentity(home);
+    const pending = readPending(home);
+    if (identity === null) {
+      if (opts.json) {
+        console.log(
+          JSON.stringify({ configured: false, pending: pending !== null, pending_kind: pending?.kind ?? null })
+        );
+      } else if (pending?.kind === "recover") {
+        console.log(
+          `No identity yet, but an account recovery is waiting on its emailed code \u2014 finish with: ${invocation2()} recover --code <code>`
+        );
+      } else if (pending !== null) {
+        console.log(
+          `No identity yet, but a registration for @${pending.handle ?? "?"} is waiting on its emailed code \u2014 finish with: ${invocation2()} register --code <code>`
+        );
+      } else {
+        console.log(`No AgentChat identity for this ${LABEL2} agent. Set one up with: ${invocation2()} register`);
+      }
+      return 0;
+    }
+    try {
+      const client = new AgentChatClient({ apiKey: identity.apiKey, baseUrl: identity.apiBase });
+      const me = await client.getMe();
+      const rows = await syncPeek({ apiKey: identity.apiKey, apiBase: identity.apiBase }, { limit: 100 });
+      const unread = rows.length === 100 ? "100+" : String(rows.length);
+      if (opts.json) {
+        console.log(
+          JSON.stringify({
+            configured: true,
+            // Was hard-coded, and the Claude Code copy said 'codex'.
+            host: profile2.id,
+            handle: me.handle,
+            status: me.status ?? "unknown",
+            unread: rows.length,
+            unread_capped: rows.length === 100,
+            key_source: identity.source,
+            api_base: identity.apiBase,
+            home,
+            anchor: hasAnchorAt(anchorFile2)
+          })
+        );
+      } else {
+        console.log(
+          [
+            `@${me.handle} \u2014 ${me.status ?? "active"}  (${LABEL2})`,
+            `Unread: ${unread} message(s) queued`,
+            `Key source: ${identity.source} (${identity.source === "file" ? credentialsPath(home) : "AGENTCHAT_API_KEY"})`,
+            `API: ${identity.apiBase}`,
+            `Anchor: ${hasAnchorAt(anchorFile2) ? "yes" : "no"} (${anchorFile2})`
+          ].join("\n")
+        );
+      }
+      return 0;
+    } catch (err) {
+      console.error(`Could not reach AgentChat: ${apiErr(err)}`);
+      return 1;
+    }
+  }
+  function runLogout2() {
+    const home = profile2.home();
+    const anchorFile2 = profile2.anchorFile();
+    const reports = [];
+    let any = false;
+    if (clearCredentials(home)) {
+      any = true;
+      reports.push("  credentials deleted");
+    }
+    if (profile2.removeWiring !== void 0) {
+      try {
+        const removed = profile2.removeWiring();
+        if (removed.length > 0) reports.push(`  removed ${removed.join(", ")}`);
+      } catch {
+        reports.push(`  could not fully clean up the ${LABEL2} wiring`);
+      }
+    }
+    if (removeAnchorAt(anchorFile2) === "removed") {
+      reports.push(`  ${anchorLabelOf(profile2)} anchor removed`);
+    }
+    console.log(
+      [
+        any ? `Signed out of ${LABEL2}.` : "Nothing to sign out of.",
+        ...reports,
+        ...any ? [
+          "Any other coding agent on this machine is untouched \u2014 it is a separate AgentChat agent with its own handle.",
+          ...profile2.logoutHints?.() ?? []
+        ] : []
+      ].join("\n")
+    );
+    return 0;
+  }
+  async function runDoctor2(opts = {}) {
+    const home = profile2.home();
+    const anchorFile2 = profile2.anchorFile();
+    const checks = [];
+    checks.push({ name: "node", verdict: "PASS", detail: process.version });
+    checks.push({ name: "home", verdict: "PASS", detail: home });
+    const creds = readCredentials(home);
+    if (creds === null) {
+      checks.push({
+        name: "credentials",
+        verdict: "FAIL",
+        detail: `no identity at ${credentialsPath(home)} \u2014 run \`${invocation2()} register\``
+      });
+    } else {
+      checks.push({ name: "credentials", verdict: "PASS", detail: `@${creds.handle}` });
+      const identity = resolveIdentity(home);
+      if (identity !== null) {
+        try {
+          const client = new AgentChatClient({ apiKey: identity.apiKey, baseUrl: identity.apiBase });
+          const started = Date.now();
+          const me = await client.getMe();
+          const verdict = (me.status ?? "active") === "active" ? "PASS" : "WARN";
           checks.push({
-            name: "handle-drift",
+            name: "api-auth",
+            verdict,
+            detail: `@${me.handle} status=${me.status ?? "active"} (${Date.now() - started}ms)`
+          });
+          if (me.handle !== creds.handle) {
+            checks.push({
+              name: "handle-drift",
+              verdict: "WARN",
+              detail: `credentials say @${creds.handle} but the key authenticates as @${me.handle} \u2014 re-run \`${invocation2()} login\``
+            });
+          }
+        } catch (err) {
+          checks.push({ name: "api-auth", verdict: "FAIL", detail: `getMe failed: ${String(err)}` });
+        }
+      }
+      const claimed = readAnchorHandleAt(anchorFile2);
+      if (claimed === creds.handle) {
+        checks.push({ name: "anchor", verdict: "PASS", detail: `@${claimed} in ${anchorFile2}` });
+      } else {
+        const why = claimed === null ? `no identity block in ${anchorFile2}` : `${anchorFile2} says @${claimed} but this agent is @${creds.handle}`;
+        if (opts.fix === true) {
+          const report = writeOurAnchor(creds.handle);
+          const failed = report.some((l) => l.includes("FAILED"));
+          checks.push({
+            name: "anchor",
+            verdict: failed ? "FAIL" : "PASS",
+            detail: failed ? `could not repair: ${report.join("; ")}` : `repaired \u2192 @${creds.handle}`
+          });
+        } else {
+          checks.push({
+            name: "anchor",
             verdict: "WARN",
-            detail: `credentials say @${creds.handle} but the key authenticates as @${me.handle} \u2014 re-run \`${invocation()} login\``
+            detail: `${why} \u2014 repair with \`${invocation2()} doctor --fix\``
           });
         }
-      } catch (err) {
-        checks.push({ name: "api-auth", verdict: "FAIL", detail: `getMe failed: ${String(err)}` });
       }
     }
-    const claimed = readAnchorHandleAt(anchorFile());
-    if (claimed === creds.handle) {
-      checks.push({ name: "anchor", verdict: "PASS", detail: `@${claimed} in ${anchorFile()}` });
-    } else {
-      const why = claimed === null ? `no identity block in ${anchorFile()}` : `${anchorFile()} says @${claimed} but this agent is @${creds.handle}`;
-      if (opts.fix === true) {
-        const report = writeOurAnchor(creds.handle);
-        const failed = report.some((l) => l.includes("FAILED"));
-        checks.push({
-          name: "anchor",
-          verdict: failed ? "FAIL" : "PASS",
-          detail: failed ? `could not repair: ${report.join("; ")}` : `repaired \u2192 @${creds.handle}`
-        });
-      } else {
-        checks.push({ name: "anchor", verdict: "WARN", detail: `${why} \u2014 repair with \`${invocation()} doctor --fix\`` });
-      }
-    }
+    if (profile2.extraDoctorChecks !== void 0) checks.push(...profile2.extraDoctorChecks());
+    console.log(checks.map((c) => `${c.verdict.padEnd(4)} ${c.name}: ${c.detail}`).join("\n"));
+    return checks.some((c) => c.verdict === "FAIL") ? 1 : 0;
   }
-  console.log(checks.map((c) => `${c.verdict.padEnd(4)} ${c.name}: ${c.detail}`).join("\n"));
-  return checks.some((c) => c.verdict === "FAIL") ? 1 : 0;
+  return { runRegister: runRegister2, runLogin: runLogin2, runRecover: runRecover2, runStatus: runStatus2, runLogout: runLogout2, runDoctor: runDoctor2 };
 }
+function plan(opts) {
+  const env = {};
+  if (process.env["PATH"]) env["PATH"] = process.env["PATH"];
+  for (const [k, v] of Object.entries(opts.env ?? {})) {
+    if (typeof v === "string" && v.length > 0) env[k] = v;
+  }
+  return {
+    label: opts.label,
+    node: process.execPath,
+    bin: path22.resolve(opts.entry),
+    home: path22.resolve(opts.home),
+    env
+  };
+}
+function run(cmd, args) {
+  const r = spawnSync(cmd, args, { encoding: "utf-8" });
+  return { ok: !r.error && r.status === 0, out: `${r.stdout ?? ""}${r.stderr ?? ""}`.trim() };
+}
+function systemdUnitPath(label) {
+  return path22.join(os.homedir(), ".config", "systemd", "user", `${label}.service`);
+}
+function systemdUnit(p) {
+  const envLines = Object.entries(p.env).map(([k, v]) => `Environment=${k}=${v}`).join("\n");
+  return [
+    "[Unit]",
+    `Description=AgentChat always-on daemon (${p.label})`,
+    "After=network-online.target",
+    "Wants=network-online.target",
+    "",
+    "[Service]",
+    "Type=simple",
+    `ExecStart=${p.node} ${p.bin} --home ${p.home}`,
+    ...envLines ? [envLines] : [],
+    "Restart=on-failure",
+    "RestartSec=5",
+    "",
+    "[Install]",
+    "WantedBy=default.target",
+    ""
+  ].join("\n");
+}
+function installSystemd(p) {
+  const unitPath = systemdUnitPath(p.label);
+  fs22.mkdirSync(path22.dirname(unitPath), { recursive: true });
+  fs22.writeFileSync(unitPath, systemdUnit(p));
+  log.info(`wrote ${unitPath}`);
+  run("systemctl", ["--user", "daemon-reload"]);
+  const linger = run("loginctl", ["enable-linger", os.userInfo().username]);
+  if (!linger.ok) {
+    log.warn(`could not enable-linger (service won't survive logout until you run: sudo loginctl enable-linger ${os.userInfo().username})`);
+  }
+  const enabled = run("systemctl", ["--user", "enable", "--now", p.label]);
+  if (!enabled.ok) throw new Error(`systemctl enable failed: ${enabled.out}`);
+  log.info(`service ${p.label} enabled + started`);
+}
+function uninstallSystemd(label) {
+  run("systemctl", ["--user", "disable", "--now", label]);
+  const unitPath = systemdUnitPath(label);
+  if (fs22.existsSync(unitPath)) fs22.rmSync(unitPath);
+  run("systemctl", ["--user", "daemon-reload"]);
+  log.info(`service ${label} removed`);
+}
+function statusSystemd(label) {
+  const active = run("systemctl", ["--user", "is-active", label]).out || "unknown";
+  const enabled = run("systemctl", ["--user", "is-enabled", label]).out || "unknown";
+  return `systemd ${label}: ${active} (${enabled})`;
+}
+function launchdPlistPath(label) {
+  return path22.join(os.homedir(), "Library", "LaunchAgents", `${launchdLabel(label)}.plist`);
+}
+var launchdLabel = (label) => `me.agentchat.${label}`;
+function launchdPlist(p) {
+  const args = [p.node, p.bin, "--home", p.home];
+  const argXml = args.map((a) => `    <string>${a}</string>`).join("\n");
+  const envXml = Object.entries(p.env).map(([k, v]) => `    <key>${k}</key><string>${v}</string>`).join("\n");
+  const logPath = path22.join(p.home, "daemon.log");
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0"><dict>',
+    `  <key>Label</key><string>${launchdLabel(p.label)}</string>`,
+    "  <key>ProgramArguments</key><array>",
+    argXml,
+    "  </array>",
+    ...envXml ? ["  <key>EnvironmentVariables</key><dict>", envXml, "  </dict>"] : [],
+    "  <key>RunAtLoad</key><true/>",
+    "  <key>KeepAlive</key><true/>",
+    `  <key>StandardErrorPath</key><string>${logPath}</string>`,
+    `  <key>StandardOutPath</key><string>${logPath}</string>`,
+    "</dict></plist>",
+    ""
+  ].join("\n");
+}
+function installLaunchd(p) {
+  const plistPath = launchdPlistPath(p.label);
+  fs22.mkdirSync(path22.dirname(plistPath), { recursive: true });
+  fs22.writeFileSync(plistPath, launchdPlist(p));
+  log.info(`wrote ${plistPath}`);
+  run("launchctl", ["unload", plistPath]);
+  const loaded = run("launchctl", ["load", "-w", plistPath]);
+  if (!loaded.ok) throw new Error(`launchctl load failed: ${loaded.out}`);
+  log.info(`service ${launchdLabel(p.label)} loaded + started`);
+}
+function uninstallLaunchd(label) {
+  const plistPath = launchdPlistPath(label);
+  run("launchctl", ["unload", "-w", plistPath]);
+  if (fs22.existsSync(plistPath)) fs22.rmSync(plistPath);
+  log.info(`service ${launchdLabel(label)} removed`);
+}
+function statusLaunchd(label) {
+  const r = run("launchctl", ["list", launchdLabel(label)]);
+  return `launchd ${launchdLabel(label)}: ${r.ok ? "loaded" : "not loaded"}`;
+}
+function isWslFromVersion(version) {
+  return /microsoft|wsl/i.test(version);
+}
+function isWsl() {
+  if (process.platform !== "linux") return false;
+  try {
+    return isWslFromVersion(fs22.readFileSync("/proc/version", "utf-8"));
+  } catch {
+    return false;
+  }
+}
+function winMode() {
+  if (process.platform === "win32") return "win32";
+  if (isWsl()) return "wsl";
+  return null;
+}
+function winMasterDir() {
+  return path22.join(os.homedir(), ".agentchat", "daemon");
+}
+function winStartupDir(mode) {
+  if (mode === "win32") {
+    return path22.join(os.homedir(), "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
+  }
+  const appdata = run("cmd.exe", ["/c", "echo %APPDATA%"]).out.split(/\r?\n/).pop()?.trim() ?? "";
+  const base = run("wslpath", ["-u", appdata]).out.trim();
+  if (!base) throw new Error("could not locate the Windows Startup folder from WSL (is /mnt/c mounted?)");
+  return path22.join(base, "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
+}
+var vbsEscape = (s) => s.replace(/"/g, '""');
+var shQuote = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
+function launcherVbs(command, env) {
+  const envLines = Object.entries(env).map(
+    ([k, v]) => `sh.Environment("Process").Item("${k}") = "${vbsEscape(v)}"`
+  );
+  return [
+    "' AgentChat always-on launcher \u2014 runs hidden, restarts on exit.",
+    'Set sh = CreateObject("WScript.Shell")',
+    ...envLines,
+    "Do",
+    `  sh.Run "${vbsEscape(command)}", 0, True`,
+    "  WScript.Sleep 5000",
+    "Loop"
+  ].join("\r\n") + "\r\n";
+}
+function winCommandNative(p) {
+  return `"${p.node}" "${p.bin}" --home "${p.home}"`;
+}
+function wslScriptContent(p) {
+  const exports = Object.entries(p.env).map(([k, v]) => `export ${k}=${shQuote(v)}`);
+  return ["#!/bin/bash", ...exports, `exec ${shQuote(p.node)} ${shQuote(p.bin)} --home ${shQuote(p.home)}`].join(
+    "\n"
+  ) + "\n";
+}
+function startDetached(cmd, args) {
+  if (process.env["AGENTCHATD_SERVICE_NO_START"] === "1") return;
+  try {
+    spawn(cmd, args, { detached: true, stdio: "ignore", windowsHide: true }).unref();
+  } catch (err) {
+    log.warn(`could not start the launcher now (it starts at next login): ${String(err)}`);
+  }
+}
+function winPathFromWsl(linuxPath) {
+  return run("wslpath", ["-w", linuxPath]).out.trim() || linuxPath;
+}
+function killLauncher(label, mode) {
+  const ps = `Get-CimInstance Win32_Process -Filter "Name='wscript.exe'" | Where-Object { $_.CommandLine -like '*${label}.vbs*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`;
+  run(mode === "win32" ? "powershell" : "powershell.exe", ["-NoProfile", "-Command", ps]);
+}
+function installWindows(p, mode) {
+  const master = winMasterDir();
+  fs22.mkdirSync(master, { recursive: true });
+  const masterVbs = path22.join(master, `${p.label}.vbs`);
+  if (mode === "win32") {
+    fs22.writeFileSync(masterVbs, launcherVbs(winCommandNative(p), p.env));
+  } else {
+    const scriptPath = path22.join(master, `${p.label}.sh`);
+    fs22.writeFileSync(scriptPath, wslScriptContent(p), { mode: 493 });
+    const distro = process.env["WSL_DISTRO_NAME"] ?? "";
+    if (!distro) throw new Error("WSL_DISTRO_NAME is not set \u2014 cannot target the right WSL distro");
+    fs22.writeFileSync(masterVbs, launcherVbs(`wsl.exe -d ${distro} -e bash "${scriptPath}"`, {}));
+  }
+  log.info(`wrote ${masterVbs}`);
+  enableWindows(p.label, mode);
+  log.info(`service ${p.label} installed (starts at login)`);
+}
+function enableWindows(label, mode) {
+  const masterVbs = path22.join(winMasterDir(), `${label}.vbs`);
+  if (!fs22.existsSync(masterVbs)) throw new Error(`no ${label} daemon installed \u2014 run install first`);
+  const startup = winStartupDir(mode);
+  fs22.mkdirSync(startup, { recursive: true });
+  const startupVbs = path22.join(startup, `${label}.vbs`);
+  fs22.copyFileSync(masterVbs, startupVbs);
+  if (mode === "win32") startDetached("wscript.exe", [startupVbs]);
+  else startDetached("cmd.exe", ["/c", "start", "", "/b", "wscript.exe", winPathFromWsl(startupVbs)]);
+}
+function disableWindows(label, mode) {
+  const startupVbs = path22.join(winStartupDir(mode), `${label}.vbs`);
+  if (fs22.existsSync(startupVbs)) fs22.rmSync(startupVbs);
+  killLauncher(label, mode);
+}
+function uninstallWindows(label, mode) {
+  try {
+    disableWindows(label, mode);
+  } catch {
+  }
+  for (const f of [`${label}.vbs`, `${label}.sh`]) {
+    const m = path22.join(winMasterDir(), f);
+    if (fs22.existsSync(m)) fs22.rmSync(m);
+  }
+}
+function statusWindows(label, mode) {
+  const installed = fs22.existsSync(path22.join(winMasterDir(), `${label}.vbs`));
+  let enabled = false;
+  try {
+    enabled = fs22.existsSync(path22.join(winStartupDir(mode), `${label}.vbs`));
+  } catch {
+  }
+  const host = mode === "wsl" ? "wsl" : "windows";
+  return `${host} ${label}: ${installed ? enabled ? "enabled" : "installed (disabled)" : "not installed"}`;
+}
+function installService(opts) {
+  const p = plan(opts);
+  if (!p.bin) throw new Error("no daemon entrypoint given (ServiceOpts.entry)");
+  const wm = winMode();
+  if (wm) return installWindows(p, wm);
+  if (process.platform === "linux") return installSystemd(p);
+  if (process.platform === "darwin") return installLaunchd(p);
+  throw new Error(`service install is not supported on ${process.platform} \u2014 run \`agentchatd start\` under your own supervisor`);
+}
+function uninstallService(opts) {
+  const label = opts.label;
+  const wm = winMode();
+  if (wm) return uninstallWindows(label, wm);
+  if (process.platform === "linux") return uninstallSystemd(label);
+  if (process.platform === "darwin") return uninstallLaunchd(label);
+  throw new Error(`service uninstall is not supported on ${process.platform}`);
+}
+function serviceStatus(opts) {
+  const label = opts.label;
+  const wm = winMode();
+  if (wm) return statusWindows(label, wm);
+  if (process.platform === "linux") return statusSystemd(label);
+  if (process.platform === "darwin") return statusLaunchd(label);
+  return `service management not supported on ${process.platform}`;
+}
+
+// src/host.ts
+import * as os2 from "os";
+import * as path5 from "path";
+function claudeHome() {
+  return path5.join(os2.homedir(), ".claude");
+}
+function identityHome() {
+  return path5.join(claudeHome(), "agentchat");
+}
+function anchorFile() {
+  return path5.join(claudeHome(), "CLAUDE.md");
+}
+var LABEL = "Claude Code";
+var SERVICE_LABEL = "agentchatd-claude-code";
+function shippedDaemonPath() {
+  const self = process.argv[1];
+  const dir = self ? path5.dirname(self) : process.cwd();
+  return path5.join(dir, DAEMON_FILENAME);
+}
+function stableDaemonPath() {
+  return path5.join(identityHome(), "bin", DAEMON_FILENAME);
+}
+var DAEMON_FILENAME = "agentchat-daemon.mjs";
+function invocation() {
+  const override = process.env["AGENTCHAT_CLI_NAME"]?.trim();
+  if (override !== void 0 && override.length > 0) return override;
+  const self = process.argv[1];
+  return self ? `node "${self}"` : "agentchat-claude-code";
+}
+function hostCopy() {
+  return { invoke: invocation(), label: LABEL };
+}
+function serviceEnv() {
+  return {};
+}
+
+// src/identity.ts
+var profile = {
+  label: LABEL,
+  id: "claude-code",
+  home: identityHome,
+  anchorFile,
+  invocation,
+  renderAnchor: renderAnchorBlock,
+  // Nothing to un-wire: Claude Code installs and removes the plugin itself, so
+  // logout only drops this agent's credentials and its anchor.
+  logoutHints: () => ["Remove the plugin itself with: /plugin uninstall agentchat@agentchatme"]
+};
+var { runRegister, runLogin, runRecover, runStatus, runLogout, runDoctor } = createIdentityCommands(profile);
 
 // src/dialect.ts
 function sessionStartOutput(context) {
@@ -6792,37 +6880,10 @@ function printJson(payload) {
 }
 
 // src/hooks.ts
-function ctx() {
-  return { home: identityHome(), copy: hostCopy() };
-}
-async function runSessionStart() {
-  try {
-    const input = await readHookInput();
-    const { context } = await sessionStart(ctx(), input);
-    if (context !== null) printJson(sessionStartOutput(context));
-  } catch (err) {
-    log.warn(`session-start hook degraded to no-op: ${String(err)}`);
-  }
-}
-async function runUserPrompt() {
-  try {
-    const input = await readHookInput();
-    await userPrompt(ctx(), input);
-  } catch (err) {
-    log.warn(`user-prompt hook degraded to no-op: ${String(err)}`);
-  }
-}
-async function runStop() {
-  try {
-    const input = await readHookInput();
-    const { reason, commit } = await stop(ctx(), input);
-    if (reason === null) return;
-    printJson(stopOutput(reason));
-    await commit();
-  } catch (err) {
-    log.warn(`stop hook degraded to no-op: ${String(err)}`);
-  }
-}
+var { runSessionStart, runUserPrompt, runStop } = createHookRunners(
+  () => ({ home: identityHome(), copy: hostCopy() }),
+  { sessionStartOutput, stopOutput, printJson }
+);
 
 // src/version.ts
 var VERSION2 = "0.1.0";

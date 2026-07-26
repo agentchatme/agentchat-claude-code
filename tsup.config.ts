@@ -31,6 +31,10 @@ export default defineConfig({
   clean: true,
   splitting: false,
   target: 'node20',
+  // Subpath builtins (readline/promises) are only recognised as builtins when
+  // the platform is explicit; without it the engine's inlined CLI prompts fail
+  // to resolve and the whole bundle fails to build.
+  platform: 'node',
   banner: { js: BANNER },
   // EVERY dependency is inlined — see above.
   noExternal: ['@agentchatme/agent-core', 'agentchatme', 'zod', 'ws'],

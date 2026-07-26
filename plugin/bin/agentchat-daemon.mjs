@@ -13,6 +13,9 @@ var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require
   if (typeof require !== "undefined") return require.apply(this, arguments);
   throw Error('Dynamic require of "' + x + '" is not supported');
 });
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __commonJS = (cb, mod) => function __require2() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
@@ -3700,6 +3703,22 @@ var require_websocket_server = __commonJS({
         abortHandshake(socket, code, message, headers);
       }
     }
+  }
+});
+
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/wrapper.mjs
+var import_stream, import_extension, import_permessage_deflate, import_receiver, import_sender, import_subprotocol, import_websocket, import_websocket_server;
+var init_wrapper = __esm({
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/wrapper.mjs"() {
+    "use strict";
+    import_stream = __toESM(require_stream(), 1);
+    import_extension = __toESM(require_extension(), 1);
+    import_permessage_deflate = __toESM(require_permessage_deflate(), 1);
+    import_receiver = __toESM(require_receiver(), 1);
+    import_sender = __toESM(require_sender(), 1);
+    import_subprotocol = __toESM(require_subprotocol(), 1);
+    import_websocket = __toESM(require_websocket(), 1);
+    import_websocket_server = __toESM(require_websocket_server(), 1);
   }
 });
 
@@ -7938,17 +7957,8 @@ function beat(home) {
   }
 }
 
-// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/wrapper.mjs
-var import_stream = __toESM(require_stream(), 1);
-var import_extension = __toESM(require_extension(), 1);
-var import_permessage_deflate = __toESM(require_permessage_deflate(), 1);
-var import_receiver = __toESM(require_receiver(), 1);
-var import_sender = __toESM(require_sender(), 1);
-var import_subprotocol = __toESM(require_subprotocol(), 1);
-var import_websocket = __toESM(require_websocket(), 1);
-var import_websocket_server = __toESM(require_websocket_server(), 1);
-
 // @agentchatme/agent-core/dist/daemon-entry.js
+init_wrapper();
 import { EventEmitter } from "events";
 import * as path2 from "path";
 import * as os from "os";

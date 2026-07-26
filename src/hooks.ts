@@ -1,6 +1,7 @@
-import { createHookRunners } from '@agentchatme/agent-core'
+import { createHookRunners, log } from '@agentchatme/agent-core'
 import { identityHome, hostCopy } from './host.js'
 import { sessionStartOutput, stopOutput, printJson } from './dialect.js'
+import { ensureAlwaysOn } from './always-on.js'
 
 // ─── Session hooks ──────────────────────────────────────────────────────────
 //
@@ -9,10 +10,34 @@ import { sessionStartOutput, stopOutput, printJson } from './dialect.js'
 // — `identityHome()` is a constant of this package.
 //
 // The joining logic was duplicated per integration and the copies were
-// byte-identical, down to a comment in this one describing how it talks to
-// Codex. It lives in the engine now.
+// byte-identical, so it lives in the engine now. The invariant it carries is
+// unchanged: exit code is ALWAYS 0. A failing hook degrades to "no AgentChat
+// context this turn", never to a broken session.
 
-export const { runSessionStart, runUserPrompt, runStop } = createHookRunners(
+const runners = createHookRunners(
   () => ({ home: identityHome(), copy: hostCopy() }),
   { sessionStartOutput, stopOutput, printJson },
 )
+
+/**
+ * Claude Code runs no code when a plugin is installed — an install is a git
+ * clone. So the first session start is this integration's install hook, and
+ * where always-on gets registered.
+ *
+ * It needs no credentials: the daemon is resident and idles until one appears.
+ * It is a no-op once registered, and respects a deliberate `daemon disable`.
+ * Failure is swallowed — a session must never break over this.
+ */
+export async function runSessionStart(): Promise<void> {
+  try {
+    const r = ensureAlwaysOn()
+    if (!r.ok && r.detail !== 'switched off by the user') {
+      log.warn(`always-on not registered: ${r.detail}`)
+    }
+  } catch (err) {
+    log.warn(`always-on not registered: ${String(err)}`)
+  }
+  await runners.runSessionStart()
+}
+
+export const { runUserPrompt, runStop } = runners

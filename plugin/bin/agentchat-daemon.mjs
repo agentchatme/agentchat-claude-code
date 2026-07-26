@@ -36,9 +36,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/constants.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/constants.js
 var require_constants = __commonJS({
-  "node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/constants.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/constants.js"(exports, module) {
     "use strict";
     var BINARY_TYPES = ["nodebuffer", "arraybuffer", "fragments"];
     var hasBlob = typeof Blob !== "undefined";
@@ -59,9 +59,9 @@ var require_constants = __commonJS({
   }
 });
 
-// node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/buffer-util.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/buffer-util.js
 var require_buffer_util = __commonJS({
-  "node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/buffer-util.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/buffer-util.js"(exports, module) {
     "use strict";
     var { EMPTY_BUFFER } = require_constants();
     var FastBuffer = Buffer[Symbol.species];
@@ -134,9 +134,9 @@ var require_buffer_util = __commonJS({
   }
 });
 
-// node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/limiter.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/limiter.js
 var require_limiter = __commonJS({
-  "node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/limiter.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/limiter.js"(exports, module) {
     "use strict";
     var kDone = /* @__PURE__ */ Symbol("kDone");
     var kRun = /* @__PURE__ */ Symbol("kRun");
@@ -184,9 +184,9 @@ var require_limiter = __commonJS({
   }
 });
 
-// node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/permessage-deflate.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/permessage-deflate.js
 var require_permessage_deflate = __commonJS({
-  "node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/permessage-deflate.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/permessage-deflate.js"(exports, module) {
     "use strict";
     var zlib = __require("zlib");
     var bufferUtil = require_buffer_util();
@@ -567,9 +567,9 @@ var require_permessage_deflate = __commonJS({
   }
 });
 
-// node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/validation.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/validation.js
 var require_validation = __commonJS({
-  "node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/validation.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/validation.js"(exports, module) {
     "use strict";
     var { isUtf8 } = __require("buffer");
     var { hasBlob } = require_constants();
@@ -768,9 +768,9 @@ var require_validation = __commonJS({
   }
 });
 
-// node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/receiver.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/receiver.js
 var require_receiver = __commonJS({
-  "node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/receiver.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/receiver.js"(exports, module) {
     "use strict";
     var { Writable } = __require("stream");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -1391,9 +1391,9 @@ var require_receiver = __commonJS({
   }
 });
 
-// node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/sender.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/sender.js
 var require_sender = __commonJS({
-  "node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/sender.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/sender.js"(exports, module) {
     "use strict";
     var { Duplex } = __require("stream");
     var { randomFillSync } = __require("crypto");
@@ -1884,9 +1884,9 @@ var require_sender = __commonJS({
   }
 });
 
-// node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/event-target.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/event-target.js
 var require_event_target = __commonJS({
-  "node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/event-target.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/event-target.js"(exports, module) {
     "use strict";
     var { kForOnEventAttribute, kListener } = require_constants();
     var kCode = /* @__PURE__ */ Symbol("kCode");
@@ -2113,9 +2113,9 @@ var require_event_target = __commonJS({
   }
 });
 
-// node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/extension.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/extension.js
 var require_extension = __commonJS({
-  "node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/extension.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/extension.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
     function push(dest, name, elem) {
@@ -2266,9 +2266,9 @@ var require_extension = __commonJS({
   }
 });
 
-// node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/websocket.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/websocket.js
 var require_websocket = __commonJS({
-  "node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/websocket.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/websocket.js"(exports, module) {
     "use strict";
     var EventEmitter2 = __require("events");
     var https = __require("https");
@@ -3162,9 +3162,9 @@ var require_websocket = __commonJS({
   }
 });
 
-// node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/stream.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/stream.js
 var require_stream = __commonJS({
-  "node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/stream.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/stream.js"(exports, module) {
     "use strict";
     var WebSocket2 = require_websocket();
     var { Duplex } = __require("stream");
@@ -3260,9 +3260,9 @@ var require_stream = __commonJS({
   }
 });
 
-// node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/subprotocol.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/subprotocol.js
 var require_subprotocol = __commonJS({
-  "node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/subprotocol.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/subprotocol.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
     function parse(header) {
@@ -3305,9 +3305,9 @@ var require_subprotocol = __commonJS({
   }
 });
 
-// node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/websocket-server.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/websocket-server.js
 var require_websocket_server = __commonJS({
-  "node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/websocket-server.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/websocket-server.js"(exports, module) {
     "use strict";
     var EventEmitter2 = __require("events");
     var http = __require("http");
@@ -3706,10 +3706,10 @@ var require_websocket_server = __commonJS({
   }
 });
 
-// node_modules/.pnpm/ws@8.21.1/node_modules/ws/wrapper.mjs
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/wrapper.mjs
 var import_stream, import_extension, import_permessage_deflate, import_receiver, import_sender, import_subprotocol, import_websocket, import_websocket_server;
 var init_wrapper = __esm({
-  "node_modules/.pnpm/ws@8.21.1/node_modules/ws/wrapper.mjs"() {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/wrapper.mjs"() {
     "use strict";
     import_stream = __toESM(require_stream(), 1);
     import_extension = __toESM(require_extension(), 1);
@@ -3724,9 +3724,9 @@ var init_wrapper = __esm({
 
 // src/daemon-main.ts
 import { parseArgs } from "util";
-import * as path7 from "path";
+import * as path8 from "path";
 
-// @agentchatme/agent-core/dist/chunk-4UOOWYCI.js
+// @agentchatme/agent-core/dist/chunk-NEGTEBFK.js
 import * as fs from "fs";
 import * as path from "path";
 import * as fs2 from "fs";
@@ -7956,11 +7956,19 @@ function beat(home) {
   } catch {
   }
 }
+function idle(home) {
+  try {
+    fs4.rmSync(path4.join(home, HEARTBEAT_FILE), { force: true });
+  } catch {
+  }
+}
 
 // @agentchatme/agent-core/dist/daemon-entry.js
 init_wrapper();
 import { EventEmitter } from "events";
 import * as path2 from "path";
+import * as fs3 from "fs";
+import * as path5 from "path";
 import * as os from "os";
 var SyncRowSchema2 = external_exports.object({
   id: external_exports.string(),
@@ -8207,7 +8215,7 @@ function wsUrlFor(apiBase) {
   return apiBase.replace(/^http/, "ws").replace(/\/+$/, "") + "/v1/ws";
 }
 async function resolveDaemonConfig(opts) {
-  const home = path2.resolve(opts.home);
+  const home = path5.resolve(opts.home);
   const id = resolveIdentity(home);
   if (id === null) {
     throw new Error(`no AgentChat identity in ${home} \u2014 register this agent first`);
@@ -8228,7 +8236,7 @@ async function resolveDaemonConfig(opts) {
     apiBase: id.apiBase,
     wsUrl: wsUrlFor(id.apiBase),
     home,
-    workdir: opts.workdir ?? path2.join(home, "daemon-workdir")
+    workdir: opts.workdir ?? path5.join(home, "daemon-workdir")
   };
 }
 var MAX_CONCURRENT_TURNS = 3;
@@ -8237,9 +8245,10 @@ var HEARTBEAT_MS = 3e4;
 var YIELD_MS = Number(process.env["AGENTCHATD_YIELD_MS"] ?? 1e4);
 var delay = (ms) => new Promise((r) => setTimeout(r, ms));
 var Daemon = class {
-  constructor(cfg, adapter, ws) {
+  constructor(cfg, adapter, ws, onTerminal) {
     this.cfg = cfg;
     this.adapter = adapter;
+    this.onTerminal = onTerminal;
     this.coord = new ReplyCoord({
       apiKey: cfg.apiKey,
       apiBase: cfg.apiBase,
@@ -8251,11 +8260,12 @@ var Daemon = class {
     this.ws.on("terminal", (reason) => {
       log.error(`daemon terminal: ${reason}`);
       this.stop();
-      process.exitCode = 1;
+      this.onTerminal?.(reason);
     });
   }
   cfg;
   adapter;
+  onTerminal;
   ws;
   coord;
   seen = /* @__PURE__ */ new Map();
@@ -8350,7 +8360,7 @@ var Daemon = class {
       this.inFlight++;
       return Promise.resolve();
     }
-    return new Promise((resolve22) => this.waiters.push(resolve22));
+    return new Promise((resolve32) => this.waiters.push(resolve32));
   }
   releaseSlot() {
     const next = this.waiters.shift();
@@ -8358,45 +8368,108 @@ var Daemon = class {
     else this.inFlight--;
   }
 };
+var POLL_MS = 5e3;
+var TICK_MS = 250;
+var MAX_BACKOFF_MS2 = 5 * 6e4;
+var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function fingerprint(home) {
+  const id = resolveIdentity(home);
+  return id === null ? null : `${id.apiKey}:${id.handle ?? ""}`;
+}
 async function runDaemon(opts) {
-  let cfg;
-  try {
-    cfg = await resolveDaemonConfig({
-      home: opts.home,
-      ...opts.workdir !== void 0 ? { workdir: opts.workdir } : {}
-    });
-  } catch (err) {
-    console.error(String(err instanceof Error ? err.message : err));
-    return 1;
-  }
-  const lock = acquireLeaderLock(cfg.home);
+  const home = path2.resolve(opts.home);
+  const workdir = opts.workdir ?? path2.join(home, "daemon-workdir");
+  if (process.env["AGENTCHAT_LOG_LEVEL"] === void 0) process.env["AGENTCHAT_LOG_LEVEL"] = "info";
+  const lock = acquireLeaderLock(home);
   if (lock === null) return 1;
-  const daemon = new Daemon(cfg, opts.adapter);
-  let releasing = false;
+  let live = null;
+  let liveFingerprint = null;
+  let refused = null;
+  let failures = 0;
+  let lastFailure = null;
+  let shuttingDown = false;
+  const disconnect = (why) => {
+    if (live === null) return;
+    log.info(`${why} \u2014 disconnecting, staying resident`);
+    live.stop();
+    live = null;
+    liveFingerprint = null;
+    idle(home);
+  };
   const shutdown = (sig) => {
-    if (releasing) return;
-    releasing = true;
+    if (shuttingDown) return;
+    shuttingDown = true;
     log.info(`${sig} \u2014 shutting down`);
-    daemon.stop();
+    live?.stop();
+    idle(home);
     lock.release();
     process.exit(0);
   };
   process.on("SIGINT", () => shutdown("SIGINT"));
   process.on("SIGTERM", () => shutdown("SIGTERM"));
+  let nudged = false;
   try {
-    await daemon.start();
-  } catch (err) {
-    console.error(String(err instanceof Error ? err.message : err));
-    lock.release();
-    return 1;
+    fs3.mkdirSync(home, { recursive: true });
+    const watcher = fs3.watch(home, (_event, filename) => {
+      if (filename === null || String(filename).startsWith("credentials")) nudged = true;
+    });
+    watcher.unref();
+  } catch {
   }
-  return await new Promise(() => {
-  });
+  log.info(`always-on resident for ${home} (${credentialsPath(home)})`);
+  idle(home);
+  for (; ; ) {
+    if (shuttingDown) break;
+    const fp = fingerprint(home);
+    if (fp === null) {
+      disconnect("signed out");
+      if (refused !== null) refused = null;
+    } else if (fp !== liveFingerprint) {
+      disconnect("identity changed");
+      failures = 0;
+      if (fp === refused) {
+      } else {
+        try {
+          const cfg = await resolveDaemonConfig({ home, workdir });
+          const candidate = new Daemon(cfg, opts.adapter, void 0, (reason) => {
+            log.warn(`credential refused (${reason}) \u2014 idling until it changes`);
+            refused = fp;
+            live = null;
+            liveFingerprint = null;
+            idle(home);
+          });
+          await candidate.start();
+          live = candidate;
+          liveFingerprint = fp;
+          failures = 0;
+          lastFailure = null;
+        } catch (err) {
+          const msg = String(err instanceof Error ? err.message : err);
+          if (msg !== lastFailure) {
+            log.warn(`not connecting yet: ${msg}`);
+            lastFailure = msg;
+          }
+          failures += 1;
+          live = null;
+          liveFingerprint = null;
+          idle(home);
+        }
+      }
+    }
+    const waitMs = failures === 0 ? POLL_MS : Math.min(POLL_MS * 2 ** Math.min(failures, 6), MAX_BACKOFF_MS2);
+    nudged = false;
+    const deadline = Date.now() + waitMs;
+    while (!nudged && !shuttingDown && Date.now() < deadline) {
+      await sleep(TICK_MS);
+    }
+  }
+  lock.release();
+  return 0;
 }
 
 // src/adapter.ts
-import * as fs3 from "fs";
-import * as path5 from "path";
+import * as fs5 from "fs";
+import * as path6 from "path";
 import * as crypto from "crypto";
 import { spawn, spawnSync } from "child_process";
 
@@ -8473,15 +8546,15 @@ var ClaudeAdapter = class {
   async preflight() {
     const which = spawnSync("claude", ["--version"], { encoding: "utf-8" });
     if (which.error) return { ok: false, detail: "claude CLI not found on PATH" };
-    if (!fs3.existsSync(path5.join(this.claudeConfigDir, ".credentials.json"))) {
+    if (!fs5.existsSync(path6.join(this.claudeConfigDir, ".credentials.json"))) {
       return {
         ok: false,
         detail: `claude is not logged in (no .credentials.json in ${this.claudeConfigDir})`
       };
     }
-    fs3.mkdirSync(this.workdir, { recursive: true });
-    this.mcpConfigPath = path5.join(this.workdir, "agentchat-mcp.json");
-    fs3.writeFileSync(
+    fs5.mkdirSync(this.workdir, { recursive: true });
+    this.mcpConfigPath = path6.join(this.workdir, "agentchat-mcp.json");
+    fs5.writeFileSync(
       this.mcpConfigPath,
       JSON.stringify({
         mcpServers: {
@@ -8524,7 +8597,7 @@ var ClaudeAdapter = class {
     const env = { ...process.env };
     for (const k of PARENT_ENV_KEYS) delete env[k];
     env["CLAUDE_CONFIG_DIR"] = this.claudeConfigDir;
-    return new Promise((resolve3) => {
+    return new Promise((resolve4) => {
       const child = spawn("claude", args, {
         cwd: this.workdir,
         stdio: ["pipe", "pipe", "pipe"],
@@ -8568,19 +8641,19 @@ var ClaudeAdapter = class {
           child.kill("SIGKILL");
         } catch {
         }
-        resolve3({ ok: false, detail: "turn timed out" });
+        resolve4({ ok: false, detail: "turn timed out" });
       }, TURN_TIMEOUT_MS);
       child.on("error", (err) => {
         clearTimeout(killTimer);
-        resolve3({ ok: false, fatal: true, detail: `claude spawn failed: ${String(err)}` });
+        resolve4({ ok: false, fatal: true, detail: `claude spawn failed: ${String(err)}` });
       });
       child.on("close", (code) => {
         clearTimeout(killTimer);
         if (code === 0 && isError !== true) {
           log.info(`claude turn done for ${ctx.conversationId} (sent=${sawSend})`);
-          resolve3({ ok: true, detail: sawSend ? "replied" : "silent" });
+          resolve4({ ok: true, detail: sawSend ? "replied" : "silent" });
         } else {
-          resolve3({ ok: false, detail: `claude exited ${code}${stderr ? `: ${stderr.slice(0, 200)}` : ""}` });
+          resolve4({ ok: false, detail: `claude exited ${code}${stderr ? `: ${stderr.slice(0, 200)}` : ""}` });
         }
       });
     });
@@ -8616,13 +8689,13 @@ function buildPrompt(ctx) {
 
 // src/host.ts
 import * as os2 from "os";
-import * as path6 from "path";
+import * as path7 from "path";
 import { fileURLToPath } from "url";
 function claudeHome() {
-  return path6.join(os2.homedir(), ".claude");
+  return path7.join(os2.homedir(), ".claude");
 }
 function identityHome() {
-  return path6.join(claudeHome(), "agentchat");
+  return path7.join(claudeHome(), "agentchat");
 }
 
 // src/daemon-main.ts
@@ -8640,8 +8713,8 @@ async function main(argv = process.argv.slice(2)) {
     console.error("Usage: agentchat-daemon [--home <dir>] [--workdir <dir>]");
     return 1;
   }
-  const home = values.home !== void 0 ? path7.resolve(values.home) : identityHome();
-  const workdir = values.workdir !== void 0 ? path7.resolve(values.workdir) : path7.join(home, "daemon-workdir");
+  const home = values.home !== void 0 ? path8.resolve(values.home) : identityHome();
+  const workdir = values.workdir !== void 0 ? path8.resolve(values.workdir) : path8.join(home, "daemon-workdir");
   return await runDaemon({
     home,
     workdir,

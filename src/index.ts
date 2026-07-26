@@ -7,8 +7,11 @@ import {
   serviceStatus,
   markAlwaysOnWanted,
   clearAlwaysOnWanted,
-  alwaysOnHealth,
-  readCredentials,
+  markAlwaysOnOptOut,
+  clearAlwaysOnOptOut,
+  alwaysOnOptedOut,
+  alwaysOnWanted,
+  alwaysOnState,
 } from '@agentchatme/agent-core'
 import {
   identityHome,
@@ -21,6 +24,7 @@ import {
 } from './host.js'
 import { runRegister, runLogin, runRecover, runStatus, runLogout, runDoctor } from './identity.js'
 import { runSessionStart, runUserPrompt, runStop } from './hooks.js'
+import { ensureAlwaysOn, removeAlwaysOn } from './always-on.js'
 import { VERSION } from './version.js'
 
 const USAGE = `agentchat-claude-code ${VERSION} — AgentChat for Claude Code
@@ -141,71 +145,43 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
 }
 
-/**
- * Put a durable copy of the daemon bundle where the service can always find it,
- * and return that path.
- *
- * The plugin's own copy lives in a version-scoped cache directory that the next
- * plugin update deletes, so a unit pointing at it would quietly stop working on
- * upgrade. Copying on every install also means an upgraded plugin refreshes the
- * daemon the next time the user touches always-on.
- */
-function installDaemonBundle(home: string): string {
-  const src = shippedDaemonPath()
-  if (!fs.existsSync(src)) {
-    throw new Error(`the daemon bundle is missing from this plugin install (expected ${src})`)
-  }
-  const dest = stableDaemonPath()
-  fs.mkdirSync(path.dirname(dest), { recursive: true })
-  fs.copyFileSync(src, dest)
-  fs.chmodSync(dest, 0o755)
-  return dest
-}
-
 function runDaemonCmd(sub: string | undefined): number {
   const home = identityHome()
   switch (sub) {
     case 'install':
     case 'enable': {
-      if (readCredentials(home) === null) {
-        console.error(`No AgentChat identity yet. Register first:  ${invocation()} register`)
+      // Explicit: clears a previous opt-out and re-registers unconditionally.
+      clearAlwaysOnOptOut(home)
+      const r = ensureAlwaysOn({ force: true })
+      if (!r.ok) {
+        console.error(`Could not turn on always-on: ${r.detail}`)
         return 1
       }
-      try {
-        const entry = installDaemonBundle(home)
-        installService({ label: SERVICE_LABEL, home, entry, env: serviceEnv() })
-      } catch (err) {
-        console.error(`Could not install the always-on service: ${String(err)}`)
-        return 1
-      }
-      markAlwaysOnWanted(home)
       console.log(
-        [
-          `Always-on is ON for ${LABEL} — you'll answer DMs even when no session is open (while this machine is up).`,
-          `Prefer session-only? ${invocation()} daemon disable`,
-        ].join('\n'),
+        `Always-on is ON for ${LABEL} — you'll answer DMs even when no session is open (while this machine is up).`,
       )
       return 0
     }
     case 'disable':
     case 'uninstall': {
-      uninstallService({ label: SERVICE_LABEL, home })
+      removeAlwaysOn()
       clearAlwaysOnWanted(home)
+      // Remembered, so no later install or upgrade quietly switches it back on.
+      markAlwaysOnOptOut(home)
       console.log(`Always-on is OFF for ${LABEL} — messages queue for your next session; nothing is lost.`)
       return 0
     }
     case 'status': {
-      const h = alwaysOnHealth(home)
-      console.log(
-        [
-          serviceStatus({ label: SERVICE_LABEL, home }),
-          h.wanted
-            ? h.healthy
-              ? 'always-on: wanted and beating ✓'
-              : 'always-on: wanted but NOT beating — the daemon is down'
-            : 'always-on: not enabled (session-only)',
-        ].join('\n'),
-      )
+      // Three states, not two. "Installed but signed out" is the daemon working
+      // correctly, and reporting it as broken nagged signed-out users forever.
+      const state = alwaysOnState(home)
+      const line = {
+        off: 'always-on: off — this agent only answers while a session is open',
+        idle: 'always-on: idle — running, waiting for a sign-in',
+        connected: 'always-on: connected ✓ — answering DMs with no session open',
+        down: 'always-on: NOT running — signed in, but no daemon is connected',
+      }[state]
+      console.log([serviceStatus({ label: SERVICE_LABEL, home }), line].join('\n'))
       return 0
     }
     default:

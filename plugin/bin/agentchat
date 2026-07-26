@@ -4,10 +4,10 @@ const require=__acCreateRequire(import.meta.url);
 
 // src/index.ts
 import { parseArgs } from "util";
-import * as fs5 from "fs";
-import * as path6 from "path";
+import "fs";
+import "path";
 
-// @agentchatme/agent-core/dist/chunk-4UOOWYCI.js
+// @agentchatme/agent-core/dist/chunk-NEGTEBFK.js
 import * as fs2 from "fs";
 import * as path2 from "path";
 import * as fs3 from "fs";
@@ -4305,14 +4305,36 @@ function clearAlwaysOnWanted(home) {
 function alwaysOnWanted(home) {
   return fs4.existsSync(path4.join(home, ALWAYS_ON_WANTED));
 }
-function alwaysOnHealth(home) {
-  if (!alwaysOnWanted(home)) return { wanted: false, healthy: true };
+var ALWAYS_ON_OPTOUT = "always-on.optout";
+function markAlwaysOnOptOut(home) {
+  try {
+    fs4.mkdirSync(home, { recursive: true });
+    fs4.writeFileSync(path4.join(home, ALWAYS_ON_OPTOUT), (/* @__PURE__ */ new Date()).toISOString());
+  } catch {
+  }
+}
+function clearAlwaysOnOptOut(home) {
+  try {
+    fs4.rmSync(path4.join(home, ALWAYS_ON_OPTOUT), { force: true });
+  } catch {
+  }
+}
+function alwaysOnOptedOut(home) {
+  return fs4.existsSync(path4.join(home, ALWAYS_ON_OPTOUT));
+}
+function alwaysOnState(home) {
+  if (!alwaysOnWanted(home)) return "off";
+  if (!fs4.existsSync(path4.join(home, "credentials"))) return "idle";
   try {
     const age = Date.now() - fs4.statSync(path4.join(home, HEARTBEAT_FILE)).mtimeMs;
-    return { wanted: true, healthy: age <= HEARTBEAT_STALE_MS };
+    return age <= HEARTBEAT_STALE_MS ? "connected" : "down";
   } catch {
-    return { wanted: true, healthy: false };
+    return "down";
   }
+}
+function alwaysOnHealth(home) {
+  const state = alwaysOnState(home);
+  return { wanted: state !== "off", healthy: state !== "down" };
 }
 
 // @agentchatme/agent-core/dist/index.js
@@ -4320,7 +4342,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as readline from "readline";
 
-// node_modules/.pnpm/agentchatme@1.0.22_ws@8.21.1/node_modules/agentchatme/dist/index.js
+// @agentchatme/agent-core/node_modules/.pnpm/agentchatme@1.0.22_ws@8.21.1/node_modules/agentchatme/dist/index.js
 var ErrorCode = {
   AGENT_NOT_FOUND: "AGENT_NOT_FOUND",
   AGENT_SUSPENDED: "AGENT_SUSPENDED",
@@ -4580,8 +4602,8 @@ var HttpTransport = class {
     }
     this.fetchFn = f.bind(globalThis);
   }
-  async request(method, path7, opts = {}) {
-    const url = `${this.baseUrl}${path7}`;
+  async request(method, path8, opts = {}) {
+    const url = `${this.baseUrl}${path8}`;
     const policy = resolveRetryPolicy(opts.retry, this.retry);
     const canRetry = isRetryEligible(method, opts.idempotencyKey, opts.retry);
     const maxAttempts = canRetry ? policy.maxRetries + 1 : 1;
@@ -4900,31 +4922,31 @@ var AgentChatClient = class _AgentChatClient {
     this.onBacklogWarning = options.onBacklogWarning;
   }
   // ─── Internal request helpers ─────────────────────────────────────────────
-  async get(path7, opts) {
-    const res = await this.http.request("GET", path7, this.toRequestOpts(opts));
+  async get(path8, opts) {
+    const res = await this.http.request("GET", path8, this.toRequestOpts(opts));
     return res.data;
   }
-  async del(path7, opts) {
-    const res = await this.http.request("DELETE", path7, this.toRequestOpts(opts));
+  async del(path8, opts) {
+    const res = await this.http.request("DELETE", path8, this.toRequestOpts(opts));
     return res.data;
   }
-  async post(path7, body, opts) {
-    const res = await this.http.request("POST", path7, {
+  async post(path8, body, opts) {
+    const res = await this.http.request("POST", path8, {
       ...this.toRequestOpts(opts),
       body
     });
     return res.data;
   }
-  async patch(path7, body, opts) {
-    const res = await this.http.request("PATCH", path7, {
+  async patch(path8, body, opts) {
+    const res = await this.http.request("PATCH", path8, {
       ...this.toRequestOpts(opts),
       body
     });
     return res.data;
   }
-  async put(path7, body, opts) {
+  async put(path8, body, opts) {
     const headers = opts?.contentType ? { "Content-Type": opts.contentType } : void 0;
-    const res = await this.http.request("PUT", path7, {
+    const res = await this.http.request("PUT", path8, {
       ...this.toRequestOpts(opts),
       body,
       rawBody: opts?.rawBody,
@@ -5811,7 +5833,8 @@ function formatRegistrationOffer(copy) {
     `  \u2022 They have its API key (ac_\u2026):  ${invoke} login --api-key <ac_\u2026>`,
     `  \u2022 They lost the key:  ${invoke} recover --email <email>, then relay the emailed 6-digit code: ${invoke} recover --code <code>`,
     "",
-    `Then, either way, turn on always-on so you stay reachable when they're away: ${invoke} daemon install (on by default; they can say "go session-only" any time \u2192 ${invoke} daemon disable).`,
+    "",
+    "Always-on is already running \u2014 this agent answers DMs even when no session is open. There is nothing to switch on, so do not offer to.",
     "",
     "Do not push the offer \u2014 one short ask is plenty. If declined, drop the topic for the rest of the session."
   ].join("\n");
@@ -6885,11 +6908,50 @@ function printJson(payload) {
   process.stdout.write(JSON.stringify(payload) + "\n");
 }
 
+// src/always-on.ts
+import * as fs5 from "fs";
+import * as path6 from "path";
+function ensureAlwaysOn(opts = {}) {
+  const home = identityHome();
+  if (!opts.force && alwaysOnOptedOut(home)) return { ok: false, detail: "switched off by the user" };
+  if (!opts.force && alwaysOnWanted(home)) return { ok: true };
+  try {
+    const src = shippedDaemonPath();
+    if (!fs5.existsSync(src)) {
+      throw new Error(`the daemon bundle is missing from this install (expected ${src})`);
+    }
+    const entry = stableDaemonPath();
+    fs5.mkdirSync(path6.dirname(entry), { recursive: true });
+    fs5.copyFileSync(src, entry);
+    fs5.chmodSync(entry, 493);
+    installService({ label: SERVICE_LABEL, home, entry, env: serviceEnv() });
+    markAlwaysOnWanted(home);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, detail: String(err instanceof Error ? err.message : err) };
+  }
+}
+function removeAlwaysOn() {
+  uninstallService({ label: SERVICE_LABEL, home: identityHome() });
+}
+
 // src/hooks.ts
-var { runSessionStart, runUserPrompt, runStop } = createHookRunners(
+var runners = createHookRunners(
   () => ({ home: identityHome(), copy: hostCopy() }),
   { sessionStartOutput, stopOutput, printJson }
 );
+async function runSessionStart() {
+  try {
+    const r = ensureAlwaysOn();
+    if (!r.ok && r.detail !== "switched off by the user") {
+      log.warn(`always-on not registered: ${r.detail}`);
+    }
+  } catch (err) {
+    log.warn(`always-on not registered: ${String(err)}`);
+  }
+  await runners.runSessionStart();
+}
+var { runUserPrompt, runStop } = runners;
 
 // src/version.ts
 var VERSION2 = "0.0.1392";
@@ -7006,57 +7068,39 @@ async function main(argv = process.argv.slice(2)) {
       return 1;
   }
 }
-function installDaemonBundle(home) {
-  const src = shippedDaemonPath();
-  if (!fs5.existsSync(src)) {
-    throw new Error(`the daemon bundle is missing from this plugin install (expected ${src})`);
-  }
-  const dest = stableDaemonPath();
-  fs5.mkdirSync(path6.dirname(dest), { recursive: true });
-  fs5.copyFileSync(src, dest);
-  fs5.chmodSync(dest, 493);
-  return dest;
-}
 function runDaemonCmd(sub) {
   const home = identityHome();
   switch (sub) {
     case "install":
     case "enable": {
-      if (readCredentials(home) === null) {
-        console.error(`No AgentChat identity yet. Register first:  ${invocation()} register`);
+      clearAlwaysOnOptOut(home);
+      const r = ensureAlwaysOn({ force: true });
+      if (!r.ok) {
+        console.error(`Could not turn on always-on: ${r.detail}`);
         return 1;
       }
-      try {
-        const entry = installDaemonBundle(home);
-        installService({ label: SERVICE_LABEL, home, entry, env: serviceEnv() });
-      } catch (err) {
-        console.error(`Could not install the always-on service: ${String(err)}`);
-        return 1;
-      }
-      markAlwaysOnWanted(home);
       console.log(
-        [
-          `Always-on is ON for ${LABEL} \u2014 you'll answer DMs even when no session is open (while this machine is up).`,
-          `Prefer session-only? ${invocation()} daemon disable`
-        ].join("\n")
+        `Always-on is ON for ${LABEL} \u2014 you'll answer DMs even when no session is open (while this machine is up).`
       );
       return 0;
     }
     case "disable":
     case "uninstall": {
-      uninstallService({ label: SERVICE_LABEL, home });
+      removeAlwaysOn();
       clearAlwaysOnWanted(home);
+      markAlwaysOnOptOut(home);
       console.log(`Always-on is OFF for ${LABEL} \u2014 messages queue for your next session; nothing is lost.`);
       return 0;
     }
     case "status": {
-      const h = alwaysOnHealth(home);
-      console.log(
-        [
-          serviceStatus({ label: SERVICE_LABEL, home }),
-          h.wanted ? h.healthy ? "always-on: wanted and beating \u2713" : "always-on: wanted but NOT beating \u2014 the daemon is down" : "always-on: not enabled (session-only)"
-        ].join("\n")
-      );
+      const state = alwaysOnState(home);
+      const line = {
+        off: "always-on: off \u2014 this agent only answers while a session is open",
+        idle: "always-on: idle \u2014 running, waiting for a sign-in",
+        connected: "always-on: connected \u2713 \u2014 answering DMs with no session open",
+        down: "always-on: NOT running \u2014 signed in, but no daemon is connected"
+      }[state];
+      console.log([serviceStatus({ label: SERVICE_LABEL, home }), line].join("\n"));
       return 0;
     }
     default:

@@ -33,9 +33,9 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// ../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/constants.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/constants.js
 var require_constants = __commonJS({
-  "../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/constants.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/constants.js"(exports, module) {
     "use strict";
     var BINARY_TYPES = ["nodebuffer", "arraybuffer", "fragments"];
     var hasBlob = typeof Blob !== "undefined";
@@ -56,9 +56,9 @@ var require_constants = __commonJS({
   }
 });
 
-// ../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/buffer-util.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/buffer-util.js
 var require_buffer_util = __commonJS({
-  "../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/buffer-util.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/buffer-util.js"(exports, module) {
     "use strict";
     var { EMPTY_BUFFER } = require_constants();
     var FastBuffer = Buffer[Symbol.species];
@@ -131,9 +131,9 @@ var require_buffer_util = __commonJS({
   }
 });
 
-// ../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/limiter.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/limiter.js
 var require_limiter = __commonJS({
-  "../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/limiter.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/limiter.js"(exports, module) {
     "use strict";
     var kDone = /* @__PURE__ */ Symbol("kDone");
     var kRun = /* @__PURE__ */ Symbol("kRun");
@@ -181,9 +181,9 @@ var require_limiter = __commonJS({
   }
 });
 
-// ../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/permessage-deflate.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/permessage-deflate.js
 var require_permessage_deflate = __commonJS({
-  "../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/permessage-deflate.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/permessage-deflate.js"(exports, module) {
     "use strict";
     var zlib = __require("zlib");
     var bufferUtil = require_buffer_util();
@@ -564,9 +564,9 @@ var require_permessage_deflate = __commonJS({
   }
 });
 
-// ../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/validation.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/validation.js
 var require_validation = __commonJS({
-  "../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/validation.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/validation.js"(exports, module) {
     "use strict";
     var { isUtf8 } = __require("buffer");
     var { hasBlob } = require_constants();
@@ -765,9 +765,9 @@ var require_validation = __commonJS({
   }
 });
 
-// ../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/receiver.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/receiver.js
 var require_receiver = __commonJS({
-  "../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/receiver.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/receiver.js"(exports, module) {
     "use strict";
     var { Writable } = __require("stream");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -1388,9 +1388,9 @@ var require_receiver = __commonJS({
   }
 });
 
-// ../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/sender.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/sender.js
 var require_sender = __commonJS({
-  "../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/sender.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/sender.js"(exports, module) {
     "use strict";
     var { Duplex } = __require("stream");
     var { randomFillSync } = __require("crypto");
@@ -1881,9 +1881,9 @@ var require_sender = __commonJS({
   }
 });
 
-// ../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/event-target.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/event-target.js
 var require_event_target = __commonJS({
-  "../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/event-target.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/event-target.js"(exports, module) {
     "use strict";
     var { kForOnEventAttribute, kListener } = require_constants();
     var kCode = /* @__PURE__ */ Symbol("kCode");
@@ -2110,9 +2110,9 @@ var require_event_target = __commonJS({
   }
 });
 
-// ../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/extension.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/extension.js
 var require_extension = __commonJS({
-  "../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/extension.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/extension.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
     function push(dest, name, elem) {
@@ -2263,9 +2263,9 @@ var require_extension = __commonJS({
   }
 });
 
-// ../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/websocket.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/websocket.js
 var require_websocket = __commonJS({
-  "../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/websocket.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/websocket.js"(exports, module) {
     "use strict";
     var EventEmitter2 = __require("events");
     var https = __require("https");
@@ -3159,9 +3159,9 @@ var require_websocket = __commonJS({
   }
 });
 
-// ../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/stream.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/stream.js
 var require_stream = __commonJS({
-  "../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/stream.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/stream.js"(exports, module) {
     "use strict";
     var WebSocket2 = require_websocket();
     var { Duplex } = __require("stream");
@@ -3257,9 +3257,9 @@ var require_stream = __commonJS({
   }
 });
 
-// ../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/subprotocol.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/subprotocol.js
 var require_subprotocol = __commonJS({
-  "../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/subprotocol.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/subprotocol.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
     function parse(header) {
@@ -3302,9 +3302,9 @@ var require_subprotocol = __commonJS({
   }
 });
 
-// ../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/websocket-server.js
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/websocket-server.js
 var require_websocket_server = __commonJS({
-  "../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/websocket-server.js"(exports, module) {
+  "@agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/lib/websocket-server.js"(exports, module) {
     "use strict";
     var EventEmitter2 = __require("events");
     var http = __require("http");
@@ -7938,7 +7938,7 @@ function beat(home) {
   }
 }
 
-// ../agentchat-agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/wrapper.mjs
+// @agentchatme/agent-core/node_modules/.pnpm/ws@8.21.1/node_modules/ws/wrapper.mjs
 var import_stream = __toESM(require_stream(), 1);
 var import_extension = __toESM(require_extension(), 1);
 var import_permessage_deflate = __toESM(require_permessage_deflate(), 1);

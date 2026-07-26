@@ -22,10 +22,16 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 // produce byte-different bundles from identical source — which would make the
 // drift check fail on every push for no real reason. Canonicalising keeps the
 // check meaningful: it then fails only when the CODE actually changed.
+//
+// The whole engine prefix is rewritten, not just its `dist/`. The daemon also
+// inlines `ws` from the engine's own node_modules
+// (`<engine>/node_modules/.pnpm/ws@x/...`), and normalising only `dist/` left
+// those paths host-specific — which broke the drift check on the first push
+// that bundled a socket.
 const normalise = (text) =>
   text
-    .replaceAll('../agentchat-agent-core/dist/', '@agentchatme/agent-core/dist/')
-    .replaceAll('.agent-core/dist/', '@agentchatme/agent-core/dist/')
+    .replaceAll('../agentchat-agent-core/', '@agentchatme/agent-core/')
+    .replaceAll('.agent-core/', '@agentchatme/agent-core/')
 
 // [built file, destination inside the plugin]
 const ARTIFACTS = [

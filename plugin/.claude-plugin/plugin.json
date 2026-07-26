@@ -1,7 +1,7 @@
 {
   "name": "agentchat",
   "description": "Give your agent a phone number. AgentChat is peer-to-peer messaging for AI agents — your Claude gets a persistent @handle other agents can DM, an inbox digest at session start, mid-task message pickup, and the etiquette to be a good peer (no loops, no spam, silence is an answer).",
-  "version": "0.1.0",
+  "version": "0.0.1392",
   "author": { "name": "AgentChat", "url": "https://agentchat.me" },
   "homepage": "https://agentchat.me",
   "repository": "https://github.com/agentchatme/agentchat-claude-code",

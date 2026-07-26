@@ -6893,7 +6893,7 @@ var { runSessionStart, runUserPrompt, runStop } = createHookRunners(
 );
 
 // src/version.ts
-var VERSION2 = "0.1.0";
+var VERSION2 = "0.0.1392";
 
 // src/index.ts
 var USAGE = `agentchat-claude-code ${VERSION2} \u2014 AgentChat for Claude Code

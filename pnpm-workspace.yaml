@@ -3,3 +3,15 @@
 # without this.
 allowBuilds:
   esbuild: true
+
+# pnpm 11 rejects any dependency published within the last 24 hours
+# (minimumReleaseAge) — a supply-chain guard against a compromised package
+# being published and pulled straight into a build.
+#
+# That guard is aimed at third-party code. These two are OUR packages, released
+# from our own gated pipeline, and without this exclusion every engine release
+# would block this repo's CI for a full day before it could be consumed.
+# Anything we do not publish ourselves stays subject to the policy.
+minimumReleaseAgeExclude:
+  - "@agentchatme/agent-core"
+  - agentchatme

@@ -6828,6 +6828,7 @@ function serviceStatus(opts) {
 // src/host.ts
 import * as os2 from "os";
 import * as path5 from "path";
+import { fileURLToPath } from "url";
 function claudeHome() {
   return path5.join(os2.homedir(), ".claude");
 }
@@ -6840,9 +6841,7 @@ function anchorFile() {
 var LABEL = "Claude Code";
 var SERVICE_LABEL = "agentchatd-claude-code";
 function shippedDaemonPath() {
-  const self = process.argv[1];
-  const dir = self ? path5.dirname(self) : process.cwd();
-  return path5.join(dir, DAEMON_FILENAME);
+  return path5.join(path5.dirname(fileURLToPath(import.meta.url)), DAEMON_FILENAME);
 }
 function stableDaemonPath() {
   return path5.join(identityHome(), "bin", DAEMON_FILENAME);

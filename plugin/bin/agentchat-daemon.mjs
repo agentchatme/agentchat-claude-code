@@ -8617,6 +8617,7 @@ function buildPrompt(ctx) {
 // src/host.ts
 import * as os2 from "os";
 import * as path6 from "path";
+import { fileURLToPath } from "url";
 function claudeHome() {
   return path6.join(os2.homedir(), ".claude");
 }

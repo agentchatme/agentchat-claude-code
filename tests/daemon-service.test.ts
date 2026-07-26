@@ -123,6 +123,30 @@ describe('daemon install points the service at the daemon, not the CLI', () => {
     expect(code).toBe(1)
   })
 
+  it('finds the daemon when invoked through a shim rather than by its real path', async () => {
+    // Claude Code's hooks invoke the bundle by absolute path, so this
+    // integration is not exposed the way the npx-installed Codex package was —
+    // where resolving the daemon relative to process.argv[1] pointed at
+    // node_modules/.bin/ and broke `daemon install` for every user in 0.0.12.
+    // Pinned here anyway: the resolution should depend on where the bundle IS,
+    // never on how it was called.
+    const home = path.join(sandbox, '.claude', 'agentchat')
+    fs.mkdirSync(home, { recursive: true })
+    fs.writeFileSync(
+      path.join(home, 'credentials'),
+      JSON.stringify({ api_key: 'ac_live_' + 'a'.repeat(40), handle: 'cc-agent' }),
+    )
+
+    const binDir = path.join(sandbox, 'elsewhere', 'bin')
+    fs.mkdirSync(binDir, { recursive: true })
+    const shim = path.join(binDir, 'agentchat')
+    fs.symlinkSync(CLI, shim)
+
+    const { out } = await run(shim, ['daemon', 'install'])
+    expect(out).not.toMatch(/daemon bundle is missing/i)
+    expect(fs.existsSync(path.join(home, 'bin', 'agentchat-daemon.mjs'))).toBe(true)
+  })
+
   it('copies the daemon to a durable path outside the version-scoped plugin cache', async () => {
     // A unit pointing inside …/plugins/cache/<mp>/<plugin>/<version>/ dies on
     // the next plugin update. Install must copy the bundle somewhere that

@@ -1,5 +1,6 @@
 import * as os from 'node:os'
 import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 // ─── The only file in this repo that knows a host exists ────────────────────
 //
@@ -36,9 +37,11 @@ export const SERVICE_LABEL = 'agentchatd-claude-code'
 
 /** The daemon bundle as it ships inside the plugin, beside the CLI. */
 export function shippedDaemonPath(): string {
-  const self = process.argv[1]
-  const dir = self ? path.dirname(self) : process.cwd()
-  return path.join(dir, DAEMON_FILENAME)
+  // Anchored to THIS MODULE, not to process.argv[1]. argv[1] is whatever was
+  // invoked — a bin shim, a symlink, a wrapper — and the daemon is shipped
+  // beside the bundle, not beside its caller. The Codex integration had the
+  // same bug and it made `daemon install` fail for every npx user.
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), DAEMON_FILENAME)
 }
 
 /**

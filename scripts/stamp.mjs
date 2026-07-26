@@ -1,23 +1,20 @@
 #!/usr/bin/env node
-// Copies the built CLI bundle into the plugin as `plugin/bin/agentchat`.
+// Copies the built bundles into the plugin:
+//   dist/index.js       → plugin/bin/agentchat              (CLI + hooks)
+//   dist/daemon-main.js → plugin/bin/agentchat-daemon.mjs   (always-on daemon)
 //
-// This copy is COMMITTED, unlike every other dist artifact in the org: a
+// These copies are COMMITTED, unlike every other dist artifact in the org: a
 // Claude Code plugin is installed by git-cloning this repo, with no install
-// step, so the hooks must find a runnable file already present. Extensionless
-// and executable so a PATH exposure of plugin/bin gives the literal
-// `agentchat` command; hooks invoke it via `node` + absolute path regardless.
+// step, so the hooks must find a runnable file already present. The CLI is
+// extensionless and executable so a PATH exposure of plugin/bin gives the
+// literal `agentchat` command; hooks invoke it via `node` + absolute path
+// regardless. The daemon keeps its `.mjs` extension — nothing execs it by bare
+// name, and the extension makes it obvious it is not the front door.
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const bundle = path.join(root, 'dist', 'index.js')
-if (!fs.existsSync(bundle)) {
-  console.error('stamp: dist/index.js missing — run `pnpm build:cli` first')
-  process.exit(1)
-}
-const dest = path.join(root, 'plugin', 'bin', 'agentchat')
-fs.mkdirSync(path.dirname(dest), { recursive: true })
 
 // Normalise the bundler's source-path annotations before committing. esbuild
 // writes the RESOLVED path of each input, so a local symlinked engine
@@ -25,11 +22,26 @@ fs.mkdirSync(path.dirname(dest), { recursive: true })
 // produce byte-different bundles from identical source — which would make the
 // drift check fail on every push for no real reason. Canonicalising keeps the
 // check meaningful: it then fails only when the CODE actually changed.
-const normalised = fs
-  .readFileSync(bundle, 'utf-8')
-  .replaceAll('../agentchat-agent-core/dist/', '@agentchatme/agent-core/dist/')
-  .replaceAll('.agent-core/dist/', '@agentchatme/agent-core/dist/')
+const normalise = (text) =>
+  text
+    .replaceAll('../agentchat-agent-core/dist/', '@agentchatme/agent-core/dist/')
+    .replaceAll('.agent-core/dist/', '@agentchatme/agent-core/dist/')
 
-fs.writeFileSync(dest, normalised)
-fs.chmodSync(dest, 0o755)
-console.log('stamp: plugin/bin/agentchat')
+// [built file, destination inside the plugin]
+const ARTIFACTS = [
+  ['index.js', 'agentchat'],
+  ['daemon-main.js', 'agentchat-daemon.mjs'],
+]
+
+for (const [builtName, destName] of ARTIFACTS) {
+  const bundle = path.join(root, 'dist', builtName)
+  if (!fs.existsSync(bundle)) {
+    console.error(`stamp: dist/${builtName} missing — run \`pnpm build:cli\` first`)
+    process.exit(1)
+  }
+  const dest = path.join(root, 'plugin', 'bin', destName)
+  fs.mkdirSync(path.dirname(dest), { recursive: true })
+  fs.writeFileSync(dest, normalise(fs.readFileSync(bundle, 'utf-8')))
+  fs.chmodSync(dest, 0o755)
+  console.log(`stamp: plugin/bin/${destName}`)
+}

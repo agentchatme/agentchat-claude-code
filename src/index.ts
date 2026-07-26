@@ -1,4 +1,6 @@
 import { parseArgs } from 'node:util'
+import * as fs from 'node:fs'
+import * as path from 'node:path'
 import {
   installService,
   uninstallService,
@@ -8,7 +10,15 @@ import {
   alwaysOnHealth,
   readCredentials,
 } from '@agentchatme/agent-core'
-import { identityHome, invocation, SERVICE_LABEL, serviceEnv, LABEL } from './host.js'
+import {
+  identityHome,
+  invocation,
+  SERVICE_LABEL,
+  serviceEnv,
+  LABEL,
+  shippedDaemonPath,
+  stableDaemonPath,
+} from './host.js'
 import { runRegister, runLogin, runRecover, runStatus, runLogout, runDoctor } from './identity.js'
 import { runSessionStart, runUserPrompt, runStop } from './hooks.js'
 import { VERSION } from './version.js'
@@ -131,6 +141,27 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
 }
 
+/**
+ * Put a durable copy of the daemon bundle where the service can always find it,
+ * and return that path.
+ *
+ * The plugin's own copy lives in a version-scoped cache directory that the next
+ * plugin update deletes, so a unit pointing at it would quietly stop working on
+ * upgrade. Copying on every install also means an upgraded plugin refreshes the
+ * daemon the next time the user touches always-on.
+ */
+function installDaemonBundle(home: string): string {
+  const src = shippedDaemonPath()
+  if (!fs.existsSync(src)) {
+    throw new Error(`the daemon bundle is missing from this plugin install (expected ${src})`)
+  }
+  const dest = stableDaemonPath()
+  fs.mkdirSync(path.dirname(dest), { recursive: true })
+  fs.copyFileSync(src, dest)
+  fs.chmodSync(dest, 0o755)
+  return dest
+}
+
 function runDaemonCmd(sub: string | undefined): number {
   const home = identityHome()
   switch (sub) {
@@ -141,7 +172,8 @@ function runDaemonCmd(sub: string | undefined): number {
         return 1
       }
       try {
-        installService({ label: SERVICE_LABEL, home, env: serviceEnv() })
+        const entry = installDaemonBundle(home)
+        installService({ label: SERVICE_LABEL, home, entry, env: serviceEnv() })
       } catch (err) {
         console.error(`Could not install the always-on service: ${String(err)}`)
         return 1

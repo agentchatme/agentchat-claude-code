@@ -1,9 +1,19 @@
 #!/usr/bin/env node
+import{createRequire as __acCreateRequire}from"node:module";
+const require=__acCreateRequire(import.meta.url);
 
 // src/index.ts
 import { parseArgs } from "util";
+import * as fs5 from "fs";
+import * as path6 from "path";
 
-// @agentchatme/agent-core/dist/chunk-OSRRGKPI.js
+// @agentchatme/agent-core/dist/chunk-4UOOWYCI.js
+import * as fs2 from "fs";
+import * as path2 from "path";
+import * as fs3 from "fs";
+import * as path3 from "path";
+import * as fs4 from "fs";
+import * as path4 from "path";
 var __defProp = Object.defineProperty;
 var __export = (target, all) => {
   for (var name in all)
@@ -27,6 +37,24 @@ var log = {
   info: (msg) => emit("info", msg),
   debug: (msg) => emit("debug", msg)
 };
+function atomicWriteFile(filePath, data, mode) {
+  const dir = path2.dirname(filePath);
+  fs2.mkdirSync(dir, { recursive: true, mode: 448 });
+  const tmp = path2.join(dir, `.${path2.basename(filePath)}.${process.pid}.tmp`);
+  fs2.writeFileSync(tmp, data, mode === void 0 ? {} : { mode });
+  fs2.renameSync(tmp, filePath);
+  if (mode !== void 0) {
+    fs2.chmodSync(filePath, mode);
+  }
+}
+function readJsonFile(filePath) {
+  try {
+    const raw = fs2.readFileSync(filePath, "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
 var external_exports = {};
 __export(external_exports, {
   BRAND: () => BRAND,
@@ -494,8 +522,8 @@ function getErrorMap() {
   return overrideErrorMap;
 }
 var makeIssue = (params) => {
-  const { data, path: path7, errorMaps, issueData } = params;
-  const fullPath = [...path7, ...issueData.path || []];
+  const { data, path: path52, errorMaps, issueData } = params;
+  const fullPath = [...path52, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -607,11 +635,11 @@ var errorUtil;
   errorUtil2.toString = (message) => typeof message === "string" ? message : message?.message;
 })(errorUtil || (errorUtil = {}));
 var ParseInputLazyPath = class {
-  constructor(parent, value, path7, key) {
+  constructor(parent, value, path52, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path7;
+    this._path = path52;
     this._key = key;
   }
   get path() {
@@ -4052,20 +4080,96 @@ var coerce = {
   date: ((arg) => ZodDate.create({ ...arg, coerce: true }))
 };
 var NEVER = INVALID;
-
-// @agentchatme/agent-core/dist/index.js
-import * as fs2 from "fs";
-import * as path2 from "path";
-import * as fs from "fs";
-import * as path from "path";
-import * as fs3 from "fs";
-import * as path3 from "path";
-import * as fs4 from "fs";
-import * as path4 from "path";
-import * as fs6 from "fs";
-import * as os from "os";
-import * as path6 from "path";
-import { spawnSync, spawn } from "child_process";
+var DEFAULT_API_BASE = "https://api.agentchat.me";
+var CredentialsSchema = external_exports.object({
+  api_key: external_exports.string().min(20),
+  handle: external_exports.string().min(3),
+  api_base: external_exports.string().url().optional(),
+  created_at: external_exports.string().optional()
+});
+function credentialsPath(home) {
+  return path3.join(home, "credentials");
+}
+function pendingPath(home) {
+  return path3.join(home, "pending.json");
+}
+function statePath(home) {
+  return path3.join(home, "state.json");
+}
+function readCredentials(home) {
+  const raw = readJsonFile(credentialsPath(home));
+  if (raw === null) return null;
+  const parsed = CredentialsSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+function resolveIdentity(home) {
+  const envKey = process.env["AGENTCHAT_API_KEY"];
+  const envBase = process.env["AGENTCHAT_API_BASE"];
+  const file = readCredentials(home);
+  if (envKey && envKey.trim().length >= 20) {
+    return {
+      apiKey: envKey.trim(),
+      apiBase: envBase?.trim() || file?.api_base || DEFAULT_API_BASE,
+      handle: file?.handle ?? null,
+      source: "env"
+    };
+  }
+  if (envKey && envKey.trim().length > 0 && file) {
+    log.warn(
+      "AGENTCHAT_API_KEY is set but malformed (under 20 chars); using the credentials-file identity instead"
+    );
+  }
+  if (file) {
+    return {
+      apiKey: file.api_key,
+      apiBase: envBase?.trim() || file.api_base || DEFAULT_API_BASE,
+      handle: file.handle,
+      source: "file"
+    };
+  }
+  return null;
+}
+function writeCredentials(home, creds) {
+  atomicWriteFile(credentialsPath(home), JSON.stringify(creds, null, 2) + "\n", 384);
+}
+function clearCredentials(home) {
+  let removed = false;
+  for (const p of [credentialsPath(home), pendingPath(home)]) {
+    try {
+      fs3.unlinkSync(p);
+      removed = true;
+    } catch {
+    }
+  }
+  return removed;
+}
+var PendingSchema = external_exports.object({
+  // 'register' creates a new agent; 'recover' re-keys an existing one.
+  // Both share the two-invocation OTP shape, so they share this file — the
+  // kind guard stops `register --code` completing a recovery (and vice
+  // versa) with confusing results.
+  kind: external_exports.enum(["register", "recover"]).default("register"),
+  pending_id: external_exports.string().min(1),
+  email: external_exports.string().email(),
+  handle: external_exports.string().min(3).optional(),
+  api_base: external_exports.string().url().optional(),
+  created_at: external_exports.string()
+});
+function readPending(home) {
+  const raw = readJsonFile(pendingPath(home));
+  if (raw === null) return null;
+  const parsed = PendingSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+function writePending(home, pending) {
+  atomicWriteFile(pendingPath(home), JSON.stringify(pending, null, 2) + "\n", 384);
+}
+function clearPending(home) {
+  try {
+    fs3.unlinkSync(pendingPath(home));
+  } catch {
+  }
+}
 var SyncRowSchema = external_exports.object({
   id: external_exports.string(),
   conversation_id: external_exports.string(),
@@ -4182,114 +4286,42 @@ function lastDeliveryId(rows) {
   }
   return null;
 }
-function atomicWriteFile(filePath, data, mode) {
-  const dir = path.dirname(filePath);
-  fs.mkdirSync(dir, { recursive: true, mode: 448 });
-  const tmp = path.join(dir, `.${path.basename(filePath)}.${process.pid}.tmp`);
-  fs.writeFileSync(tmp, data, mode === void 0 ? {} : { mode });
-  fs.renameSync(tmp, filePath);
-  if (mode !== void 0) {
-    fs.chmodSync(filePath, mode);
-  }
-}
-function readJsonFile(filePath) {
+var ALWAYS_ON_WANTED = "always-on.wanted";
+var HEARTBEAT_FILE = "daemon.heartbeat";
+var HEARTBEAT_STALE_MS = 3 * 6e4;
+function markAlwaysOnWanted(home) {
   try {
-    const raw = fs.readFileSync(filePath, "utf-8");
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-var DEFAULT_API_BASE = "https://api.agentchat.me";
-var CredentialsSchema = external_exports.object({
-  api_key: external_exports.string().min(20),
-  handle: external_exports.string().min(3),
-  api_base: external_exports.string().url().optional(),
-  created_at: external_exports.string().optional()
-});
-function credentialsPath(home) {
-  return path2.join(home, "credentials");
-}
-function pendingPath(home) {
-  return path2.join(home, "pending.json");
-}
-function statePath(home) {
-  return path2.join(home, "state.json");
-}
-function readCredentials(home) {
-  const raw = readJsonFile(credentialsPath(home));
-  if (raw === null) return null;
-  const parsed = CredentialsSchema.safeParse(raw);
-  return parsed.success ? parsed.data : null;
-}
-function resolveIdentity(home) {
-  const envKey = process.env["AGENTCHAT_API_KEY"];
-  const envBase = process.env["AGENTCHAT_API_BASE"];
-  const file = readCredentials(home);
-  if (envKey && envKey.trim().length >= 20) {
-    return {
-      apiKey: envKey.trim(),
-      apiBase: envBase?.trim() || file?.api_base || DEFAULT_API_BASE,
-      handle: file?.handle ?? null,
-      source: "env"
-    };
-  }
-  if (envKey && envKey.trim().length > 0 && file) {
-    log.warn(
-      "AGENTCHAT_API_KEY is set but malformed (under 20 chars); using the credentials-file identity instead"
-    );
-  }
-  if (file) {
-    return {
-      apiKey: file.api_key,
-      apiBase: envBase?.trim() || file.api_base || DEFAULT_API_BASE,
-      handle: file.handle,
-      source: "file"
-    };
-  }
-  return null;
-}
-function writeCredentials(home, creds) {
-  atomicWriteFile(credentialsPath(home), JSON.stringify(creds, null, 2) + "\n", 384);
-}
-function clearCredentials(home) {
-  let removed = false;
-  for (const p of [credentialsPath(home), pendingPath(home)]) {
-    try {
-      fs2.unlinkSync(p);
-      removed = true;
-    } catch {
-    }
-  }
-  return removed;
-}
-var PendingSchema = external_exports.object({
-  // 'register' creates a new agent; 'recover' re-keys an existing one.
-  // Both share the two-invocation OTP shape, so they share this file — the
-  // kind guard stops `register --code` completing a recovery (and vice
-  // versa) with confusing results.
-  kind: external_exports.enum(["register", "recover"]).default("register"),
-  pending_id: external_exports.string().min(1),
-  email: external_exports.string().email(),
-  handle: external_exports.string().min(3).optional(),
-  api_base: external_exports.string().url().optional(),
-  created_at: external_exports.string()
-});
-function readPending(home) {
-  const raw = readJsonFile(pendingPath(home));
-  if (raw === null) return null;
-  const parsed = PendingSchema.safeParse(raw);
-  return parsed.success ? parsed.data : null;
-}
-function writePending(home, pending) {
-  atomicWriteFile(pendingPath(home), JSON.stringify(pending, null, 2) + "\n", 384);
-}
-function clearPending(home) {
-  try {
-    fs2.unlinkSync(pendingPath(home));
+    fs4.mkdirSync(home, { recursive: true });
+    fs4.writeFileSync(path4.join(home, ALWAYS_ON_WANTED), "");
   } catch {
   }
 }
+function clearAlwaysOnWanted(home) {
+  try {
+    fs4.rmSync(path4.join(home, ALWAYS_ON_WANTED), { force: true });
+  } catch {
+  }
+}
+function alwaysOnWanted(home) {
+  return fs4.existsSync(path4.join(home, ALWAYS_ON_WANTED));
+}
+function alwaysOnHealth(home) {
+  if (!alwaysOnWanted(home)) return { wanted: false, healthy: true };
+  try {
+    const age = Date.now() - fs4.statSync(path4.join(home, HEARTBEAT_FILE)).mtimeMs;
+    return { wanted: true, healthy: age <= HEARTBEAT_STALE_MS };
+  } catch {
+    return { wanted: true, healthy: false };
+  }
+}
+
+// @agentchatme/agent-core/dist/index.js
+import * as fs from "fs";
+import * as path from "path";
+import * as fs22 from "fs";
+import * as os from "os";
+import * as path22 from "path";
+import { spawnSync, spawn } from "child_process";
 var SESSION_TTL_MS = 48 * 60 * 60 * 1e3;
 var SessionStateSchema = external_exports.object({
   continuations: external_exports.number().int().min(0),
@@ -4518,11 +4550,11 @@ function renderAnchorBlock(handle) {
   ].join("\n");
 }
 function writeAnchor(filePath, block, expectHandle) {
-  fs3.mkdirSync(path3.dirname(filePath), { recursive: true });
-  const existing = fs3.existsSync(filePath) ? fs3.readFileSync(filePath, "utf-8") : "";
-  fs3.writeFileSync(filePath, upsertAnchorBlock(existing, block), "utf-8");
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const existing = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8") : "";
+  fs.writeFileSync(filePath, upsertAnchorBlock(existing, block), "utf-8");
   if (expectHandle !== void 0) {
-    const verify = fs3.readFileSync(filePath, "utf-8");
+    const verify = fs.readFileSync(filePath, "utf-8");
     if (!verify.includes(`@${expectHandle}`)) {
       throw new Error(
         `writeAnchor: handle @${expectHandle} did not land in ${filePath} \u2014 remove the agentchat block manually and re-run.`
@@ -4532,20 +4564,20 @@ function writeAnchor(filePath, block, expectHandle) {
   return "written";
 }
 function removeAnchorAt(filePath) {
-  if (!fs3.existsSync(filePath)) return "noop";
-  const existing = fs3.readFileSync(filePath, "utf-8");
+  if (!fs.existsSync(filePath)) return "noop";
+  const existing = fs.readFileSync(filePath, "utf-8");
   const next = stripAnchorBlock(existing);
   if (next === existing) return "noop";
-  fs3.writeFileSync(filePath, next, "utf-8");
+  fs.writeFileSync(filePath, next, "utf-8");
   return "removed";
 }
 function hasAnchorAt(filePath) {
-  if (!fs3.existsSync(filePath)) return false;
-  return findBlock(fs3.readFileSync(filePath, "utf-8"), ANCHOR_START, ANCHOR_END) !== null;
+  if (!fs.existsSync(filePath)) return false;
+  return findBlock(fs.readFileSync(filePath, "utf-8"), ANCHOR_START, ANCHOR_END) !== null;
 }
 function readAnchorHandleAt(filePath) {
-  if (!fs3.existsSync(filePath)) return null;
-  return readAnchorHandleFrom(fs3.readFileSync(filePath, "utf-8"));
+  if (!fs.existsSync(filePath)) return null;
+  return readAnchorHandleFrom(fs.readFileSync(filePath, "utf-8"));
 }
 function readAnchorHandleFrom(text) {
   const block = findBlock(text, ANCHOR_START, ANCHOR_END);
@@ -4596,34 +4628,6 @@ function stripAllBlocks(existing, start, end) {
     else text = before + "\n\n" + after + (after.endsWith("\n") ? "" : "\n");
   }
   return text;
-}
-var ALWAYS_ON_WANTED = "always-on.wanted";
-var HEARTBEAT_FILE = "daemon.heartbeat";
-var HEARTBEAT_STALE_MS = 3 * 6e4;
-function markAlwaysOnWanted(home) {
-  try {
-    fs4.mkdirSync(home, { recursive: true });
-    fs4.writeFileSync(path4.join(home, ALWAYS_ON_WANTED), "");
-  } catch {
-  }
-}
-function clearAlwaysOnWanted(home) {
-  try {
-    fs4.rmSync(path4.join(home, ALWAYS_ON_WANTED), { force: true });
-  } catch {
-  }
-}
-function alwaysOnWanted(home) {
-  return fs4.existsSync(path4.join(home, ALWAYS_ON_WANTED));
-}
-function alwaysOnHealth(home) {
-  if (!alwaysOnWanted(home)) return { wanted: false, healthy: true };
-  try {
-    const age = Date.now() - fs4.statSync(path4.join(home, HEARTBEAT_FILE)).mtimeMs;
-    return { wanted: true, healthy: age <= HEARTBEAT_STALE_MS };
-  } catch {
-    return { wanted: true, healthy: false };
-  }
 }
 var SESSION_START_PEEK_LIMIT = 100;
 var STOP_PEEK_LIMIT = 50;
@@ -4800,8 +4804,8 @@ function plan(opts) {
   return {
     label: opts.label,
     node: process.execPath,
-    bin: process.argv[1] ?? "",
-    home: path6.resolve(opts.home),
+    bin: path22.resolve(opts.entry),
+    home: path22.resolve(opts.home),
     env
   };
 }
@@ -4810,7 +4814,7 @@ function run(cmd, args) {
   return { ok: !r.error && r.status === 0, out: `${r.stdout ?? ""}${r.stderr ?? ""}`.trim() };
 }
 function systemdUnitPath(label) {
-  return path6.join(os.homedir(), ".config", "systemd", "user", `${label}.service`);
+  return path22.join(os.homedir(), ".config", "systemd", "user", `${label}.service`);
 }
 function systemdUnit(p) {
   const envLines = Object.entries(p.env).map(([k, v]) => `Environment=${k}=${v}`).join("\n");
@@ -4822,7 +4826,7 @@ function systemdUnit(p) {
     "",
     "[Service]",
     "Type=simple",
-    `ExecStart=${p.node} ${p.bin} start --home ${p.home}`,
+    `ExecStart=${p.node} ${p.bin} --home ${p.home}`,
     ...envLines ? [envLines] : [],
     "Restart=on-failure",
     "RestartSec=5",
@@ -4834,8 +4838,8 @@ function systemdUnit(p) {
 }
 function installSystemd(p) {
   const unitPath = systemdUnitPath(p.label);
-  fs6.mkdirSync(path6.dirname(unitPath), { recursive: true });
-  fs6.writeFileSync(unitPath, systemdUnit(p));
+  fs22.mkdirSync(path22.dirname(unitPath), { recursive: true });
+  fs22.writeFileSync(unitPath, systemdUnit(p));
   log.info(`wrote ${unitPath}`);
   run("systemctl", ["--user", "daemon-reload"]);
   const linger = run("loginctl", ["enable-linger", os.userInfo().username]);
@@ -4849,7 +4853,7 @@ function installSystemd(p) {
 function uninstallSystemd(label) {
   run("systemctl", ["--user", "disable", "--now", label]);
   const unitPath = systemdUnitPath(label);
-  if (fs6.existsSync(unitPath)) fs6.rmSync(unitPath);
+  if (fs22.existsSync(unitPath)) fs22.rmSync(unitPath);
   run("systemctl", ["--user", "daemon-reload"]);
   log.info(`service ${label} removed`);
 }
@@ -4859,14 +4863,14 @@ function statusSystemd(label) {
   return `systemd ${label}: ${active} (${enabled})`;
 }
 function launchdPlistPath(label) {
-  return path6.join(os.homedir(), "Library", "LaunchAgents", `${launchdLabel(label)}.plist`);
+  return path22.join(os.homedir(), "Library", "LaunchAgents", `${launchdLabel(label)}.plist`);
 }
 var launchdLabel = (label) => `me.agentchat.${label}`;
 function launchdPlist(p) {
-  const args = [p.node, p.bin, "start", "--home", p.home];
+  const args = [p.node, p.bin, "--home", p.home];
   const argXml = args.map((a) => `    <string>${a}</string>`).join("\n");
   const envXml = Object.entries(p.env).map(([k, v]) => `    <key>${k}</key><string>${v}</string>`).join("\n");
-  const logPath = path6.join(p.home, "daemon.log");
+  const logPath = path22.join(p.home, "daemon.log");
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
@@ -4886,8 +4890,8 @@ function launchdPlist(p) {
 }
 function installLaunchd(p) {
   const plistPath = launchdPlistPath(p.label);
-  fs6.mkdirSync(path6.dirname(plistPath), { recursive: true });
-  fs6.writeFileSync(plistPath, launchdPlist(p));
+  fs22.mkdirSync(path22.dirname(plistPath), { recursive: true });
+  fs22.writeFileSync(plistPath, launchdPlist(p));
   log.info(`wrote ${plistPath}`);
   run("launchctl", ["unload", plistPath]);
   const loaded = run("launchctl", ["load", "-w", plistPath]);
@@ -4897,7 +4901,7 @@ function installLaunchd(p) {
 function uninstallLaunchd(label) {
   const plistPath = launchdPlistPath(label);
   run("launchctl", ["unload", "-w", plistPath]);
-  if (fs6.existsSync(plistPath)) fs6.rmSync(plistPath);
+  if (fs22.existsSync(plistPath)) fs22.rmSync(plistPath);
   log.info(`service ${launchdLabel(label)} removed`);
 }
 function statusLaunchd(label) {
@@ -4910,7 +4914,7 @@ function isWslFromVersion(version) {
 function isWsl() {
   if (process.platform !== "linux") return false;
   try {
-    return isWslFromVersion(fs6.readFileSync("/proc/version", "utf-8"));
+    return isWslFromVersion(fs22.readFileSync("/proc/version", "utf-8"));
   } catch {
     return false;
   }
@@ -4921,16 +4925,16 @@ function winMode() {
   return null;
 }
 function winMasterDir() {
-  return path6.join(os.homedir(), ".agentchat", "daemon");
+  return path22.join(os.homedir(), ".agentchat", "daemon");
 }
 function winStartupDir(mode) {
   if (mode === "win32") {
-    return path6.join(os.homedir(), "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
+    return path22.join(os.homedir(), "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
   }
   const appdata = run("cmd.exe", ["/c", "echo %APPDATA%"]).out.split(/\r?\n/).pop()?.trim() ?? "";
   const base = run("wslpath", ["-u", appdata]).out.trim();
   if (!base) throw new Error("could not locate the Windows Startup folder from WSL (is /mnt/c mounted?)");
-  return path6.join(base, "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
+  return path22.join(base, "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
 }
 var vbsEscape = (s) => s.replace(/"/g, '""');
 var shQuote = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
@@ -4949,11 +4953,11 @@ function launcherVbs(command, env) {
   ].join("\r\n") + "\r\n";
 }
 function winCommandNative(p) {
-  return `"${p.node}" "${p.bin}" start --home "${p.home}"`;
+  return `"${p.node}" "${p.bin}" --home "${p.home}"`;
 }
 function wslScriptContent(p) {
   const exports = Object.entries(p.env).map(([k, v]) => `export ${k}=${shQuote(v)}`);
-  return ["#!/bin/bash", ...exports, `exec ${shQuote(p.node)} ${shQuote(p.bin)} start --home ${shQuote(p.home)}`].join(
+  return ["#!/bin/bash", ...exports, `exec ${shQuote(p.node)} ${shQuote(p.bin)} --home ${shQuote(p.home)}`].join(
     "\n"
   ) + "\n";
 }
@@ -4974,34 +4978,34 @@ function killLauncher(label, mode) {
 }
 function installWindows(p, mode) {
   const master = winMasterDir();
-  fs6.mkdirSync(master, { recursive: true });
-  const masterVbs = path6.join(master, `${p.label}.vbs`);
+  fs22.mkdirSync(master, { recursive: true });
+  const masterVbs = path22.join(master, `${p.label}.vbs`);
   if (mode === "win32") {
-    fs6.writeFileSync(masterVbs, launcherVbs(winCommandNative(p), p.env));
+    fs22.writeFileSync(masterVbs, launcherVbs(winCommandNative(p), p.env));
   } else {
-    const scriptPath = path6.join(master, `${p.label}.sh`);
-    fs6.writeFileSync(scriptPath, wslScriptContent(p), { mode: 493 });
+    const scriptPath = path22.join(master, `${p.label}.sh`);
+    fs22.writeFileSync(scriptPath, wslScriptContent(p), { mode: 493 });
     const distro = process.env["WSL_DISTRO_NAME"] ?? "";
     if (!distro) throw new Error("WSL_DISTRO_NAME is not set \u2014 cannot target the right WSL distro");
-    fs6.writeFileSync(masterVbs, launcherVbs(`wsl.exe -d ${distro} -e bash "${scriptPath}"`, {}));
+    fs22.writeFileSync(masterVbs, launcherVbs(`wsl.exe -d ${distro} -e bash "${scriptPath}"`, {}));
   }
   log.info(`wrote ${masterVbs}`);
   enableWindows(p.label, mode);
   log.info(`service ${p.label} installed (starts at login)`);
 }
 function enableWindows(label, mode) {
-  const masterVbs = path6.join(winMasterDir(), `${label}.vbs`);
-  if (!fs6.existsSync(masterVbs)) throw new Error(`no ${label} daemon installed \u2014 run install first`);
+  const masterVbs = path22.join(winMasterDir(), `${label}.vbs`);
+  if (!fs22.existsSync(masterVbs)) throw new Error(`no ${label} daemon installed \u2014 run install first`);
   const startup = winStartupDir(mode);
-  fs6.mkdirSync(startup, { recursive: true });
-  const startupVbs = path6.join(startup, `${label}.vbs`);
-  fs6.copyFileSync(masterVbs, startupVbs);
+  fs22.mkdirSync(startup, { recursive: true });
+  const startupVbs = path22.join(startup, `${label}.vbs`);
+  fs22.copyFileSync(masterVbs, startupVbs);
   if (mode === "win32") startDetached("wscript.exe", [startupVbs]);
   else startDetached("cmd.exe", ["/c", "start", "", "/b", "wscript.exe", winPathFromWsl(startupVbs)]);
 }
 function disableWindows(label, mode) {
-  const startupVbs = path6.join(winStartupDir(mode), `${label}.vbs`);
-  if (fs6.existsSync(startupVbs)) fs6.rmSync(startupVbs);
+  const startupVbs = path22.join(winStartupDir(mode), `${label}.vbs`);
+  if (fs22.existsSync(startupVbs)) fs22.rmSync(startupVbs);
   killLauncher(label, mode);
 }
 function uninstallWindows(label, mode) {
@@ -5010,15 +5014,15 @@ function uninstallWindows(label, mode) {
   } catch {
   }
   for (const f of [`${label}.vbs`, `${label}.sh`]) {
-    const m = path6.join(winMasterDir(), f);
-    if (fs6.existsSync(m)) fs6.rmSync(m);
+    const m = path22.join(winMasterDir(), f);
+    if (fs22.existsSync(m)) fs22.rmSync(m);
   }
 }
 function statusWindows(label, mode) {
-  const installed = fs6.existsSync(path6.join(winMasterDir(), `${label}.vbs`));
+  const installed = fs22.existsSync(path22.join(winMasterDir(), `${label}.vbs`));
   let enabled = false;
   try {
-    enabled = fs6.existsSync(path6.join(winStartupDir(mode), `${label}.vbs`));
+    enabled = fs22.existsSync(path22.join(winStartupDir(mode), `${label}.vbs`));
   } catch {
   }
   const host = mode === "wsl" ? "wsl" : "windows";
@@ -5026,7 +5030,7 @@ function statusWindows(label, mode) {
 }
 function installService(opts) {
   const p = plan(opts);
-  if (!p.bin) throw new Error("could not resolve the daemon entrypoint (process.argv[1])");
+  if (!p.bin) throw new Error("no daemon entrypoint given (ServiceOpts.entry)");
   const wm = winMode();
   if (wm) return installWindows(p, wm);
   if (process.platform === "linux") return installSystemd(p);
@@ -5064,6 +5068,15 @@ function anchorFile() {
 }
 var LABEL = "Claude Code";
 var SERVICE_LABEL = "agentchatd-claude-code";
+function shippedDaemonPath() {
+  const self = process.argv[1];
+  const dir = self ? path5.dirname(self) : process.cwd();
+  return path5.join(dir, DAEMON_FILENAME);
+}
+function stableDaemonPath() {
+  return path5.join(identityHome(), "bin", DAEMON_FILENAME);
+}
+var DAEMON_FILENAME = "agentchat-daemon.mjs";
 function invocation() {
   const override = process.env["AGENTCHAT_CLI_NAME"]?.trim();
   if (override !== void 0 && override.length > 0) return override;
@@ -6926,6 +6939,17 @@ async function main(argv = process.argv.slice(2)) {
       return 1;
   }
 }
+function installDaemonBundle(home) {
+  const src = shippedDaemonPath();
+  if (!fs5.existsSync(src)) {
+    throw new Error(`the daemon bundle is missing from this plugin install (expected ${src})`);
+  }
+  const dest = stableDaemonPath();
+  fs5.mkdirSync(path6.dirname(dest), { recursive: true });
+  fs5.copyFileSync(src, dest);
+  fs5.chmodSync(dest, 493);
+  return dest;
+}
 function runDaemonCmd(sub) {
   const home = identityHome();
   switch (sub) {
@@ -6936,7 +6960,8 @@ function runDaemonCmd(sub) {
         return 1;
       }
       try {
-        installService({ label: SERVICE_LABEL, home, env: serviceEnv() });
+        const entry = installDaemonBundle(home);
+        installService({ label: SERVICE_LABEL, home, entry, env: serviceEnv() });
       } catch (err) {
         console.error(`Could not install the always-on service: ${String(err)}`);
         return 1;

@@ -34,6 +34,30 @@ export function anchorFile(): string {
 export const LABEL = 'Claude Code'
 export const SERVICE_LABEL = 'agentchatd-claude-code'
 
+/** The daemon bundle as it ships inside the plugin, beside the CLI. */
+export function shippedDaemonPath(): string {
+  const self = process.argv[1]
+  const dir = self ? path.dirname(self) : process.cwd()
+  return path.join(dir, DAEMON_FILENAME)
+}
+
+/**
+ * Where the always-on service actually runs the daemon from.
+ *
+ * NOT the plugin's own copy. Claude Code installs a plugin into a
+ * VERSION-SCOPED cache directory (`…/plugins/cache/<mp>/<plugin>/<version>/`),
+ * so a unit pointing inside it silently dies the next time the plugin updates
+ * and that directory goes away — always-on would stop with nothing to show for
+ * it but a restart-looping service. The identity home is durable and already
+ * this agent's own scope, so `daemon install` copies the bundle here and points
+ * the service at the copy.
+ */
+export function stableDaemonPath(): string {
+  return path.join(identityHome(), 'bin', DAEMON_FILENAME)
+}
+
+const DAEMON_FILENAME = 'agentchat-daemon.mjs'
+
 /**
  * Exactly what a user types to reach this integration. The plugin ships its
  * own bundle, so hooks and the first-run offer invoke an absolute path — the

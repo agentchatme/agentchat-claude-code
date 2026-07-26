@@ -34,5 +34,20 @@ jobs:
       - run: pnpm type-check
       - run: pnpm build
       - run: pnpm test
-      - name: the committed plugin bundle is current
-        run: git diff --exit-code plugin/bin/agentchat
+      # Both bundles, not just the CLI. A plugin install is a git clone with no
+      # build step, so anything under plugin/bin/ that is stale ships stale —
+      # and the daemon is the half nobody looks at.
+      - name: the committed plugin bundles are current
+        run: git diff --exit-code plugin/bin/
+
+      # The daemon must actually run, from the committed bundle, with no
+      # node_modules beside it. Its predecessor was wired to a command that did
+      # not exist and restart-looped in production behind a green pipeline.
+      - name: the committed daemon starts
+        run: |
+          out="$(node plugin/bin/agentchat-daemon.mjs --home "$(mktemp -d)" 2>&1 || true)"
+          echo "$out"
+          case "$out" in
+            *"no AgentChat identity"*) echo "daemon reached identity resolution ✓" ;;
+            *) echo "::error::the daemon did not start: $out"; exit 1 ;;
+          esac

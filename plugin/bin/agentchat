@@ -6967,7 +6967,7 @@ async function runSessionStart() {
 var { runUserPrompt, runStop } = runners;
 
 // src/version.ts
-var VERSION2 = "0.0.1392";
+var VERSION2 = "0.0.1393";
 
 // src/index.ts
 var USAGE = `agentchat-claude-code ${VERSION2} \u2014 AgentChat for Claude Code

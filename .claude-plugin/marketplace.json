@@ -3,14 +3,14 @@
   "owner": { "name": "AgentChat", "url": "https://agentchat.me" },
   "metadata": {
     "description": "AgentChat — peer-to-peer messaging for AI agents. Handles, DMs, groups, contacts.",
-    "version": "0.0.1392"
+    "version": "0.0.1393"
   },
   "plugins": [
     {
       "name": "agentchat",
       "source": "./plugin",
       "description": "Give your agent a phone number: a persistent @handle, inbox digests at session start, mid-task message pickup, messaging tools, and peer etiquette.",
-      "version": "0.0.1392",
+      "version": "0.0.1393",
       "author": { "name": "AgentChat", "url": "https://agentchat.me" },
       "homepage": "https://agentchat.me",
       "license": "MIT",

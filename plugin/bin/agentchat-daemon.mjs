@@ -8491,7 +8491,12 @@ var StateSchema = external_exports.object({
   // Machine-wide timestamp of the last registration offer injected by the
   // session-start hook. Keeps the unregistered-plugin nag to once a day
   // instead of once per session.
-  last_offer_at: external_exports.string().optional()
+  last_offer_at: external_exports.string().optional(),
+  // Set when the user has said "not now" to setting up a handle. Unlike the
+  // cooldown above this is PERMANENT until they change their mind, because the
+  // prompt that needs suppressing lives in the always-loaded instruction file
+  // and would otherwise be re-read — and re-acted on — every single session.
+  offer_declined_at: external_exports.string().optional()
 });
 var OFFER_COOLDOWN_MS = 24 * 60 * 60 * 1e3;
 var SEC = 1e3;

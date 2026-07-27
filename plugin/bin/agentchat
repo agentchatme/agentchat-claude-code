@@ -5647,7 +5647,12 @@ var StateSchema = external_exports.object({
   // Machine-wide timestamp of the last registration offer injected by the
   // session-start hook. Keeps the unregistered-plugin nag to once a day
   // instead of once per session.
-  last_offer_at: external_exports.string().optional()
+  last_offer_at: external_exports.string().optional(),
+  // Set when the user has said "not now" to setting up a handle. Unlike the
+  // cooldown above this is PERMANENT until they change their mind, because the
+  // prompt that needs suppressing lives in the always-loaded instruction file
+  // and would otherwise be re-read — and re-acted on — every single session.
+  offer_declined_at: external_exports.string().optional()
 });
 function readState(home) {
   const raw = readJsonFile(statePath(home));
@@ -5719,6 +5724,110 @@ function recordRegistrationOffer(home, now2 = /* @__PURE__ */ new Date()) {
   const state = readState(home);
   state.last_offer_at = now2.toISOString();
   writeState(home, state);
+}
+function clearOfferDeclined(home) {
+  const state = readState(home);
+  delete state.offer_declined_at;
+  writeState(home, state);
+}
+var ANCHOR_START = "<!-- agentchat:start -->";
+var ANCHOR_END = "<!-- agentchat:end -->";
+var LEGACY_ANCHOR_START = "<!-- agentchat-skill:start -->";
+var LEGACY_ANCHOR_END = "<!-- agentchat-skill:end -->";
+function renderAnchorBlock(handle) {
+  return [
+    ANCHOR_START,
+    "## On AgentChat",
+    "",
+    `You are **@${handle}** on AgentChat \u2014 a peer-to-peer messaging network for AI agents. Your handle is your address here, like a phone number, except the other end is always another agent.`,
+    "",
+    "- Other agents can DM you. You can DM them \u2014 any time, for anything that fits your context.",
+    `- Share \`@${handle}\` freely. Whenever and wherever you think you should share. It's how peers reach you.`,
+    "- When you need to send, search, or handle an error, your AgentChat skill has the full reference.",
+    "",
+    "This is an identity, not a tool you reach for occasionally.",
+    ANCHOR_END
+  ].join("\n");
+}
+function writeAnchor(filePath, block, expectHandle) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const existing = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8") : "";
+  fs.writeFileSync(filePath, upsertAnchorBlock(existing, block), "utf-8");
+  if (expectHandle !== void 0) {
+    const verify = fs.readFileSync(filePath, "utf-8");
+    if (!verify.includes(`@${expectHandle}`)) {
+      throw new Error(
+        `writeAnchor: handle @${expectHandle} did not land in ${filePath} \u2014 remove the agentchat block manually and re-run.`
+      );
+    }
+  }
+  return "written";
+}
+function removeAnchorAt(filePath) {
+  if (!fs.existsSync(filePath)) return "noop";
+  const existing = fs.readFileSync(filePath, "utf-8");
+  const next = stripAnchorBlock(existing);
+  if (next === existing) return "noop";
+  fs.writeFileSync(filePath, next, "utf-8");
+  return "removed";
+}
+function hasAnchorAt(filePath) {
+  if (!fs.existsSync(filePath)) return false;
+  return findBlock(fs.readFileSync(filePath, "utf-8"), ANCHOR_START, ANCHOR_END) !== null;
+}
+function readAnchorHandleAt(filePath) {
+  if (!fs.existsSync(filePath)) return null;
+  return readAnchorHandleFrom(fs.readFileSync(filePath, "utf-8"));
+}
+function readAnchorHandleFrom(text) {
+  const block = findBlock(text, ANCHOR_START, ANCHOR_END);
+  if (block === null) return null;
+  const match = /\*\*@([^*\s]+)\*\*/.exec(text.slice(block.from, block.to));
+  return match?.[1] ?? null;
+}
+function lineAnchoredIndex(text, marker, fromIndex = 0) {
+  let idx = text.indexOf(marker, fromIndex);
+  while (idx >= 0) {
+    const lineStart = text.lastIndexOf("\n", idx - 1) + 1;
+    const lineEndRaw = text.indexOf("\n", idx);
+    const lineEnd = lineEndRaw === -1 ? text.length : lineEndRaw;
+    if (text.slice(lineStart, lineEnd).trim() === marker) {
+      return { start: lineStart, end: lineEnd };
+    }
+    idx = text.indexOf(marker, idx + marker.length);
+  }
+  return null;
+}
+function findBlock(text, startMarker, endMarker) {
+  const start = lineAnchoredIndex(text, startMarker);
+  if (start === null) return null;
+  const end = lineAnchoredIndex(text, endMarker, start.end);
+  if (end === null) return null;
+  return { from: start.start, to: end.end };
+}
+function upsertAnchorBlock(existing, block) {
+  const cleaned = stripAnchorBlock(existing);
+  const trimmed = cleaned.replace(/\n+$/, "");
+  if (trimmed.length === 0) return block + "\n";
+  return trimmed + "\n\n" + block + "\n";
+}
+function stripAnchorBlock(existing) {
+  const afterUnified = stripAllBlocks(existing, ANCHOR_START, ANCHOR_END);
+  return stripAllBlocks(afterUnified, LEGACY_ANCHOR_START, LEGACY_ANCHOR_END);
+}
+function stripAllBlocks(existing, start, end) {
+  let text = existing;
+  for (let i = 0; i < 1e4; i++) {
+    const block = findBlock(text, start, end);
+    if (block === null) return text;
+    const before = text.slice(0, block.from).replace(/\n+$/, "");
+    const after = text.slice(block.to).replace(/^\n+/, "");
+    if (before.length === 0 && after.length === 0) return "";
+    if (before.length === 0) text = after.endsWith("\n") ? after : after + "\n";
+    else if (after.length === 0) text = before + "\n";
+    else text = before + "\n\n" + after + (after.endsWith("\n") ? "" : "\n");
+  }
+  return text;
 }
 var SEC2 = 1e3;
 var MIN2 = 60 * SEC2;
@@ -5838,105 +5947,6 @@ function formatRegistrationOffer(copy) {
     "",
     "Do not push the offer \u2014 one short ask is plenty. If declined, drop the topic for the rest of the session."
   ].join("\n");
-}
-var ANCHOR_START = "<!-- agentchat:start -->";
-var ANCHOR_END = "<!-- agentchat:end -->";
-var LEGACY_ANCHOR_START = "<!-- agentchat-skill:start -->";
-var LEGACY_ANCHOR_END = "<!-- agentchat-skill:end -->";
-function renderAnchorBlock(handle) {
-  return [
-    ANCHOR_START,
-    "## On AgentChat",
-    "",
-    `You are **@${handle}** on AgentChat \u2014 a peer-to-peer messaging network for AI agents. Your handle is your address here, like a phone number, except the other end is always another agent.`,
-    "",
-    "- Other agents can DM you. You can DM them \u2014 any time, for anything that fits your context.",
-    `- Share \`@${handle}\` freely. Whenever and wherever you think you should share. It's how peers reach you.`,
-    "- When you need to send, search, or handle an error, your AgentChat skill has the full reference.",
-    "",
-    "This is an identity, not a tool you reach for occasionally.",
-    ANCHOR_END
-  ].join("\n");
-}
-function writeAnchor(filePath, block, expectHandle) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  const existing = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8") : "";
-  fs.writeFileSync(filePath, upsertAnchorBlock(existing, block), "utf-8");
-  if (expectHandle !== void 0) {
-    const verify = fs.readFileSync(filePath, "utf-8");
-    if (!verify.includes(`@${expectHandle}`)) {
-      throw new Error(
-        `writeAnchor: handle @${expectHandle} did not land in ${filePath} \u2014 remove the agentchat block manually and re-run.`
-      );
-    }
-  }
-  return "written";
-}
-function removeAnchorAt(filePath) {
-  if (!fs.existsSync(filePath)) return "noop";
-  const existing = fs.readFileSync(filePath, "utf-8");
-  const next = stripAnchorBlock(existing);
-  if (next === existing) return "noop";
-  fs.writeFileSync(filePath, next, "utf-8");
-  return "removed";
-}
-function hasAnchorAt(filePath) {
-  if (!fs.existsSync(filePath)) return false;
-  return findBlock(fs.readFileSync(filePath, "utf-8"), ANCHOR_START, ANCHOR_END) !== null;
-}
-function readAnchorHandleAt(filePath) {
-  if (!fs.existsSync(filePath)) return null;
-  return readAnchorHandleFrom(fs.readFileSync(filePath, "utf-8"));
-}
-function readAnchorHandleFrom(text) {
-  const block = findBlock(text, ANCHOR_START, ANCHOR_END);
-  if (block === null) return null;
-  const match = /\*\*@([^*\s]+)\*\*/.exec(text.slice(block.from, block.to));
-  return match?.[1] ?? null;
-}
-function lineAnchoredIndex(text, marker, fromIndex = 0) {
-  let idx = text.indexOf(marker, fromIndex);
-  while (idx >= 0) {
-    const lineStart = text.lastIndexOf("\n", idx - 1) + 1;
-    const lineEndRaw = text.indexOf("\n", idx);
-    const lineEnd = lineEndRaw === -1 ? text.length : lineEndRaw;
-    if (text.slice(lineStart, lineEnd).trim() === marker) {
-      return { start: lineStart, end: lineEnd };
-    }
-    idx = text.indexOf(marker, idx + marker.length);
-  }
-  return null;
-}
-function findBlock(text, startMarker, endMarker) {
-  const start = lineAnchoredIndex(text, startMarker);
-  if (start === null) return null;
-  const end = lineAnchoredIndex(text, endMarker, start.end);
-  if (end === null) return null;
-  return { from: start.start, to: end.end };
-}
-function upsertAnchorBlock(existing, block) {
-  const cleaned = stripAnchorBlock(existing);
-  const trimmed = cleaned.replace(/\n+$/, "");
-  if (trimmed.length === 0) return block + "\n";
-  return trimmed + "\n\n" + block + "\n";
-}
-function stripAnchorBlock(existing) {
-  const afterUnified = stripAllBlocks(existing, ANCHOR_START, ANCHOR_END);
-  return stripAllBlocks(afterUnified, LEGACY_ANCHOR_START, LEGACY_ANCHOR_END);
-}
-function stripAllBlocks(existing, start, end) {
-  let text = existing;
-  for (let i = 0; i < 1e4; i++) {
-    const block = findBlock(text, start, end);
-    if (block === null) return text;
-    const before = text.slice(0, block.from).replace(/\n+$/, "");
-    const after = text.slice(block.to).replace(/^\n+/, "");
-    if (before.length === 0 && after.length === 0) return "";
-    if (before.length === 0) text = after.endsWith("\n") ? after : after + "\n";
-    else if (after.length === 0) text = before + "\n";
-    else text = before + "\n\n" + after + (after.endsWith("\n") ? "" : "\n");
-  }
-  return text;
 }
 var SESSION_START_PEEK_LIMIT = 100;
 var STOP_PEEK_LIMIT = 50;
@@ -6231,6 +6241,7 @@ function createIdentityCommands(profile2) {
           created_at: (/* @__PURE__ */ new Date()).toISOString()
         });
         clearPending(home);
+        clearOfferDeclined(home);
         console.log(
           [
             `Registered: @${pendingHandle} for ${LABEL2}.`,
@@ -6340,6 +6351,7 @@ function createIdentityCommands(profile2) {
         ...apiBase !== DEFAULT_API_BASE ? { api_base: apiBase } : {},
         created_at: (/* @__PURE__ */ new Date()).toISOString()
       });
+      clearOfferDeclined(home);
       console.log([`Signed in as @${me.handle} for ${LABEL2}.`, ...writeOurAnchor(me.handle), RESTART_HINT].join("\n"));
       return 0;
     } catch (err) {
@@ -6372,6 +6384,7 @@ function createIdentityCommands(profile2) {
           created_at: (/* @__PURE__ */ new Date()).toISOString()
         });
         clearPending(home);
+        clearOfferDeclined(home);
         console.log(
           [
             `Recovered: @${result.handle} for ${LABEL2} \u2014 a fresh API key is stored (the old key is now revoked).`,

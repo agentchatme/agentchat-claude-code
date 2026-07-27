@@ -43,6 +43,30 @@ const PARENT_ENV_KEYS = [
   'AI_AGENT',
 ]
 
+/**
+ * Is Claude Code signed in?
+ *
+ * NOT just `<config>/.credentials.json`. On macOS Claude Code keeps its
+ * credentials in the login Keychain (service `Claude Code-credentials`) and
+ * writes no such file — so a file-only check reports "not logged in" on every
+ * Mac, forever. Always-on could never connect on macOS, and the only trace was
+ * one line in a log nobody reads.
+ *
+ * The keychain probe is existence-only: `find-generic-password` without `-w`
+ * returns metadata, never the secret, does not prompt, and takes ~10ms. A
+ * daemon must never trigger a keychain prompt, so reading the secret is not an
+ * option even if we wanted it.
+ */
+export function claudeIsLoggedIn(configDir: string): boolean {
+  if (fs.existsSync(path.join(configDir, '.credentials.json'))) return true
+  if (process.platform !== 'darwin') return false
+  const r = spawnSync('security', ['find-generic-password', '-s', 'Claude Code-credentials'], {
+    encoding: 'utf-8',
+    timeout: 5_000,
+  })
+  return !r.error && r.status === 0
+}
+
 export class ClaudeAdapter implements RuntimeAdapter {
   readonly name = 'claude-code'
   // conversationId → true once we've created its session this process.
@@ -58,11 +82,8 @@ export class ClaudeAdapter implements RuntimeAdapter {
   async preflight(): Promise<{ ok: boolean; detail?: string }> {
     const which = spawnSync('claude', ['--version'], { encoding: 'utf-8' })
     if (which.error) return { ok: false, detail: 'claude CLI not found on PATH' }
-    if (!fs.existsSync(path.join(this.claudeConfigDir, '.credentials.json'))) {
-      return {
-        ok: false,
-        detail: `claude is not logged in (no .credentials.json in ${this.claudeConfigDir})`,
-      }
+    if (!claudeIsLoggedIn(this.claudeConfigDir)) {
+      return { ok: false, detail: 'claude is not logged in (run `claude` once and sign in)' }
     }
     fs.mkdirSync(this.workdir, { recursive: true })
     // Write the MCP config the spawned turns load — the AgentChat messaging

@@ -3726,7 +3726,7 @@ var init_wrapper = __esm({
 import { parseArgs } from "util";
 import * as path8 from "path";
 
-// @agentchatme/agent-core/dist/chunk-NEGTEBFK.js
+// @agentchatme/agent-core/dist/chunk-XLRPNQ7G.js
 import * as fs from "fs";
 import * as path from "path";
 import * as fs2 from "fs";
@@ -8535,6 +8535,15 @@ var PARENT_ENV_KEYS = [
   "CLAUDE_EFFORT",
   "AI_AGENT"
 ];
+function claudeIsLoggedIn(configDir) {
+  if (fs5.existsSync(path6.join(configDir, ".credentials.json"))) return true;
+  if (process.platform !== "darwin") return false;
+  const r = spawnSync("security", ["find-generic-password", "-s", "Claude Code-credentials"], {
+    encoding: "utf-8",
+    timeout: 5e3
+  });
+  return !r.error && r.status === 0;
+}
 var ClaudeAdapter = class {
   constructor(claudeConfigDir, identityHome2, workdir) {
     this.claudeConfigDir = claudeConfigDir;
@@ -8551,11 +8560,8 @@ var ClaudeAdapter = class {
   async preflight() {
     const which = spawnSync("claude", ["--version"], { encoding: "utf-8" });
     if (which.error) return { ok: false, detail: "claude CLI not found on PATH" };
-    if (!fs5.existsSync(path6.join(this.claudeConfigDir, ".credentials.json"))) {
-      return {
-        ok: false,
-        detail: `claude is not logged in (no .credentials.json in ${this.claudeConfigDir})`
-      };
+    if (!claudeIsLoggedIn(this.claudeConfigDir)) {
+      return { ok: false, detail: "claude is not logged in (run `claude` once and sign in)" };
     }
     fs5.mkdirSync(this.workdir, { recursive: true });
     this.mcpConfigPath = path6.join(this.workdir, "agentchat-mcp.json");

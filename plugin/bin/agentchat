@@ -7,7 +7,7 @@ import { parseArgs } from "util";
 import "fs";
 import "path";
 
-// @agentchatme/agent-core/dist/chunk-NEGTEBFK.js
+// @agentchatme/agent-core/dist/chunk-XLRPNQ7G.js
 import * as fs2 from "fs";
 import * as path2 from "path";
 import * as fs3 from "fs";
@@ -4292,7 +4292,7 @@ var HEARTBEAT_STALE_MS = 3 * 6e4;
 function markAlwaysOnWanted(home) {
   try {
     fs4.mkdirSync(home, { recursive: true });
-    fs4.writeFileSync(path4.join(home, ALWAYS_ON_WANTED), "");
+    fs4.writeFileSync(path4.join(home, ALWAYS_ON_WANTED), (/* @__PURE__ */ new Date()).toISOString());
   } catch {
   }
 }
@@ -4322,15 +4322,24 @@ function clearAlwaysOnOptOut(home) {
 function alwaysOnOptedOut(home) {
   return fs4.existsSync(path4.join(home, ALWAYS_ON_OPTOUT));
 }
+var STARTUP_GRACE_MS = 9e4;
 function alwaysOnState(home) {
   if (!alwaysOnWanted(home)) return "off";
   if (!fs4.existsSync(path4.join(home, "credentials"))) return "idle";
+  let beating = false;
   try {
     const age = Date.now() - fs4.statSync(path4.join(home, HEARTBEAT_FILE)).mtimeMs;
-    return age <= HEARTBEAT_STALE_MS ? "connected" : "down";
+    beating = age <= HEARTBEAT_STALE_MS;
   } catch {
-    return "down";
+    beating = false;
   }
+  if (beating) return "connected";
+  try {
+    const since = Date.now() - fs4.statSync(path4.join(home, ALWAYS_ON_WANTED)).mtimeMs;
+    if (since <= STARTUP_GRACE_MS) return "starting";
+  } catch {
+  }
+  return "down";
 }
 function alwaysOnHealth(home) {
   const state = alwaysOnState(home);
@@ -5925,28 +5934,44 @@ function formatStopPickup(handle, rows) {
 function formatAlwaysOnDown(copy) {
   return `\u26A0 Always-on is down \u2014 while you are away I won\u2019t be able to answer messages (they queue for your next session, nothing is lost). Turn it back on: \`${copy.invoke} daemon install\``;
 }
-function formatRegistrationOffer(copy) {
+function formatRegistrationOffer(copy, alwaysOn = "off") {
   const { invoke, label } = copy;
   return [
-    `The AgentChat plugin is installed but this ${label} agent has no AgentChat identity yet.`,
+    `This ${label} agent is on AgentChat but has no handle yet \u2014 no address other agents can reach it at.`,
     "",
-    "AgentChat gives you (the agent) a handle other agents can DM. If the user would like that, offer to set it up \u2014 and FIRST ask whether they already have an AgentChat account (e.g. from another machine, or a Hermes / OpenClaw agent), so you sign them in instead of creating a duplicate:",
-    `This ${label} agent gets its OWN handle \u2014 separate from any other coding agent on this machine, which is exactly what lets them DM each other. Use an email not already tied to another agent.`,
+    "If the moment is right, offer it in ONE plain sentence and let them answer. Do not paste this block,",
+    "do not list the commands, do not walk them through steps. You run the commands; they just talk to you.",
     "",
-    "NEW to AgentChat (most people):",
-    "  1. Ask for their email + a desired handle (3\u201330 chars, lowercase letters/digits/hyphens, must start with a letter).",
-    `  2. Run: ${invoke} register --email <email> --handle <handle>`,
-    `  3. A 6-digit code lands in their email; ask for it, then run: ${invoke} register --code <code>`,
+    "All you need from them is an email and a handle they like (3\u201330 characters, lowercase letters, digits",
+    "and hyphens, starting with a letter). Ask first whether they already have an AgentChat account \u2014 from",
+    "another machine, or a Hermes or OpenClaw agent \u2014 so you sign that one in instead of creating a second.",
+    `Either way this ${label} agent ends up with its own handle, separate from any other coding agent here,`,
+    "which is what lets them message each other.",
     "",
-    "ALREADY have an AgentChat agent \u2014 sign in, do NOT register a second one:",
-    `  \u2022 They have its API key (ac_\u2026):  ${invoke} login --api-key <ac_\u2026>`,
-    `  \u2022 They lost the key:  ${invoke} recover --email <email>, then relay the emailed 6-digit code: ${invoke} recover --code <code>`,
+    "Commands \u2014 yours to run, not to show:",
+    `  new account    ${invoke} register --email <email> --handle <handle>`,
+    `                 then, with the 6-digit code they were emailed: ${invoke} register --code <code>`,
+    `  has an API key ${invoke} login --api-key <ac_\u2026>`,
+    `  lost the key   ${invoke} recover --email <email>, then ${invoke} recover --code <code>`,
     "",
+    alwaysOnNote(alwaysOn, invoke),
     "",
-    "Always-on is already running \u2014 this agent answers DMs even when no session is open. There is nothing to switch on, so do not offer to.",
-    "",
-    "Do not push the offer \u2014 one short ask is plenty. If declined, drop the topic for the rest of the session."
+    `One ask is plenty. If they decline or change the subject, drop it \u2014 and \`${invoke} register --not-now\``,
+    "stops it being raised in future sessions too."
   ].join("\n");
+}
+function alwaysOnNote(state, invoke) {
+  switch (state) {
+    case "connected":
+      return "Always-on is running: this agent answers DMs even with no session open. Nothing to switch on.";
+    case "idle":
+    case "starting":
+      return "Always-on is set up and will start answering DMs on its own as soon as there is a handle. Nothing to switch on.";
+    case "off":
+      return "Always-on is not set up here, so DMs are only seen during a session.";
+    case "down":
+      return `Always-on is registered but not running \u2014 \`${invoke} daemon status\` says why. DMs are only seen during a session until it recovers.`;
+  }
 }
 var SESSION_START_PEEK_LIMIT = 100;
 var STOP_PEEK_LIMIT = 50;
@@ -5996,7 +6021,7 @@ async function sessionStart(ctx, input) {
     if (identity === null) {
       if (shouldOfferRegistration(ctx.home)) {
         recordRegistrationOffer(ctx.home);
-        return { context: formatRegistrationOffer(ctx.copy) };
+        return { context: formatRegistrationOffer(ctx.copy, alwaysOnState(ctx.home)) };
       }
       return none;
     }
@@ -6953,7 +6978,7 @@ var runners = createHookRunners(
   () => ({ home: identityHome(), copy: hostCopy() }),
   { sessionStartOutput, stopOutput, printJson }
 );
-async function runSessionStart() {
+function ensureAlwaysOnQuietly() {
   try {
     const r = ensureAlwaysOn();
     if (!r.ok && r.detail !== "switched off by the user") {
@@ -6962,12 +6987,22 @@ async function runSessionStart() {
   } catch (err) {
     log.warn(`always-on not registered: ${String(err)}`);
   }
+}
+async function runSessionStart() {
+  ensureAlwaysOnQuietly();
   await runners.runSessionStart();
 }
-var { runUserPrompt, runStop } = runners;
+async function runUserPrompt() {
+  ensureAlwaysOnQuietly();
+  await runners.runUserPrompt();
+}
+async function runStop() {
+  ensureAlwaysOnQuietly();
+  await runners.runStop();
+}
 
 // src/version.ts
-var VERSION2 = "0.0.1394";
+var VERSION2 = "0.0.13941";
 
 // src/index.ts
 var USAGE = `agentchat-claude-code ${VERSION2} \u2014 AgentChat for Claude Code

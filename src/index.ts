@@ -172,12 +172,13 @@ function runDaemonCmd(sub: string | undefined): number {
       return 0
     }
     case 'status': {
-      // Three states, not two. "Installed but signed out" is the daemon working
+      // Four live states, not two. "Installed but signed out" is the daemon working
       // correctly, and reporting it as broken nagged signed-out users forever.
       const state = alwaysOnState(home)
       const line = {
         off: 'always-on: off — this agent only answers while a session is open',
         idle: 'always-on: idle — running, waiting for a sign-in',
+        starting: 'always-on: starting — the service is coming online',
         connected: 'always-on: connected ✓ — answering DMs with no session open',
         down: 'always-on: NOT running — signed in, but no daemon is connected',
       }[state]

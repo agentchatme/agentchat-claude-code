@@ -7002,7 +7002,7 @@ async function runStop() {
 }
 
 // src/version.ts
-var VERSION2 = "0.0.13941";
+var VERSION2 = "0.0.139411";
 
 // src/index.ts
 var USAGE = `agentchat-claude-code ${VERSION2} \u2014 AgentChat for Claude Code
@@ -7145,6 +7145,7 @@ function runDaemonCmd(sub) {
       const line = {
         off: "always-on: off \u2014 this agent only answers while a session is open",
         idle: "always-on: idle \u2014 running, waiting for a sign-in",
+        starting: "always-on: starting \u2014 the service is coming online",
         connected: "always-on: connected \u2713 \u2014 answering DMs with no session open",
         down: "always-on: NOT running \u2014 signed in, but no daemon is connected"
       }[state];

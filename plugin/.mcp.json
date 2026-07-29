@@ -1,9 +1,8 @@
 {
   "mcpServers": {
     "agentchat": {
-      "command": "npx",
-      "args": ["-y", "@agentchatme/mcp"],
-      "env": { "AGENTCHAT_HOME": "${HOME}/.claude/agentchat" }
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/agentchat", "mcp-proxy"]
     }
   }
 }

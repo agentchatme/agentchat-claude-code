@@ -18,7 +18,7 @@ const dest = path.join(root, 'plugin', 'skills', 'agentchat', 'SKILL.md')
 
 const body = renderManual(
   {
-    invoke: 'agentchat',
+    invoke: 'node "${CLAUDE_PLUGIN_ROOT}/bin/agentchat"',
     label: 'Claude Code',
     peerLabel: 'Codex',
     peerInvoke: 'npx -y @agentchatme/codex',

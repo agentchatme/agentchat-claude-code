@@ -15,15 +15,20 @@
 // the CLI entrypoint, which imports the hooks.
 
 import * as fs from 'node:fs'
-import * as path from 'node:path'
 import {
   installService,
   uninstallService,
   markAlwaysOnWanted,
   alwaysOnWanted,
   alwaysOnOptedOut,
+  atomicCopyFile,
+  serviceDefinitionCurrent,
+  readAlwaysOnInstalledVersion,
+  markAlwaysOnInstalledVersion,
+  clearAlwaysOnInstalledVersion,
 } from '@agentchatme/agent-core'
 import { identityHome, SERVICE_LABEL, serviceEnv, shippedDaemonPath, stableDaemonPath } from './host.js'
+import { VERSION } from './version.js'
 
 export interface EnsureResult {
   ok: boolean
@@ -39,17 +44,25 @@ export function ensureAlwaysOn(opts: { force?: boolean } = {}): EnsureResult {
   // A deliberate `daemon disable` outranks any implicit re-registration. Only
   // an explicit `daemon install` clears it.
   if (!opts.force && alwaysOnOptedOut(home)) return { ok: false, detail: 'switched off by the user' }
-  if (!opts.force && alwaysOnWanted(home)) return { ok: true }
   try {
     const src = shippedDaemonPath()
     if (!fs.existsSync(src)) {
       throw new Error(`the daemon bundle is missing from this install (expected ${src})`)
     }
     const entry = stableDaemonPath()
-    fs.mkdirSync(path.dirname(entry), { recursive: true })
-    fs.copyFileSync(src, entry)
-    fs.chmodSync(entry, 0o755)
-    installService({ label: SERVICE_LABEL, home, entry, env: serviceEnv() })
+    const service = { label: SERVICE_LABEL, home, entry, env: serviceEnv() }
+    if (
+      !opts.force &&
+      alwaysOnWanted(home) &&
+      readAlwaysOnInstalledVersion(home) === VERSION &&
+      fs.existsSync(entry) &&
+      serviceDefinitionCurrent(service)
+    ) {
+      return { ok: true }
+    }
+    atomicCopyFile(src, entry)
+    installService(service)
+    markAlwaysOnInstalledVersion(home, VERSION)
     markAlwaysOnWanted(home)
     return { ok: true }
   } catch (err) {
@@ -59,5 +72,7 @@ export function ensureAlwaysOn(opts: { force?: boolean } = {}): EnsureResult {
 
 /** Remove the service. The only thing that does. */
 export function removeAlwaysOn(): void {
-  uninstallService({ label: SERVICE_LABEL, home: identityHome() })
+  const home = identityHome()
+  uninstallService({ label: SERVICE_LABEL, home })
+  clearAlwaysOnInstalledVersion(home)
 }

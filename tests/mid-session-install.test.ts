@@ -29,6 +29,8 @@ const CLI = path.join(__dirname, '..', 'plugin', 'bin', 'agentchat')
 let sandbox: string
 const claudeHome = (): string => path.join(sandbox, '.claude')
 const wanted = (): string => path.join(claudeHome(), 'agentchat', 'always-on.wanted')
+const stableDaemon = (): string =>
+  path.join(claudeHome(), 'agentchat', 'bin', 'agentchat-daemon.mjs')
 
 beforeEach(() => {
   sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-midsession-'))
@@ -85,6 +87,20 @@ describe('always-on survives an install that misses SessionStart', () => {
     // the startup grace reads — a constantly-refreshed marker would mask a
     // genuinely dead daemon forever.
     expect(fs.readFileSync(wanted(), 'utf-8')).toBe(first)
+  })
+
+  it('a later hook repairs a missing durable daemon instead of trusting the marker', async () => {
+    await hook('session-start')
+    expect(fs.existsSync(stableDaemon())).toBe(true)
+
+    fs.unlinkSync(stableDaemon())
+    const { code, out } = await hook('user-prompt')
+
+    expect(code, out).toBe(0)
+    expect(fs.existsSync(stableDaemon())).toBe(true)
+    expect(
+      fs.readFileSync(path.join(claudeHome(), 'agentchat', 'always-on.installed-version'), 'utf-8').trim(),
+    ).toMatch(/^\d+\.\d+\.\d+$/)
   })
 
   it('the tested event names are the ones the plugin actually wires', () => {

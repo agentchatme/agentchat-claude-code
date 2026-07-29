@@ -1,4 +1,5 @@
 import * as os from 'node:os'
+import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -12,13 +13,13 @@ import { fileURLToPath } from 'node:url'
 // of a runtime argument — so "acted on the wrong agent" is not a bug that can
 // be written here.
 //
-// Pinned to os.homedir()/.claude, NOT CLAUDE_CONFIG_DIR: the committed
-// plugin `.mcp.json` sets the MCP server's home to `${HOME}/.claude/agentchat`
-// and Claude Code does NOT substitute an unset CLAUDE_CONFIG_DIR — verified
-// empirically 2026-07-23 (`${CLAUDE_CONFIG_DIR}` stayed literal; the nested
-// `${VAR:-default}` form mangled the path). Both sides must resolve the same
-// folder, so this is the one that agrees with the shipped config.
+// Honour Claude Code's supported relocation knob. The plugin MCP config invokes
+// this bundle as a small proxy, so both the CLI/hooks and the MCP subprocess
+// resolve the fallback in executable code rather than relying on unsupported
+// `${VAR:-default}` interpolation inside JSON.
 export function claudeHome(): string {
+  const override = process.env['CLAUDE_CONFIG_DIR']
+  if (override !== undefined && override.trim().length > 0) return path.resolve(override)
   return path.join(os.homedir(), '.claude')
 }
 
@@ -42,6 +43,15 @@ export function shippedDaemonPath(): string {
   // beside the bundle, not beside its caller. The Codex integration had the
   // same bug and it made `daemon install` fail for every npx user.
   return path.join(path.dirname(fileURLToPath(import.meta.url)), DAEMON_FILENAME)
+}
+
+/** The plugin-owned MCP declaration, from either a real plugin cache or this
+ * repository's build layout. */
+export function pluginMcpConfigPath(): string {
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url))
+  const installed = path.resolve(moduleDir, '..', '.mcp.json')
+  if (fs.existsSync(installed)) return installed
+  return path.resolve(moduleDir, '..', 'plugin', '.mcp.json')
 }
 
 /**
@@ -79,5 +89,10 @@ export function hostCopy(): { invoke: string; label: string } {
 }
 
 export function serviceEnv(): Record<string, string> {
-  return {}
+  const env: Record<string, string> = {}
+  const configDir = process.env['CLAUDE_CONFIG_DIR']
+  if (configDir !== undefined && configDir.trim().length > 0) {
+    env['CLAUDE_CONFIG_DIR'] = path.resolve(configDir)
+  }
+  return env
 }

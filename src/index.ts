@@ -1,31 +1,28 @@
 import { parseArgs } from 'node:util'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { spawn } from 'node:child_process'
 import {
-  installService,
-  uninstallService,
   serviceStatus,
-  markAlwaysOnWanted,
   clearAlwaysOnWanted,
   markAlwaysOnOptOut,
   clearAlwaysOnOptOut,
-  alwaysOnOptedOut,
-  alwaysOnWanted,
   alwaysOnState,
+  removeAnchorAt,
 } from '@agentchatme/agent-core'
 import {
+  anchorFile,
   identityHome,
   invocation,
   SERVICE_LABEL,
-  serviceEnv,
   LABEL,
-  shippedDaemonPath,
   stableDaemonPath,
 } from './host.js'
 import { runRegister, runLogin, runRecover, runStatus, runLogout, runDoctor } from './identity.js'
 import { runSessionStart, runUserPrompt, runStop } from './hooks.js'
 import { ensureAlwaysOn, removeAlwaysOn } from './always-on.js'
 import { VERSION } from './version.js'
+import { AGENTCHAT_MCP_PACKAGE } from './adapter.js'
 
 const USAGE = `agentchat-claude-code ${VERSION} — AgentChat for Claude Code
 
@@ -37,6 +34,7 @@ Usage:
   ${invocation()} recover --code <6-digit-code>
   ${invocation()} status [--json]
   ${invocation()} logout
+  ${invocation()} uninstall                         prepare a clean plugin removal
   ${invocation()} doctor [--fix]
   ${invocation()} daemon <install|disable|status|uninstall>
 
@@ -123,11 +121,19 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     case 'logout':
       return runLogout()
 
+    case 'uninstall':
+      return runUninstall()
+
     case 'doctor':
       return runDoctor({ ...(values.fix === true ? { fix: true } : {}) })
 
     case 'daemon':
       return runDaemonCmd(subcommand)
+
+    // Internal plugin transport. Keeping path resolution in executable code is
+    // what makes CLAUDE_CONFIG_DIR work even when it is unset.
+    case 'mcp-proxy':
+      return runMcpProxy()
 
     case 'hook': {
       // Hooks always exit 0 — a failing hook must never break a session.
@@ -143,6 +149,72 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       console.error(USAGE)
       return 1
   }
+}
+
+async function runMcpProxy(): Promise<number> {
+  const env = { ...process.env }
+  env['AGENTCHAT_HOME'] = identityHome()
+  env['AGENTCHAT_CLIENT_NAME'] = 'claude-code'
+  env['AGENTCHAT_CLIENT_VERSION'] = VERSION
+
+  return await new Promise<number>((resolve) => {
+    const child = spawn('npx', ['-y', AGENTCHAT_MCP_PACKAGE], {
+      stdio: 'inherit',
+      env,
+      windowsHide: true,
+    })
+    const forward = (signal: NodeJS.Signals): void => {
+      try {
+        child.kill(signal)
+      } catch {
+        /* already gone */
+      }
+    }
+    process.once('SIGINT', () => forward('SIGINT'))
+    process.once('SIGTERM', () => forward('SIGTERM'))
+    child.once('error', (err) => {
+      console.error(`AgentChat MCP could not start: ${String(err)}`)
+      resolve(1)
+    })
+    child.once('close', (code) => resolve(code ?? 1))
+  })
+}
+
+function runUninstall(): number {
+  const home = identityHome()
+  const warnings: string[] = []
+  let serviceRemoved = true
+  try {
+    removeAlwaysOn()
+    clearAlwaysOnWanted(home)
+  } catch (err) {
+    serviceRemoved = false
+    warnings.push(`could not fully remove the always-on service: ${String(err)}`)
+  }
+
+  // A plugin has no uninstall lifecycle hook. Remember this opt-out before the
+  // user runs Claude's plugin command, otherwise any remaining hook event in
+  // the current session would immediately recreate the service.
+  markAlwaysOnOptOut(home)
+  if (removeAnchorAt(anchorFile()) === 'removed') {
+    console.log(`Removed the AgentChat anchor from ${anchorFile()}.`)
+  }
+  if (serviceRemoved) {
+    try {
+      fs.rmSync(stableDaemonPath(), { force: true })
+    } catch (err) {
+      warnings.push(`could not remove the durable daemon bundle: ${String(err)}`)
+    }
+  }
+
+  console.log(
+    serviceRemoved
+      ? 'AgentChat background service is off; your AgentChat identity was preserved.'
+      : 'AgentChat could not verify that the background service stopped; its durable bundle was preserved so the service cannot restart against a missing executable. Your AgentChat identity was preserved.',
+  )
+  console.log('Finish removing the plugin in Claude Code with: /plugin uninstall agentchat@agentchatme')
+  for (const warning of warnings) console.error(`Warning: ${warning}`)
+  return warnings.length > 0 ? 1 : 0
 }
 
 function runDaemonCmd(sub: string | undefined): number {

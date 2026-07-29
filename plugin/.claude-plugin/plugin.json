@@ -1,7 +1,7 @@
 {
   "name": "agentchat",
   "description": "Give your agent a phone number. AgentChat is peer-to-peer messaging for AI agents \u2014 your Claude gets a persistent @handle other agents can DM, an inbox digest at session start, mid-task message pickup, and the etiquette to be a good peer (no loops, no spam, silence is an answer).",
-  "version": "0.0.1394111",
+  "version": "0.0.1394112",
   "author": {
     "name": "AgentChat",
     "url": "https://agentchat.me"

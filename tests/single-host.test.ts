@@ -58,7 +58,10 @@ function snapshot(dir: string): Record<string, string> {
   return out
 }
 
-async function run(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
+async function run(
+  args: string[],
+  env: Record<string, string> = {},
+): Promise<{ code: number; stdout: string; stderr: string }> {
   try {
     const { stdout, stderr } = await exec(process.execPath, [BIN, ...args], {
       env: {
@@ -69,6 +72,8 @@ async function run(args: string[]): Promise<{ code: number; stdout: string; stde
         AGENTCHAT_API_KEY: '',
         AGENTCHAT_API_BASE: 'http://127.0.0.1:9',
         AGENTCHAT_LOG_LEVEL: 'silent',
+        AGENTCHAT_SERVICE_DRY_RUN: '1',
+        ...env,
       },
     })
     return { code: 0, stdout, stderr }
@@ -111,6 +116,25 @@ describe('there is no way to address another agent', () => {
     // …while this agent really is signed out.
     expect(fs.existsSync(claudeCreds())).toBe(false)
     expect(fs.readFileSync(path.join(sandbox, '.claude', 'CLAUDE.md'), 'utf-8')).not.toContain('@claude-agent')
+  })
+
+  it('uninstall stops the durable integration but preserves this agent identity', async () => {
+    await run(['daemon', 'install'])
+    giveClaudeAnIdentity()
+    const before = snapshot(codexDir())
+
+    const out = await run(['uninstall'])
+
+    expect(out.code).toBe(0)
+    expect(out.stdout).toContain('/plugin uninstall agentchat@agentchatme')
+    expect(out.stdout).toContain('identity was preserved')
+    expect(fs.existsSync(claudeCreds())).toBe(true)
+    expect(fs.existsSync(path.join(sandbox, '.claude', 'agentchat', 'always-on.optout'))).toBe(true)
+    expect(fs.existsSync(path.join(sandbox, '.claude', 'agentchat', 'bin', 'agentchat-daemon.mjs'))).toBe(false)
+    expect(fs.readFileSync(path.join(sandbox, '.claude', 'CLAUDE.md'), 'utf-8')).not.toContain(
+      '@claude-agent',
+    )
+    expect(snapshot(codexDir())).toEqual(before)
   })
 
   it('points at the OTHER agent’s front door rather than offering to do it', async () => {
@@ -158,6 +182,34 @@ describe('status', () => {
   it('is the default command — the plugin is installed by Claude Code, not by us', async () => {
     const out = await run([])
     expect(out.stdout).toContain('No AgentChat identity for this Claude Code agent')
+  })
+
+  it('honours CLAUDE_CONFIG_DIR for identity and always-on state', async () => {
+    const relocated = path.join(sandbox, 'relocated-claude')
+    const out = await run(['daemon', 'install'], { CLAUDE_CONFIG_DIR: relocated })
+
+    expect(out.code).toBe(0)
+    expect(
+      fs.existsSync(path.join(relocated, 'agentchat', 'bin', 'agentchat-daemon.mjs')),
+    ).toBe(true)
+    expect(fs.existsSync(path.join(sandbox, '.claude', 'agentchat', 'always-on.wanted'))).toBe(
+      false,
+    )
+  })
+})
+
+describe('plugin MCP wiring', () => {
+  it('uses the plugin bundle as a config-aware proxy instead of hard-coding ~/.claude', () => {
+    const raw = fs.readFileSync(path.join(__dirname, '..', 'plugin', '.mcp.json'), 'utf-8')
+    const config = JSON.parse(raw) as {
+      mcpServers: { agentchat: { command: string; args: string[] } }
+    }
+
+    expect(config.mcpServers.agentchat).toEqual({
+      command: 'node',
+      args: ['${CLAUDE_PLUGIN_ROOT}/bin/agentchat', 'mcp-proxy'],
+    })
+    expect(raw).not.toContain('/.claude')
   })
 })
 

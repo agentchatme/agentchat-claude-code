@@ -3726,7 +3726,7 @@ var init_wrapper = __esm({
 import { parseArgs } from "util";
 import * as path8 from "path";
 
-// @agentchatme/agent-core/dist/chunk-XLRPNQ7G.js
+// @agentchatme/agent-core/dist/chunk-ER4AFPH7.js
 import * as fs from "fs";
 import * as path from "path";
 import * as fs2 from "fs";
@@ -3755,6 +3755,15 @@ var log = {
   warn: (msg) => emit("warn", msg),
   info: (msg) => emit("info", msg),
   debug: (msg) => emit("debug", msg)
+};
+var VERSION = "0.0.1311";
+var CODING_AGENTS_CLIENT_IDENTITY = {
+  name: "coding_agents",
+  version: VERSION
+};
+var CODING_AGENTS_CLIENT_HEADERS = {
+  "X-AgentChat-Client": CODING_AGENTS_CLIENT_IDENTITY.name,
+  "X-AgentChat-Client-Version": CODING_AGENTS_CLIENT_IDENTITY.version
 };
 function acquireLeaderLock(home) {
   const lockPath = path.join(home, "daemon.lock");
@@ -7918,6 +7927,7 @@ async function request(cfg, method, pathname, body) {
   const res = await fetch(url, {
     method,
     headers: {
+      ...CODING_AGENTS_CLIENT_HEADERS,
       authorization: `Bearer ${cfg.apiKey}`,
       ...body !== void 0 ? { "content-type": "application/json" } : {}
     },
@@ -8065,6 +8075,7 @@ var AgentWsClient = class extends EventEmitter {
     log.info(`ws ${this.state} (attempt ${this.attempt + 1}) \u2192 ${this.url}`);
     const ws = new import_websocket.default(this.url, {
       headers: {
+        ...CODING_AGENTS_CLIENT_HEADERS,
         authorization: `Bearer ${this.apiKey}`,
         // Opt into the delivery-ack protocol: the server then leaves each
         // delivery 'stored' until we ack it (by message id) instead of
@@ -8164,6 +8175,7 @@ var ReplyCoord = class {
     const res = await fetch(url, {
       method,
       headers: {
+        ...CODING_AGENTS_CLIENT_HEADERS,
         authorization: `Bearer ${this.cfg.apiKey}`,
         ...body !== void 0 ? { "content-type": "application/json" } : {}
       },
@@ -8412,6 +8424,13 @@ async function runDaemon(opts) {
     fs3.mkdirSync(home, { recursive: true });
     const watcher = fs3.watch(home, (_event, filename) => {
       if (filename === null || String(filename).startsWith("credentials")) nudged = true;
+    });
+    watcher.on("error", (err) => {
+      log.warn(`credential watcher unavailable; polling instead: ${String(err)}`);
+      try {
+        watcher.close();
+      } catch {
+      }
     });
     watcher.unref();
   } catch {

@@ -7,7 +7,7 @@ import { parseArgs } from "util";
 import "fs";
 import "path";
 
-// @agentchatme/agent-core/dist/chunk-XLRPNQ7G.js
+// @agentchatme/agent-core/dist/chunk-ER4AFPH7.js
 import * as fs2 from "fs";
 import * as path2 from "path";
 import * as fs3 from "fs";
@@ -36,6 +36,15 @@ var log = {
   warn: (msg) => emit("warn", msg),
   info: (msg) => emit("info", msg),
   debug: (msg) => emit("debug", msg)
+};
+var VERSION = "0.0.1311";
+var CODING_AGENTS_CLIENT_IDENTITY = {
+  name: "coding_agents",
+  version: VERSION
+};
+var CODING_AGENTS_CLIENT_HEADERS = {
+  "X-AgentChat-Client": CODING_AGENTS_CLIENT_IDENTITY.name,
+  "X-AgentChat-Client-Version": CODING_AGENTS_CLIENT_IDENTITY.version
 };
 function atomicWriteFile(filePath, data, mode) {
   const dir = path2.dirname(filePath);
@@ -4203,6 +4212,7 @@ async function request(cfg, method, pathname, body) {
   const res = await fetch(url, {
     method,
     headers: {
+      ...CODING_AGENTS_CLIENT_HEADERS,
       authorization: `Bearer ${cfg.apiKey}`,
       ...body !== void 0 ? { "content-type": "application/json" } : {}
     },
@@ -4557,7 +4567,7 @@ function createAgentChatError(body, status, headers) {
       return new AgentChatError(body, status, requestId);
   }
 }
-var VERSION = "1.0.22";
+var VERSION2 = "1.0.221";
 function detectRuntime() {
   const g = globalThis;
   if (typeof g.Bun?.version === "string") return `bun/${g.Bun.version}`;
@@ -4571,7 +4581,7 @@ function detectRuntime() {
   return "unknown";
 }
 function defaultUserAgent() {
-  return `agentchat-ts/${VERSION} ${detectRuntime()}`;
+  return `agentchat-ts/${VERSION2} ${detectRuntime()}`;
 }
 var REQUEST_ID_HEADER = "x-request-id";
 var DEFAULT_RETRY_POLICY = {
@@ -4890,6 +4900,16 @@ async function* paginate(fetchPage, options) {
     if (page.items.length === 0) return;
   }
 }
+var DEFAULT_CLIENT_IDENTITY = {
+  name: "typescript_sdk",
+  version: VERSION2
+};
+function clientIdentityHeaders(identity = DEFAULT_CLIENT_IDENTITY) {
+  return {
+    "X-AgentChat-Client": identity.name,
+    ...identity.version ? { "X-AgentChat-Client-Version": identity.version } : {}
+  };
+}
 var DEFAULT_BASE_URL = "https://api.agentchat.me";
 function parseBacklogWarning(header) {
   if (!header) return null;
@@ -4926,7 +4946,8 @@ var AgentChatClient = class _AgentChatClient {
       timeoutMs: options.timeoutMs,
       retry: options.retry,
       hooks: options.hooks,
-      fetch: options.fetch
+      fetch: options.fetch,
+      defaultHeaders: clientIdentityHeaders(options.clientIdentity)
     });
     this.onBacklogWarning = options.onBacklogWarning;
   }
@@ -4977,7 +4998,10 @@ var AgentChatClient = class _AgentChatClient {
    * returned `pending_id` and the OTP code.
    */
   static async register(options) {
-    const http = new HttpTransport({ baseUrl: options.baseUrl ?? DEFAULT_BASE_URL });
+    const http = new HttpTransport({
+      baseUrl: options.baseUrl ?? DEFAULT_BASE_URL,
+      defaultHeaders: clientIdentityHeaders(options.clientIdentity)
+    });
     const res = await http.request("POST", "/v1/register", {
       body: {
         email: options.email,
@@ -4997,12 +5021,19 @@ var AgentChatClient = class _AgentChatClient {
    */
   static async verify(pendingId, code, options) {
     const baseUrl = options?.baseUrl ?? DEFAULT_BASE_URL;
-    const http = new HttpTransport({ baseUrl });
+    const http = new HttpTransport({
+      baseUrl,
+      defaultHeaders: clientIdentityHeaders(options?.clientIdentity)
+    });
     const res = await http.request("POST", "/v1/register/verify", {
       body: { pending_id: pendingId, code },
       retry: "never"
     });
-    const client = new _AgentChatClient({ apiKey: res.data.api_key, baseUrl });
+    const client = new _AgentChatClient({
+      apiKey: res.data.api_key,
+      baseUrl,
+      clientIdentity: options?.clientIdentity
+    });
     return { agent: res.data.agent, apiKey: res.data.api_key, client };
   }
   /**
@@ -5013,7 +5044,10 @@ var AgentChatClient = class _AgentChatClient {
    */
   static async recover(email, options) {
     const baseUrl = options?.baseUrl ?? DEFAULT_BASE_URL;
-    const http = new HttpTransport({ baseUrl });
+    const http = new HttpTransport({
+      baseUrl,
+      defaultHeaders: clientIdentityHeaders(options?.clientIdentity)
+    });
     const res = await http.request(
       "POST",
       "/v1/agents/recover",
@@ -5023,13 +5057,20 @@ var AgentChatClient = class _AgentChatClient {
   }
   static async recoverVerify(pendingId, code, options) {
     const baseUrl = options?.baseUrl ?? DEFAULT_BASE_URL;
-    const http = new HttpTransport({ baseUrl });
+    const http = new HttpTransport({
+      baseUrl,
+      defaultHeaders: clientIdentityHeaders(options?.clientIdentity)
+    });
     const res = await http.request(
       "POST",
       "/v1/agents/recover/verify",
       { body: { pending_id: pendingId, code }, retry: "never" }
     );
-    const client = new _AgentChatClient({ apiKey: res.data.api_key, baseUrl });
+    const client = new _AgentChatClient({
+      apiKey: res.data.api_key,
+      baseUrl,
+      clientIdentity: options?.clientIdentity
+    });
     return { handle: res.data.handle, apiKey: res.data.api_key, client };
   }
   // ─── Agent profile ────────────────────────────────────────────────────────
@@ -6257,7 +6298,8 @@ function createIdentityCommands(profile2) {
       }
       try {
         const result = await AgentChatClient.verify(pending.pending_id, code, {
-          baseUrl: pending.api_base ?? apiBase
+          baseUrl: pending.api_base ?? apiBase,
+          clientIdentity: CODING_AGENTS_CLIENT_IDENTITY
         });
         writeCredentials(home, {
           api_key: result.apiKey,
@@ -6330,7 +6372,8 @@ function createIdentityCommands(profile2) {
         handle,
         ...opts.displayName ? { display_name: opts.displayName } : {},
         ...opts.description ? { description: opts.description } : {},
-        baseUrl: apiBase
+        baseUrl: apiBase,
+        clientIdentity: CODING_AGENTS_CLIENT_IDENTITY
       });
       writePending(home, {
         kind: "register",
@@ -6368,7 +6411,11 @@ function createIdentityCommands(profile2) {
       return 1;
     }
     try {
-      const client = new AgentChatClient({ apiKey, baseUrl: apiBase });
+      const client = new AgentChatClient({
+        apiKey,
+        baseUrl: apiBase,
+        clientIdentity: CODING_AGENTS_CLIENT_IDENTITY
+      });
       const me = await client.getMe();
       writeCredentials(home, {
         api_key: apiKey,
@@ -6400,7 +6447,8 @@ function createIdentityCommands(profile2) {
       }
       try {
         const result = await AgentChatClient.recoverVerify(pending.pending_id, code, {
-          baseUrl: pending.api_base ?? apiBase
+          baseUrl: pending.api_base ?? apiBase,
+          clientIdentity: CODING_AGENTS_CLIENT_IDENTITY
         });
         writeCredentials(home, {
           api_key: result.apiKey,
@@ -6436,7 +6484,10 @@ function createIdentityCommands(profile2) {
       return 1;
     }
     try {
-      const result = await AgentChatClient.recover(email, { baseUrl: apiBase });
+      const result = await AgentChatClient.recover(email, {
+        baseUrl: apiBase,
+        clientIdentity: CODING_AGENTS_CLIENT_IDENTITY
+      });
       if (!result.pending_id) {
         console.log("If an agent is registered with that email, a recovery code was sent to it.");
         return 0;
@@ -6485,7 +6536,11 @@ function createIdentityCommands(profile2) {
       return 0;
     }
     try {
-      const client = new AgentChatClient({ apiKey: identity.apiKey, baseUrl: identity.apiBase });
+      const client = new AgentChatClient({
+        apiKey: identity.apiKey,
+        baseUrl: identity.apiBase,
+        clientIdentity: CODING_AGENTS_CLIENT_IDENTITY
+      });
       const me = await client.getMe();
       const rows = await syncPeek({ apiKey: identity.apiKey, apiBase: identity.apiBase }, { limit: 100 });
       const unread = rows.length === 100 ? "100+" : String(rows.length);
@@ -6572,7 +6627,11 @@ function createIdentityCommands(profile2) {
       const identity = resolveIdentity(home);
       if (identity !== null) {
         try {
-          const client = new AgentChatClient({ apiKey: identity.apiKey, baseUrl: identity.apiBase });
+          const client = new AgentChatClient({
+            apiKey: identity.apiKey,
+            baseUrl: identity.apiBase,
+            clientIdentity: CODING_AGENTS_CLIENT_IDENTITY
+          });
           const started = Date.now();
           const me = await client.getMe();
           const verdict = (me.status ?? "active") === "active" ? "PASS" : "WARN";
@@ -7002,10 +7061,10 @@ async function runStop() {
 }
 
 // src/version.ts
-var VERSION2 = "0.0.139411";
+var VERSION3 = "0.0.1394111";
 
 // src/index.ts
-var USAGE = `agentchat-claude-code ${VERSION2} \u2014 AgentChat for Claude Code
+var USAGE = `agentchat-claude-code ${VERSION3} \u2014 AgentChat for Claude Code
 
 Usage:
   ${invocation()} register --email <e> --handle <h>
@@ -7058,7 +7117,7 @@ async function main(argv = process.argv.slice(2)) {
   const { values, positionals } = parsed;
   const [command, subcommand] = positionals;
   if (values.version) {
-    console.log(VERSION2);
+    console.log(VERSION3);
     return 0;
   }
   if (values.help || command === "help") {

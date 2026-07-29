@@ -7144,7 +7144,7 @@ import * as crypto from "crypto";
 import { spawn as spawn2, spawnSync as spawnSync2 } from "child_process";
 
 // src/version.ts
-var VERSION3 = "0.0.1394112";
+var VERSION3 = "0.0.1394113";
 
 // src/adapter.ts
 var MAX_EVENT_TAIL_CHARS = 1024 * 1024;

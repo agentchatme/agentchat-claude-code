@@ -34,7 +34,7 @@ importers:
 packages:
 
   '@agentchatme/agent-core@0.0.1312':
-    resolution: {integrity: sha512-eyE5846sEHMtlM7WKWhhEzaPdRIvOFOX7X3R0suniscAwyYNc5Lj8J9+Vb9WBfLMdGZPiYLIvKpIFRC6t42fbw==}
+    resolution: {integrity: sha512-BcHY5xioPU+ZzDfoVPU8VzXCOSAXxnLoKE6PDuMmBFpa856aMVLpp/8icHeN5NT43AQEOnDKA1l+ZBrjyJS2qQ==}
     engines: {node: '>=20.0.0'}
 
   '@esbuild/aix-ppc64@0.27.7':

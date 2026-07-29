@@ -8783,7 +8783,7 @@ function formatWhen(createdAt, now = Date.now()) {
 }
 
 // src/version.ts
-var VERSION2 = "0.0.1394112";
+var VERSION2 = "0.0.1394113";
 
 // src/adapter.ts
 var TURN_TIMEOUT_MS = 24e4;

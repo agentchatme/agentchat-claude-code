@@ -1,0 +1,274 @@
+name: publish
+
+# OIDC trusted publishing for @agentchatme/claude-code, gated by a human
+# approval. The first package version was necessarily bootstrapped directly:
+# npm cannot attach a trusted publisher until the package exists.
+#
+# npm Trusted Publisher:
+#   GitHub org/user: agentchatme
+#   repository:      agentchat-claude-code
+#   workflow:        publish.yml
+#   environment:     npm-publish
+#   allowed action:  npm publish
+#
+# Release flow: bump package.json → tag `v<version>` → push → approve.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm type-check
+      - run: pnpm build
+      - run: pnpm test
+      - name: tag matches package version
+        run: |
+          pkg="v$(node -p "require('./package.json').version")"
+          [ "$pkg" = "$GITHUB_REF_NAME" ] || {
+            echo "tag $GITHUB_REF_NAME != package $pkg"
+            exit 1
+          }
+
+  publish:
+    needs: gate
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing requires npm >=11.5.1. The runner's bundled npm is
+      # not a stable contract, so install the current CLI explicitly.
+      - run: npm install -g npm@latest
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: the published tarball is self-contained and direct wiring works
+        run: |
+          set -euo pipefail
+          workspace="$PWD"
+          rm -rf /tmp/verify /tmp/npxlike
+          mkdir -p /tmp/verify /tmp/npxlike
+
+          # Verify the actual package boundary, not files beside the checkout.
+          tgz="$(npm pack --ignore-scripts --pack-destination /tmp/verify | tail -1)"
+          echo "packed: $tgz"
+          tar xzf "/tmp/verify/$tgz" -C /tmp/verify
+          echo "--- tarball contents ---"
+          (cd /tmp/verify/package && find . -type f | sed 's|^\./|  |' | sort)
+
+          for file in dist/index.js dist/daemon-main.js; do
+            test -f "/tmp/verify/package/$file" || {
+              echo "::error::the tarball is missing $file"
+              exit 1
+            }
+          done
+
+          cd /tmp/verify/package
+          cli_out="$(node dist/index.js --version 2>&1 || true)"
+          echo "--- cli --version: $cli_out"
+          case "$cli_out" in
+            *"Cannot find module"*|*"ERR_MODULE_NOT_FOUND"*|*"Dynamic require"*)
+              echo "::error::the CLI is not self-contained"
+              exit 1
+              ;;
+          esac
+          expected="$(node -p "require('./package.json').version")"
+          [ "$cli_out" = "$expected" ] || {
+            echo "::error::--version printed '$cli_out', expected '$expected'"
+            exit 1
+          }
+
+          # The copied daemon runs with no node_modules beside it and remains
+          # resident while it waits for registration.
+          dlog="$(mktemp)"
+          daemon_home="$(mktemp -d)"
+          (node dist/daemon-main.js --home "$daemon_home" >"$dlog" 2>&1) &
+          dpid=$!
+          sleep 6
+          dalive=0
+          kill -0 "$dpid" 2>/dev/null && dalive=1
+          kill "$dpid" 2>/dev/null || true
+          wait "$dpid" 2>/dev/null || true
+          echo "--- daemon ---"
+          cat "$dlog"
+          [ "$dalive" = "1" ] || {
+            echo "::error::the daemon exited instead of idling"
+            exit 1
+          }
+          grep -q "always-on resident" "$dlog" || {
+            echo "::error::the daemon did not come up from the tarball"
+            exit 1
+          }
+
+          # Install the tarball for real so the executable runs through the
+          # node_modules/.bin shim used by NPX.
+          cd /tmp/npxlike
+          npm init -y >/dev/null 2>&1
+          npm install --no-audit --no-fund "/tmp/verify/$tgz" >/dev/null 2>&1
+          mkdir -p fake-bin home/.claude
+
+          # Claude is not installed on generic GitHub runners. Model only its
+          # documented management commands; the package's own tests cover the
+          # same adapter with a broader state matrix.
+          cat > fake-bin/claude <<'NODE'
+          #!/usr/bin/env node
+          const fs = require('node:fs')
+          const path = require('node:path')
+          const config = process.env.CLAUDE_CONFIG_DIR
+          const stateFile = path.join(config, '.claude.json')
+          const args = process.argv.slice(2)
+          if (args[0] === '--version') {
+            console.log('2.1.220 (Claude Code)')
+            process.exit(0)
+          }
+          if (args[0] === 'mcp' && args[1] === 'add') {
+            const separator = args.indexOf('--')
+            const command = args.slice(separator + 1)
+            let state = {}
+            try { state = JSON.parse(fs.readFileSync(stateFile, 'utf8')) } catch {}
+            state.mcpServers = {
+              ...(state.mcpServers || {}),
+              agentchat: {
+                type: 'stdio',
+                command: command[0],
+                args: command.slice(1),
+                env: {},
+              },
+            }
+            fs.writeFileSync(stateFile, JSON.stringify(state))
+            process.exit(0)
+          }
+          if (args[0] === 'mcp' && args[1] === 'remove') {
+            try {
+              const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'))
+              if (state.mcpServers) delete state.mcpServers.agentchat
+              fs.writeFileSync(stateFile, JSON.stringify(state))
+            } catch {}
+            process.exit(0)
+          }
+          if (args[0] === 'plugin' && args[1] === 'list') {
+            console.log('[]')
+            process.exit(0)
+          }
+          console.error(`unsupported fake Claude command: ${args.join(' ')}`)
+          process.exit(2)
+          NODE
+          chmod +x fake-bin/claude
+
+          run_cli() {
+            HOME=/tmp/npxlike/home \
+            CLAUDE_CONFIG_DIR=/tmp/npxlike/home/.claude \
+            PATH="/tmp/npxlike/fake-bin:$PATH" \
+            AGENTCHAT_SERVICE_DRY_RUN=1 \
+              ./node_modules/.bin/agentchat-claude-code "$@"
+          }
+
+          first="$(run_cli 2>&1)"
+          echo "--- first install ---"
+          echo "$first"
+          echo "$first" | grep -q "Claude Code: wired ✓"
+
+          second="$(run_cli 2>&1)"
+          echo "--- idempotent install ---"
+          echo "$second"
+          echo "$second" | grep -q "Claude user MCP already current"
+
+          node <<'NODE'
+          const fs = require('node:fs')
+          const root = '/tmp/npxlike/home/.claude'
+          const bundle = `${root}/agentchat/bin/agentchat.mjs`
+          const settings = JSON.parse(fs.readFileSync(`${root}/settings.json`, 'utf8'))
+          const state = JSON.parse(fs.readFileSync(`${root}/.claude.json`, 'utf8'))
+          const expected = {
+            SessionStart: ['session-start', 20, 'startup|resume|clear|fork'],
+            UserPromptSubmit: ['user-prompt', 12, undefined],
+            Stop: ['stop', 25, undefined],
+            SessionEnd: ['session-end', 10, undefined],
+          }
+          for (const [event, [subcommand, timeout, matcher]] of Object.entries(expected)) {
+            const groups = settings.hooks?.[event] || []
+            const ours = groups.flatMap((group) =>
+              (group.hooks || []).map((leaf) => ({ group, leaf })),
+            ).filter(({ leaf }) =>
+              leaf.type === 'command' &&
+              leaf.command === 'node' &&
+              JSON.stringify(leaf.args) === JSON.stringify([bundle, 'hook', subcommand]),
+            )
+            if (ours.length !== 1) throw new Error(`${event}: expected one AgentChat hook`)
+            if (ours[0].leaf.timeout !== timeout) throw new Error(`${event}: wrong timeout`)
+            if (ours[0].group.matcher !== matcher) throw new Error(`${event}: wrong matcher`)
+          }
+          const mcp = state.mcpServers?.agentchat
+          if (
+            mcp?.command !== 'node' ||
+            JSON.stringify(mcp.args) !== JSON.stringify([bundle, 'mcp-proxy'])
+          ) {
+            throw new Error('user-scoped AgentChat MCP is not exact')
+          }
+          for (const file of [
+            bundle,
+            `${root}/agentchat/bin/agentchat-daemon.mjs`,
+            `${root}/agentchat/SKILL.md`,
+            `${root}/CLAUDE.md`,
+          ]) {
+            if (!fs.existsSync(file)) throw new Error(`missing durable file: ${file}`)
+          }
+          NODE
+
+          removed="$(run_cli uninstall 2>&1)"
+          echo "--- uninstall ---"
+          echo "$removed"
+          echo "$removed" | grep -q "Claude Code integration removed"
+
+          node <<'NODE'
+          const fs = require('node:fs')
+          const root = '/tmp/npxlike/home/.claude'
+          const read = (file) => {
+            try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return {} }
+          }
+          const settings = read(`${root}/settings.json`)
+          const state = read(`${root}/.claude.json`)
+          const leaves = Object.values(settings.hooks || {}).flatMap((groups) =>
+            groups.flatMap((group) => group.hooks || []),
+          )
+          if (leaves.some((leaf) =>
+            Array.isArray(leaf.args) && leaf.args.some((arg) => String(arg).includes('agentchat')),
+          )) {
+            throw new Error('AgentChat hooks survived uninstall')
+          }
+          if (state.mcpServers?.agentchat) throw new Error('AgentChat MCP survived uninstall')
+          for (const file of [
+            `${root}/agentchat/bin/agentchat.mjs`,
+            `${root}/agentchat/bin/agentchat-daemon.mjs`,
+          ]) {
+            if (fs.existsSync(file)) throw new Error(`durable file survived uninstall: ${file}`)
+          }
+          NODE
+
+          echo "published-package boundary and direct Claude wiring are green ✓"
+          cd "$workspace"
+
+      - run: npm publish --provenance --access public

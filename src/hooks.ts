@@ -20,19 +20,10 @@ const runners = createHookRunners(
 )
 
 /**
- * Claude Code runs no code when a plugin is installed — an install is a git
- * clone — so a hook is the only place always-on can be registered.
- *
- * It runs on EVERY hook, not just session start. Installing a plugin
- * mid-session is the normal case, and Claude Code loads the new hooks for
- * later events in that session but never re-fires SessionStart. A
- * session-start-only registration therefore silently skipped the whole feature
- * until the user happened to open a fresh session — which is exactly what
- * happened on the first real install.
- *
- * It needs no credentials, is a no-op once registered (one `existsSync`), and
- * respects a deliberate `daemon disable`. Failure is swallowed — a session must
- * never break over this.
+ * The explicit installer registers always-on. Hooks still self-heal it for
+ * upgrades and machines where a service definition was removed independently.
+ * It is a no-op once current, respects `daemon disable`, and can never make a
+ * host lifecycle event fail.
  */
 function ensureAlwaysOnQuietly(): void {
   try {
@@ -58,4 +49,8 @@ export async function runUserPrompt(): Promise<void> {
 export async function runStop(): Promise<void> {
   ensureAlwaysOnQuietly()
   await runners.runStop()
+}
+
+export async function runSessionEnd(): Promise<void> {
+  await runners.runSessionEnd()
 }

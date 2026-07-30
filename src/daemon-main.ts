@@ -11,8 +11,8 @@ import { claudeHome, identityHome } from './host.js'
 //
 //   1. `ws` is CommonJS and reaches for `require` at runtime. Bundled into the
 //      CLI's single-file ESM artifact it dies at startup with "Dynamic require
-//      of events is not supported" — taking down `status`, `register` and both
-//      hooks with it. Keeping the socket layer in its own binary means the CLI
+//      of events is not supported" — taking down the CLI and lifecycle hooks
+//      with it. Keeping the socket layer in its own binary means the CLI
 //      cannot regress that way.
 //   2. A service should run a script whose entire job is to serve. The unit
 //      names this file, so there is no subcommand to get wrong and no chance of

@@ -90,6 +90,11 @@ export function buildClaudeEnv(
   for (const key of PARENT_ENV_KEYS) delete env[key]
   env['CLAUDE_CONFIG_DIR'] = configDir
   env['DISABLE_AUTOUPDATER'] = '1'
+  // The unattended child reads the same user configuration as the interactive
+  // host. It must not recursively run AgentChat's own SessionStart/Stop hooks:
+  // those would announce a false foreground turn and contend for this inbox.
+  // Other user hooks, skills, plugins, MCP servers and permissions stay intact.
+  env['AGENTCHAT_HOOKS_ENABLED'] = '0'
   return env
 }
 

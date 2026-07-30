@@ -19,9 +19,9 @@ import * as path from 'node:path'
 // FILE EXISTED. So the rule here is: never assert a path exists — RUN it, and
 // assert it got far enough to prove it is the daemon.
 
-const PLUGIN_BIN = path.join(__dirname, '..', 'plugin', 'bin')
-const DAEMON = path.join(PLUGIN_BIN, 'agentchat-daemon.mjs')
-const CLI = path.join(PLUGIN_BIN, 'agentchat')
+const DIST = path.join(__dirname, '..', 'dist')
+const DAEMON = path.join(DIST, 'daemon-main.js')
+const CLI = path.join(DIST, 'index.js')
 
 let sandbox: string
 
@@ -98,8 +98,8 @@ function runFor(
   })
 }
 
-describe('the daemon bundle ships with the plugin', () => {
-  it('is committed, because a plugin install is a git clone with no build step', () => {
+describe('the daemon bundle ships with the NPX package', () => {
+  it('is built as a published package artifact', () => {
     expect(fs.existsSync(DAEMON)).toBe(true)
   })
 
@@ -107,7 +107,7 @@ describe('the daemon bundle ships with the plugin', () => {
     const cli = fs.readFileSync(CLI, 'utf-8')
     const daemon = fs.readFileSync(DAEMON, 'utf-8')
     // `ws` is CommonJS and reaches for `require` at runtime; bundled into the
-    // CLI it kills `status`, `register` and both hooks at startup.
+    // CLI it kills every command and lifecycle hook at startup.
     expect(daemon).toContain('daemon up as')
     expect(cli).not.toContain('daemon up as')
   })
@@ -159,12 +159,9 @@ describe('daemon install points the service at the daemon, not the CLI', () => {
   })
 
   it('finds the daemon when invoked through a shim rather than by its real path', async () => {
-    // Claude Code's hooks invoke the bundle by absolute path, so this
-    // integration is not exposed the way the npx-installed Codex package was —
-    // where resolving the daemon relative to process.argv[1] pointed at
-    // node_modules/.bin/ and broke `daemon install` for every user in 0.0.12.
-    // Pinned here anyway: the resolution should depend on where the bundle IS,
-    // never on how it was called.
+    // NPX invokes through a bin shim. The daemon must be resolved from the
+    // installed module, never from process.argv[1], or every NPX install points
+    // at a nonexistent node_modules/.bin/daemon-main.js.
     const home = path.join(sandbox, '.claude', 'agentchat')
     fs.mkdirSync(home, { recursive: true })
     fs.writeFileSync(
@@ -182,10 +179,8 @@ describe('daemon install points the service at the daemon, not the CLI', () => {
     expect(fs.existsSync(path.join(home, 'bin', 'agentchat-daemon.mjs'))).toBe(true)
   })
 
-  it('copies the daemon to a durable path outside the version-scoped plugin cache', async () => {
-    // A unit pointing inside …/plugins/cache/<mp>/<plugin>/<version>/ dies on
-    // the next plugin update. Install must copy the bundle somewhere that
-    // survives, and the copy must be byte-identical to what shipped.
+  it('copies the daemon to a durable path outside the disposable NPX cache', async () => {
+    // A unit pointing into an NPX cache dies when that cache is cleaned.
     const home = path.join(sandbox, '.claude', 'agentchat')
     fs.mkdirSync(home, { recursive: true })
     fs.writeFileSync(
@@ -204,42 +199,21 @@ describe('daemon install points the service at the daemon, not the CLI', () => {
   })
 })
 
-// ─── The committed hooks.json must invoke commands this CLI accepts ─────────
+// ─── Every lifecycle command written by the installer must be accepted ──────
 //
 // The Codex integration shipped 0.0.13 with every session hook broken: its
 // installer wrote `hook <event> --platform codex`, a leftover from the shared
 // CLI, and this generation of the binary rejects that flag. Each hook exited on
 // "Unknown option" and printed usage — no digest, no pickup, no acks.
 //
-// This plugin's hooks.json is COMMITTED, so the same drift is possible and
-// would ship to every user with no build step in between. Run what it declares.
-describe('the committed hooks.json runs', () => {
-  it('every declared hook command is accepted by the bundle', { timeout: 30_000 }, async () => {
-    const hooksFile = path.join(__dirname, '..', 'plugin', 'hooks', 'hooks.json')
-    const declared = JSON.parse(fs.readFileSync(hooksFile, 'utf-8')) as Record<string, any>
-    const events = (declared['hooks'] ?? declared) as Record<string, Array<Record<string, any>>>
-
-    const commands: string[] = []
-    for (const groups of Object.values(events)) {
-      for (const group of groups) {
-        for (const h of group['hooks'] ?? []) {
-          if (typeof h?.command === 'string') commands.push(h.command)
-        }
-      }
-    }
-    expect(commands.length).toBe(3) // SessionStart + UserPromptSubmit + Stop
-
-    for (const command of commands) {
-      // `node "${CLAUDE_PLUGIN_ROOT}/bin/agentchat" hook <event>` — resolve the
-      // placeholder the way Claude Code does, then run it.
-      const resolved = command.replace('${CLAUDE_PLUGIN_ROOT}', path.join(__dirname, '..', 'plugin'))
-      const m = resolved.match(/^node "([^"]+)" (.+)$/)
-      expect(m, `unexpected hook command shape: ${command}`).not.toBeNull()
-      const { out } = await run(m![1] as string, (m![2] as string).split(/\s+/), {
+describe('the lifecycle hook commands run', () => {
+  it('accepts every command the direct installer wires', { timeout: 30_000 }, async () => {
+    for (const event of ['session-start', 'user-prompt', 'stop', 'session-end']) {
+      const { out } = await run(CLI, ['hook', event], {
         AGENTCHAT_HOOKS_ENABLED: '0',
       })
-      expect(out, `hook rejected its own arguments: ${command}\n${out}`).not.toMatch(/Unknown option/i)
-      expect(out, `hook printed usage instead of running: ${command}\n${out}`).not.toMatch(/^Usage:/im)
+      expect(out, `hook rejected \`${event}\`:\n${out}`).not.toMatch(/Unknown option/i)
+      expect(out, `hook printed usage instead of running:\n${out}`).not.toMatch(/^Usage:/im)
     }
   })
 })

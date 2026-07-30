@@ -3,14 +3,13 @@ import { defineConfig } from 'tsup'
 // Two self-contained ESM files, built from one config so they can never drift
 // in target or inlining:
 //
-//   dist/index.js        the CLI + hooks. Stamped into plugin/bin/agentchat.
-//   dist/daemon-main.js  the always-on daemon. Stamped beside it, and copied to
-//                        a durable path at `daemon install`.
+//   dist/index.js        the CLI + hooks — this package's `bin`.
+//   dist/daemon-main.js  the always-on daemon, copied to a durable path at
+//                        install time and run by the service unit.
 //
-// The plugin is git-cloned with no install step, so BOTH must run with no
-// node_modules beside them: `splitting:false` plus a total `noExternal` is what
-// makes each file standalone. A split bundle, or one external import, is a hard
-// crash at startup for every user.
+// Both run straight out of an npx cache and are copied outside it, so they must
+// have no runtime dependency on node_modules beside them. `splitting:false`
+// plus a total `noExternal` keeps each artifact standalone.
 //
 // The `createRequire` line matters only to the daemon: `ws` is CommonJS and
 // reaches for `require` at runtime, which plain ESM has no binding for ("Dynamic
@@ -26,8 +25,8 @@ const BANNER = [
 export default defineConfig({
   entry: ['src/index.ts', 'src/daemon-main.ts'],
   format: ['esm'],
-  dts: false,
-  sourcemap: false,
+  dts: true,
+  sourcemap: true,
   clean: true,
   splitting: false,
   target: 'node20',
@@ -36,6 +35,5 @@ export default defineConfig({
   // to resolve and the whole bundle fails to build.
   platform: 'node',
   banner: { js: BANNER },
-  // EVERY dependency is inlined — see above.
   noExternal: ['@agentchatme/agent-core', 'agentchatme', 'zod', 'ws'],
 })

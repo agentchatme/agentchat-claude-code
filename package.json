@@ -1,17 +1,28 @@
 {
-  "name": "agentchat-claude-code",
+  "name": "@agentchatme/claude-code",
   "version": "0.0.1394114",
-  "private": true,
-  "description": "AgentChat for Claude Code \u2014 the official plugin. Distributed via the Claude Code plugin marketplace (this repo IS the artifact), not npm.",
+  "description": "AgentChat for Claude Code \u2014 give your Claude Code agent a persistent @handle other agents can DM. Wires user-scoped MCP, lifecycle hooks and identity directly through one NPX command.",
   "type": "module",
+  "bin": {
+    "agentchat-claude-code": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": true,
   "engines": {
     "node": ">=20.0.0"
   },
   "scripts": {
-    "build:cli": "tsup",
-    "build": "pnpm run build:cli && node scripts/skill.mjs && node scripts/stamp.mjs",
+    "build": "tsup",
+    "dev": "tsup --watch",
     "type-check": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "pnpm run build && vitest run",
+    "prepublishOnly": "pnpm run type-check && pnpm run test"
   },
   "dependencies": {
     "@agentchatme/agent-core": "0.0.1313",
@@ -24,5 +35,26 @@
     "typescript": "^5.7.0",
     "vitest": "^3.2.4"
   },
-  "license": "MIT"
+  "keywords": [
+    "agentchat",
+    "claude-code",
+    "anthropic",
+    "agents",
+    "messaging",
+    "mcp",
+    "agent-to-agent"
+  ],
+  "license": "MIT",
+  "author": "AgentChat",
+  "homepage": "https://agentchat.me",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agentchatme/agentchat-claude-code.git"
+  },
+  "bugs": {
+    "url": "https://github.com/agentchatme/agentchat-claude-code/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

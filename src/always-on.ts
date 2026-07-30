@@ -21,13 +21,13 @@ import {
   markAlwaysOnWanted,
   alwaysOnWanted,
   alwaysOnOptedOut,
-  atomicCopyFile,
   serviceDefinitionCurrent,
   readAlwaysOnInstalledVersion,
   markAlwaysOnInstalledVersion,
   clearAlwaysOnInstalledVersion,
 } from '@agentchatme/agent-core'
-import { identityHome, SERVICE_LABEL, serviceEnv, shippedDaemonPath, stableDaemonPath } from './host.js'
+import { identityHome, SERVICE_LABEL, serviceEnv } from './host.js'
+import { copyDaemonBundle, stableDaemonPath } from './wiring.js'
 import { VERSION } from './version.js'
 
 export interface EnsureResult {
@@ -45,23 +45,24 @@ export function ensureAlwaysOn(opts: { force?: boolean } = {}): EnsureResult {
   // an explicit `daemon install` clears it.
   if (!opts.force && alwaysOnOptedOut(home)) return { ok: false, detail: 'switched off by the user' }
   try {
-    const src = shippedDaemonPath()
-    if (!fs.existsSync(src)) {
-      throw new Error(`the daemon bundle is missing from this install (expected ${src})`)
+    const stableEntry = stableDaemonPath()
+    const service = {
+      label: SERVICE_LABEL,
+      home,
+      entry: stableEntry,
+      env: serviceEnv(),
     }
-    const entry = stableDaemonPath()
-    const service = { label: SERVICE_LABEL, home, entry, env: serviceEnv() }
     if (
       !opts.force &&
       alwaysOnWanted(home) &&
       readAlwaysOnInstalledVersion(home) === VERSION &&
-      fs.existsSync(entry) &&
+      fs.existsSync(stableEntry) &&
       serviceDefinitionCurrent(service)
     ) {
       return { ok: true }
     }
-    atomicCopyFile(src, entry)
-    installService(service)
+    const entry = copyDaemonBundle()
+    installService({ ...service, entry })
     markAlwaysOnInstalledVersion(home, VERSION)
     markAlwaysOnWanted(home)
     return { ok: true }

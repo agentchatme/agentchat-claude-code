@@ -52,6 +52,7 @@ describe('Claude autonomous turn contract', () => {
     })
     expect(env).toMatchObject({
       CLAUDE_CONFIG_DIR: '/claude',
+      AGENTCHAT_HOOKS_ENABLED: '0',
     })
     expect(env['CLAUDECODE']).toBeUndefined()
     expect(env['AGENTCHAT_TURN_SCOPE']).toBeUndefined()

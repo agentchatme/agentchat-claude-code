@@ -5,10 +5,12 @@ import * as crypto from 'node:crypto'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
+import { installFakeClaude, type FakeClaude } from './helpers/fake-claude.js'
 
 const exec = promisify(execFile)
-// Drives the COMMITTED plugin bundle — the exact file Claude Code's hooks run.
-const BIN = path.join(__dirname, '..', 'plugin', 'bin', 'agentchat')
+// Drives the publishable NPX bundle — the exact file the stable copy derives
+// from and Claude Code's direct hooks run.
+const BIN = path.join(__dirname, '..', 'dist', 'index.js')
 
 // ─── This binary can only act on Claude Code ────────────────────────────────
 //
@@ -22,10 +24,12 @@ const BIN = path.join(__dirname, '..', 'plugin', 'bin', 'agentchat')
 // are not fixed here — they are unwritable.
 
 let sandbox: string
+let fakeClaude: FakeClaude
 
 beforeEach(() => {
   sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-integration-'))
   fs.mkdirSync(path.join(sandbox, '.claude'), { recursive: true })
+  fakeClaude = installFakeClaude(sandbox)
   // A fully set-up Codex agent sharing the machine.
   fs.mkdirSync(path.join(sandbox, '.codex', 'agentchat'), { recursive: true })
   fs.writeFileSync(
@@ -66,8 +70,10 @@ async function run(
     const { stdout, stderr } = await exec(process.execPath, [BIN, ...args], {
       env: {
         ...process.env,
+        PATH: `${fakeClaude.binDir}${path.delimiter}${process.env['PATH'] ?? ''}`,
         HOME: sandbox,
         USERPROFILE: sandbox,
+        CLAUDE_CONFIG_DIR: path.join(sandbox, '.claude'),
         CODEX_HOME: path.join(sandbox, '.codex'),
         AGENTCHAT_API_KEY: '',
         AGENTCHAT_API_BASE: 'http://127.0.0.1:9',
@@ -119,18 +125,24 @@ describe('there is no way to address another agent', () => {
   })
 
   it('uninstall stops the durable integration but preserves this agent identity', async () => {
-    await run(['daemon', 'install'])
+    const installed = await run([])
+    expect(installed.code, installed.stderr).toBe(0)
     giveClaudeAnIdentity()
     const before = snapshot(codexDir())
 
     const out = await run(['uninstall'])
 
     expect(out.code).toBe(0)
-    expect(out.stdout).toContain('/plugin uninstall agentchat@agentchatme')
     expect(out.stdout).toContain('identity was preserved')
     expect(fs.existsSync(claudeCreds())).toBe(true)
     expect(fs.existsSync(path.join(sandbox, '.claude', 'agentchat', 'always-on.optout'))).toBe(true)
     expect(fs.existsSync(path.join(sandbox, '.claude', 'agentchat', 'bin', 'agentchat-daemon.mjs'))).toBe(false)
+    expect(fs.existsSync(path.join(sandbox, '.claude', 'agentchat', 'bin', 'agentchat.mjs'))).toBe(false)
+    const userState = JSON.parse(fs.readFileSync(fakeClaude.mcpState, 'utf-8')) as {
+      mcpServers?: Record<string, unknown>
+    }
+    expect(userState.mcpServers?.['agentchat']).toBeUndefined()
+    expect(fs.existsSync(path.join(sandbox, '.claude', 'settings.json'))).toBe(false)
     expect(fs.readFileSync(path.join(sandbox, '.claude', 'CLAUDE.md'), 'utf-8')).not.toContain(
       '@claude-agent',
     )
@@ -179,9 +191,11 @@ describe('doctor', () => {
 })
 
 describe('status', () => {
-  it('is the default command — the plugin is installed by Claude Code, not by us', async () => {
+  it('a bare command installs the direct integration', async () => {
     const out = await run([])
-    expect(out.stdout).toContain('No AgentChat identity for this Claude Code agent')
+    expect(out.code, out.stderr).toBe(0)
+    expect(out.stdout).toContain('Claude Code: wired ✓')
+    expect(out.stdout).toContain('Last step')
   })
 
   it('honours CLAUDE_CONFIG_DIR for identity and always-on state', async () => {
@@ -196,20 +210,207 @@ describe('status', () => {
       false,
     )
   })
+
+  it('does not undo an explicit always-on disable during an upgrade', async () => {
+    expect((await run([])).code).toBe(0)
+    expect((await run(['daemon', 'disable'])).code).toBe(0)
+
+    const upgraded = await run([])
+
+    expect(upgraded.code).toBe(0)
+    expect(upgraded.stdout).toContain('always-on remains off (user choice)')
+    expect(
+      fs.existsSync(path.join(sandbox, '.claude', 'agentchat', 'always-on.optout')),
+    ).toBe(true)
+  })
 })
 
-describe('plugin MCP wiring', () => {
-  it('uses the plugin bundle as a config-aware proxy instead of hard-coding ~/.claude', () => {
-    const raw = fs.readFileSync(path.join(__dirname, '..', 'plugin', '.mcp.json'), 'utf-8')
-    const config = JSON.parse(raw) as {
-      mcpServers: { agentchat: { command: string; args: string[] } }
-    }
+describe('direct Claude Code wiring', () => {
+  it('refuses a Claude build that predates shell-free hook arguments', async () => {
+    fakeClaude = installFakeClaude(sandbox, '2.1.138')
 
-    expect(config.mcpServers.agentchat).toEqual({
+    const out = await run([])
+
+    expect(out.code).toBe(1)
+    expect(out.stdout).toContain('requires Claude Code >= 2.1.139')
+    expect(fs.existsSync(path.join(sandbox, '.claude', 'settings.json'))).toBe(false)
+    expect(
+      fs.existsSync(path.join(sandbox, '.claude', 'agentchat', 'bin', 'agentchat.mjs')),
+    ).toBe(false)
+  })
+
+  it('owns user-scoped MCP and four hooks through the stable bundle', async () => {
+    fs.writeFileSync(
+      path.join(sandbox, '.claude', 'settings.json'),
+      JSON.stringify({
+        theme: 'dark',
+        hooks: {
+          Stop: [
+            {
+              hooks: [{ type: 'command', command: '/usr/local/bin/user-hook' }],
+            },
+          ],
+        },
+      }),
+    )
+
+    const first = await run([])
+    expect(first.code, first.stderr).toBe(0)
+
+    const stable = path.join(sandbox, '.claude', 'agentchat', 'bin', 'agentchat.mjs')
+    const settings = JSON.parse(
+      fs.readFileSync(path.join(sandbox, '.claude', 'settings.json'), 'utf-8'),
+    ) as {
+      theme: string
+      hooks: Record<
+        string,
+        Array<{
+          matcher?: string
+          hooks: Array<{ type?: string; command: string; args?: string[] }>
+        }>
+      >
+    }
+    expect(settings.theme).toBe('dark')
+    expect(Object.keys(settings.hooks).sort()).toEqual(
+      ['SessionEnd', 'SessionStart', 'Stop', 'UserPromptSubmit'].sort(),
+    )
+    expect(settings.hooks.Stop?.some((group) =>
+      group.hooks.some((hook) => hook.command === '/usr/local/bin/user-hook'),
+    )).toBe(true)
+    for (const event of Object.values(settings.hooks)) {
+      expect(event.some((group) =>
+        group.hooks.some((hook) =>
+          hook.command === 'node' &&
+          hook.args?.[0] === stable &&
+          hook.args?.[1] === 'hook',
+        ),
+      )).toBe(true)
+    }
+    expect(settings.hooks.SessionStart?.find((group) =>
+      group.hooks.some((hook) => hook.args?.[1] === 'hook'),
+    )?.matcher).toBe('startup|resume|clear|fork')
+
+    const mcpDoc = JSON.parse(fs.readFileSync(fakeClaude.mcpState, 'utf-8')) as {
+      mcpServers: {
+        agentchat: { type: string; command: string; args: string[]; env: Record<string, string> }
+      }
+    }
+    expect(mcpDoc.mcpServers.agentchat).toEqual({
+      type: 'stdio',
       command: 'node',
-      args: ['${CLAUDE_PLUGIN_ROOT}/bin/agentchat', 'mcp-proxy'],
+      args: [stable, 'mcp-proxy'],
+      env: {},
     })
-    expect(raw).not.toContain('/.claude')
+
+    // Users can add a command beside ours in the same matcher group. Upgrade
+    // and uninstall must remove only our leaf, never their neighbor.
+    const ownedStopGroup = settings.hooks.Stop?.find((group) =>
+      group.hooks.some((hook) => hook.args?.[0] === stable),
+    )
+    expect(ownedStopGroup).toBeDefined()
+    ownedStopGroup?.hooks.push({
+      type: 'command',
+      command: '/usr/local/bin/co-located-user-hook',
+    })
+    fs.writeFileSync(
+      path.join(sandbox, '.claude', 'settings.json'),
+      JSON.stringify(settings, null, 2) + '\n',
+    )
+
+    const second = await run([])
+    expect(second.code, second.stderr).toBe(0)
+    const rerun = fs.readFileSync(path.join(sandbox, '.claude', 'settings.json'), 'utf-8')
+    expect((rerun.match(/agentchat\.mjs/g) ?? []).length).toBe(4)
+
+    const removed = await run(['uninstall'])
+    expect(removed.code, removed.stderr).toBe(0)
+    const preserved = JSON.parse(
+      fs.readFileSync(path.join(sandbox, '.claude', 'settings.json'), 'utf-8'),
+    ) as {
+      theme: string
+      hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>
+    }
+    expect(preserved).toEqual({
+      theme: 'dark',
+      hooks: {
+        Stop: [
+          {
+            hooks: [{ type: 'command', command: '/usr/local/bin/user-hook' }],
+          },
+          {
+            hooks: [
+              {
+                type: 'command',
+                command: '/usr/local/bin/co-located-user-hook',
+              },
+            ],
+          },
+        ],
+      },
+    })
+  })
+
+  it('replaces the legacy user plugin only after direct wiring succeeds', async () => {
+    fs.writeFileSync(fakeClaude.pluginState, 'installed')
+    const out = await run([])
+    expect(out.code, out.stderr).toBe(0)
+    expect(out.stdout).toContain('legacy marketplace plugin removed')
+    expect(fs.existsSync(fakeClaude.pluginState)).toBe(false)
+  })
+
+  it('refuses to overwrite a foreign MCP server with the same name', async () => {
+    fs.writeFileSync(
+      fakeClaude.mcpState,
+      JSON.stringify({
+        mcpServers: {
+          agentchat: { type: 'stdio', command: 'foreign-agentchat', args: [], env: {} },
+        },
+      }),
+    )
+    fs.writeFileSync(fakeClaude.pluginState, 'installed')
+
+    const out = await run([])
+
+    expect(out.code).toBe(1)
+    expect(out.stdout).toContain('left it untouched')
+    expect(JSON.parse(fs.readFileSync(fakeClaude.mcpState, 'utf-8'))).toMatchObject({
+      mcpServers: { agentchat: { command: 'foreign-agentchat' } },
+    })
+    expect(fs.existsSync(fakeClaude.pluginState)).toBe(true)
+    expect(fs.existsSync(path.join(sandbox, '.claude', 'settings.json'))).toBe(false)
+    expect(
+      fs.existsSync(path.join(sandbox, '.claude', 'agentchat', 'bin', 'agentchat.mjs')),
+    ).toBe(false)
+  })
+
+  it('diagnoses a per-project MCP disable and keeps the legacy path during migration', async () => {
+    const project = path.join(sandbox, 'project-with-disabled-mcp')
+    fs.mkdirSync(project, { recursive: true })
+    fs.writeFileSync(
+      fakeClaude.mcpState,
+      JSON.stringify({
+        projects: {
+          [project]: {
+            disabledMcpServers: ['agentchat'],
+          },
+        },
+      }),
+    )
+    fs.writeFileSync(fakeClaude.pluginState, 'installed')
+
+    const out = await run([], { CLAUDE_PROJECT_DIR: project })
+
+    expect(out.code).toBe(1)
+    expect(out.stdout).toContain('AgentChat MCP is disabled')
+    expect(out.stdout).toContain('legacy plugin was left in place')
+    expect(fs.existsSync(fakeClaude.pluginState)).toBe(true)
+    expect(
+      fs.existsSync(path.join(sandbox, '.claude', 'agentchat', 'bin', 'agentchat.mjs')),
+    ).toBe(true)
+
+    const doctor = await run(['doctor'], { CLAUDE_PROJECT_DIR: project })
+    expect(doctor.stdout).toContain('FAIL project-mcp')
+    expect(doctor.stdout).toContain('AgentChat MCP is disabled')
   })
 })
 
@@ -222,12 +423,10 @@ describe('every hint is a runnable command', () => {
   }
 })
 
-describe('the committed bundle runs from a bare clone', () => {
+describe('the publishable bundle runs after its NPX cache is gone', () => {
   it('has no external imports left to resolve', async () => {
-    // A Claude Code plugin is installed by git-cloning this repo — there is no
-    // install step and no node_modules beside the bundle. A single external
-    // import is a hard crash at startup for every user, which is exactly what
-    // shipped before `agentchatme` was added to noExternal.
+    // The installer copies this file into a durable home. A single external
+    // import would become a hard crash as soon as the NPX cache is cleaned.
     const bundle = fs.readFileSync(BIN, 'utf-8')
     expect(bundle).not.toMatch(/^import .* from ["'](agentchatme|@agentchatme\/|zod)/m)
   })

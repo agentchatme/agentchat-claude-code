@@ -1,4 +1,5 @@
 import * as fs from 'node:fs'
+import * as path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import {
   alwaysOnOptedOut,
@@ -6,9 +7,12 @@ import {
   alwaysOnWanted,
   createIdentityCommands,
   readAlwaysOnInstalledVersion,
-  renderAnchorBlock,
+  readCredentials,
+  recordOfferDeclined,
+  renderDeclinedBlock,
   serviceDefinitionCurrent,
   serviceInstalled,
+  writeAnchor,
   type DoctorCheck,
   type HostProfile,
 } from '@agentchatme/agent-core'
@@ -18,12 +22,21 @@ import {
   claudeHome,
   invocation,
   LABEL,
-  pluginMcpConfigPath,
   SERVICE_LABEL,
   serviceEnv,
-  shippedDaemonPath,
-  stableDaemonPath,
 } from './host.js'
+import {
+  inspectClaudeMcp,
+  inspectCurrentProjectMcp,
+  inspectClaudeRuntime,
+  installClaude,
+  isClaudeWired,
+  manualPath,
+  renderClaudeAgents,
+  settingsPath,
+  stableBundlePath,
+  stableDaemonPath,
+} from './wiring.js'
 import { AGENTCHAT_MCP_PACKAGE, claudeIsLoggedIn } from './adapter.js'
 import { ensureAlwaysOn } from './always-on.js'
 import { VERSION } from './version.js'
@@ -49,15 +62,15 @@ const profile: HostProfile = {
   home: identityHome,
   anchorFile,
   invocation,
-  renderAnchor: renderAnchorBlock,
-  // Nothing to un-wire: Claude Code installs and removes the plugin itself, so
-  // logout only drops this agent's credentials and its anchor.
+  renderAnchor: renderClaudeAgents,
+  isWired: isClaudeWired,
   logoutHints: () => [
-    `To remove the integration too, first run \`${invocation()} uninstall\`, then: /plugin uninstall agentchat@agentchatme`,
+    `To remove the integration too, run \`${invocation()} uninstall\`.`,
   ],
   extraDoctorChecks: (opts): DoctorCheck[] => [
     ...runtimeChecks(),
-    pluginMcpCheck(),
+    wiringCheck(opts.fix === true),
+    projectMcpCheck(),
     alwaysOnCheck(opts.fix === true),
   ],
 }
@@ -80,18 +93,13 @@ function runtimeChecks(): DoctorCheck[] {
         ? `npx ${concise(npx.stdout || npx.stderr)}`
         : npx.error?.message ?? `npx exited ${npx.status}`,
   }
-  const version = spawnSync('claude', ['--version'], {
-    encoding: 'utf-8',
-    timeout: 5_000,
-    windowsHide: true,
-    env: { ...process.env, CLAUDE_CONFIG_DIR: claudeHome() },
-  })
-  if (version.error || version.status !== 0) {
+  const version = inspectClaudeRuntime()
+  if (!version.ok) {
     return [
       {
         name: 'claude-cli',
         verdict: 'FAIL',
-        detail: version.error ? `unavailable: ${version.error.message}` : `exited ${version.status}`,
+        detail: version.detail,
       },
       { name: 'claude-auth', verdict: 'FAIL', detail: 'cannot check until the Claude CLI works' },
       mcpRunner,
@@ -102,7 +110,7 @@ function runtimeChecks(): DoctorCheck[] {
     {
       name: 'claude-cli',
       verdict: 'PASS',
-      detail: concise(version.stdout || version.stderr) || 'available',
+      detail: concise(version.detail) || 'available',
     },
     {
       name: 'claude-auth',
@@ -115,34 +123,52 @@ function runtimeChecks(): DoctorCheck[] {
   ]
 }
 
-function pluginMcpCheck(): DoctorCheck {
-  try {
-    const config = JSON.parse(fs.readFileSync(pluginMcpConfigPath(), 'utf-8')) as {
-      mcpServers?: { agentchat?: { command?: unknown; args?: unknown } }
-    }
-    const server = config.mcpServers?.agentchat
-    const args = Array.isArray(server?.args) ? server.args : []
-    const current =
-      server?.command === 'node' &&
-      args.includes('${CLAUDE_PLUGIN_ROOT}/bin/agentchat') &&
-      args.includes('mcp-proxy')
-    return current
-      ? {
-          name: 'plugin-mcp',
-          verdict: 'PASS',
-          detail: `plugin proxy launches ${AGENTCHAT_MCP_PACKAGE} with this agent's config directory`,
-        }
-      : {
-          name: 'plugin-mcp',
+function wiringCheck(fix: boolean): DoctorCheck {
+  const current = (): boolean =>
+    isClaudeWired() &&
+    fs.existsSync(settingsPath()) &&
+    fs.existsSync(stableBundlePath()) &&
+    fs.existsSync(manualPath())
+
+  if (fix && !current()) {
+    try {
+      const repaired = installClaude(readCredentials(identityHome())?.handle ?? null)
+      if (!repaired.complete) {
+        return {
+          name: 'wiring',
           verdict: 'FAIL',
-          detail: 'plugin MCP declaration is missing or stale; update/reinstall the plugin',
+          detail: repaired.warnings.join('; ') || 'repair did not complete',
         }
-  } catch (err) {
-    return {
-      name: 'plugin-mcp',
-      verdict: 'FAIL',
-      detail: `cannot read ${pluginMcpConfigPath()}: ${String(err)}`,
+      }
+    } catch (err) {
+      return { name: 'wiring', verdict: 'FAIL', detail: `repair failed: ${String(err)}` }
     }
+  }
+
+  if (current()) {
+    return {
+      name: 'wiring',
+      verdict: 'PASS',
+      detail: `current user MCP (${AGENTCHAT_MCP_PACKAGE}), four lifecycle hooks, bundle and manual`,
+    }
+  }
+
+  const mcp = inspectClaudeMcp()
+  return {
+    name: 'wiring',
+    verdict: 'FAIL',
+    detail:
+      `missing or stale direct integration (${mcp.detail}) — ` +
+      `run \`${invocation()}${fix ? '' : ' doctor --fix'}\``,
+  }
+}
+
+function projectMcpCheck(): DoctorCheck {
+  const availability = inspectCurrentProjectMcp()
+  return {
+    name: 'project-mcp',
+    verdict: availability.state === 'clear' ? 'PASS' : 'FAIL',
+    detail: availability.detail,
   }
 }
 
@@ -159,13 +185,12 @@ function alwaysOnCheck(fix: boolean): DoctorCheck {
   }
   const current = (): boolean =>
     alwaysOnWanted(home) &&
-    fs.existsSync(shippedDaemonPath()) &&
     fs.existsSync(service.entry) &&
     readAlwaysOnInstalledVersion(home) === VERSION &&
     serviceInstalled(service) &&
     serviceDefinitionCurrent(service)
 
-  if (fix && !current()) {
+  if (fix && isClaudeWired() && !current()) {
     const repaired = ensureAlwaysOn()
     if (!repaired.ok) {
       return {
@@ -178,7 +203,7 @@ function alwaysOnCheck(fix: boolean): DoctorCheck {
   if (!current()) {
     return {
       name: 'always-on',
-      verdict: 'FAIL',
+      verdict: isClaudeWired() ? 'FAIL' : 'WARN',
       detail: `service, durable bundle or version marker is missing/stale — run \`${invocation()} doctor --fix\``,
     }
   }
@@ -190,7 +215,27 @@ function alwaysOnCheck(fix: boolean): DoctorCheck {
   }
 }
 
-export const { runRegister, runLogin, runRecover, runStatus, runLogout, runDoctor } =
-  createIdentityCommands(profile)
+const commands = createIdentityCommands(profile)
+
+/** Persist a declined setup offer so the always-loaded CLAUDE.md does not nag. */
+export function runNotNow(): number {
+  const home = identityHome()
+  recordOfferDeclined(home)
+  try {
+    writeAnchor(anchorFile(), renderDeclinedBlock({ invoke: invocation(), label: LABEL }))
+  } catch (err) {
+    console.error(`Recorded, but could not update ${path.basename(anchorFile())}: ${String(err)}`)
+    return 1
+  }
+  console.log(
+    [
+      `Noted — ${LABEL} will not ask about AgentChat again.`,
+      `Changed your mind? ${invocation()} register --email <email> --handle <handle>`,
+    ].join('\n'),
+  )
+  return 0
+}
+
+export const { runRegister, runLogin, runRecover, runStatus, runLogout, runDoctor } = commands
 
 export type { RegisterOpts, DoctorOpts } from '@agentchatme/agent-core'

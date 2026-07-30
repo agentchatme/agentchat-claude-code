@@ -1,25 +1,25 @@
 import { parseArgs } from 'node:util'
-import * as fs from 'node:fs'
-import * as path from 'node:path'
 import { spawn } from 'node:child_process'
 import {
-  serviceStatus,
-  clearAlwaysOnWanted,
-  markAlwaysOnOptOut,
-  clearAlwaysOnOptOut,
   alwaysOnState,
-  removeAnchorAt,
+  clearAlwaysOnWanted,
+  clearAlwaysOnOptOut,
+  markAlwaysOnOptOut,
+  readCredentials,
+  serviceStatus,
 } from '@agentchatme/agent-core'
+import { identityHome, invocation, SERVICE_LABEL, LABEL } from './host.js'
+import { installClaude, removeClaudeWiring } from './wiring.js'
 import {
-  anchorFile,
-  identityHome,
-  invocation,
-  SERVICE_LABEL,
-  LABEL,
-  stableDaemonPath,
-} from './host.js'
-import { runRegister, runLogin, runRecover, runStatus, runLogout, runDoctor } from './identity.js'
-import { runSessionStart, runUserPrompt, runStop } from './hooks.js'
+  runRegister,
+  runLogin,
+  runRecover,
+  runStatus,
+  runLogout,
+  runDoctor,
+  runNotNow,
+} from './identity.js'
+import { runSessionStart, runUserPrompt, runStop, runSessionEnd } from './hooks.js'
 import { ensureAlwaysOn, removeAlwaysOn } from './always-on.js'
 import { VERSION } from './version.js'
 import { AGENTCHAT_MCP_PACKAGE } from './adapter.js'
@@ -27,14 +27,16 @@ import { AGENTCHAT_MCP_PACKAGE } from './adapter.js'
 const USAGE = `agentchat-claude-code ${VERSION} — AgentChat for Claude Code
 
 Usage:
+  ${invocation()}                                  wire Claude Code up
   ${invocation()} register --email <e> --handle <h>
   ${invocation()} register --code <6-digit-code>
+  ${invocation()} register --not-now                stop offering to set this up
   ${invocation()} login --api-key <ac_…>           already have an account
   ${invocation()} recover --email <email>          lost your key (rotates it)
   ${invocation()} recover --code <6-digit-code>
   ${invocation()} status [--json]
   ${invocation()} logout
-  ${invocation()} uninstall                         prepare a clean plugin removal
+  ${invocation()} uninstall                         remove the Claude Code integration
   ${invocation()} doctor [--fix]
   ${invocation()} daemon <install|disable|status|uninstall>
 
@@ -42,10 +44,6 @@ This command only ever acts on your ${LABEL} agent. If you also run another
 coding agent here, it is a SEPARATE AgentChat agent with its own @handle — the
 two of you can DM each other — and it has its own front door:
   Codex:  npx -y @agentchatme/codex
-
-The plugin itself is managed by Claude Code:
-  /plugin marketplace add agentchatme/agentchat-claude-code
-  /plugin install agentchat@agentchatme
 
 AGENTCHAT_API_KEY / AGENTCHAT_API_BASE override the stored identity.
 (hook subcommands are wired by the installer — you don't run them.)
@@ -67,6 +65,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         'api-base': { type: 'string' },
         json: { type: 'boolean' },
         fix: { type: 'boolean' },
+        'not-now': { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
       },
@@ -89,10 +88,63 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     return 0
   }
 
-  // The plugin is installed by Claude Code itself, so a bare invocation has
-  // nothing to wire — show where this agent stands instead.
-  switch (command ?? 'status') {
+  // Bare invocation = the thing people came here to do.
+  switch (command ?? 'install') {
+    case 'install': {
+      const home = identityHome()
+      const handle = readCredentials(home)?.handle ?? null
+      let failed = false
+      try {
+        const result = installClaude(handle)
+        const { actions, warnings } = result
+        if (!result.complete) {
+          failed = true
+          warnings.push(
+            `direct wiring is incomplete — resolve the warning above and re-run \`${invocation()}\``,
+          )
+        } else {
+          const alwaysOn = ensureAlwaysOn()
+          if (alwaysOn.ok) actions.push('always-on service registered')
+          else if (alwaysOn.detail === 'switched off by the user') {
+            actions.push('always-on remains off (user choice)')
+          } else {
+            failed = true
+            warnings.push(
+              `always-on could not be registered (${alwaysOn.detail}) — \`${invocation()} daemon install\` retries it`,
+            )
+          }
+        }
+        if (warnings.length > 0) failed = true
+        console.log(
+          !result.complete
+            ? `${LABEL}: wiring incomplete`
+            : failed
+              ? `${LABEL}: direct wiring installed, but action is still required`
+              : `${LABEL}: wired ✓ (${actions.join(', ') || 'no changes'})`,
+        )
+        for (const warning of warnings) console.log(`  ⚠ ${warning}`)
+      } catch (err) {
+        console.error(`${LABEL}: wiring failed — ${String(err)}`)
+        return 1
+      }
+      if (failed) return 1
+      if (handle === null) {
+        console.log(
+          [
+            '',
+            `Last step — give ${LABEL} its @handle:`,
+            '  Open a new Claude Code session and it will offer to set one up — or run:',
+            `    ${invocation()} register --email <email> --handle <handle>`,
+          ].join('\n'),
+        )
+      } else {
+        console.log(`\nSigned in as @${handle}. Start a new Claude Code session to load the integration.`)
+      }
+      return 0
+    }
+
     case 'register':
+      if (values['not-now'] === true) return runNotNow()
       return runRegister({
         ...(values.email !== undefined ? { email: values.email } : {}),
         ...(values.handle !== undefined ? { handle: values.handle } : {}),
@@ -130,8 +182,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     case 'daemon':
       return runDaemonCmd(subcommand)
 
-    // Internal plugin transport. Keeping path resolution in executable code is
-    // what makes CLAUDE_CONFIG_DIR work even when it is unset.
+    // Internal MCP transport. Keeping identity resolution in executable code
+    // makes CLAUDE_CONFIG_DIR work even when it is unset.
     case 'mcp-proxy':
       return runMcpProxy()
 
@@ -140,7 +192,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       if (subcommand === 'session-start') { await runSessionStart(); return 0 }
       if (subcommand === 'user-prompt') { await runUserPrompt(); return 0 }
       if (subcommand === 'stop') { await runStop(); return 0 }
-      console.error('Usage: hook <session-start|user-prompt|stop>')
+      if (subcommand === 'session-end') { await runSessionEnd(); return 0 }
+      console.error('Usage: hook <session-start|user-prompt|stop|session-end>')
       return 1
     }
 
@@ -192,27 +245,29 @@ function runUninstall(): number {
     warnings.push(`could not fully remove the always-on service: ${String(err)}`)
   }
 
-  // A plugin has no uninstall lifecycle hook. Remember this opt-out before the
-  // user runs Claude's plugin command, otherwise any remaining hook event in
-  // the current session would immediately recreate the service.
+  // A running session may have loaded the old hook set already. Remember the
+  // opt-out so a final event cannot recreate the service during teardown.
   markAlwaysOnOptOut(home)
-  if (removeAnchorAt(anchorFile()) === 'removed') {
-    console.log(`Removed the AgentChat anchor from ${anchorFile()}.`)
-  }
-  if (serviceRemoved) {
-    try {
-      fs.rmSync(stableDaemonPath(), { force: true })
-    } catch (err) {
-      warnings.push(`could not remove the durable daemon bundle: ${String(err)}`)
-    }
+
+  let removed: string[] = []
+  try {
+    const wiring = removeClaudeWiring({ preserveDaemonBundle: !serviceRemoved })
+    removed = wiring.removed
+    warnings.push(...wiring.warnings)
+  } catch (err) {
+    warnings.push(`could not fully remove Claude Code wiring: ${String(err)}`)
   }
 
   console.log(
-    serviceRemoved
-      ? 'AgentChat background service is off; your AgentChat identity was preserved.'
-      : 'AgentChat could not verify that the background service stopped; its durable bundle was preserved so the service cannot restart against a missing executable. Your AgentChat identity was preserved.',
+    removed.length > 0
+      ? `Claude Code integration removed: ${removed.join(', ')}.`
+      : 'Claude Code integration was already removed.',
   )
-  console.log('Finish removing the plugin in Claude Code with: /plugin uninstall agentchat@agentchatme')
+  console.log(
+    serviceRemoved
+      ? `Your AgentChat identity was preserved. Run \`${invocation()}\` to install the integration again, or \`${invocation()} logout\` to delete its local credentials.`
+      : 'The durable daemon bundle was preserved because the background service could not be verified as stopped. Your AgentChat identity was preserved.',
+  )
   for (const warning of warnings) console.error(`Warning: ${warning}`)
   return warnings.length > 0 ? 1 : 0
 }

@@ -8,7 +8,7 @@ import * as fs9 from "fs";
 import "path";
 import { spawn as spawn3 } from "child_process";
 
-// @agentchatme/agent-core/dist/chunk-AGDJ4A6R.js
+// @agentchatme/agent-core/dist/chunk-27XDHOL3.js
 import * as fs2 from "fs";
 import * as path2 from "path";
 import * as fs3 from "fs";
@@ -38,7 +38,7 @@ var log = {
   info: (msg) => emit("info", msg),
   debug: (msg) => emit("debug", msg)
 };
-var VERSION = "0.0.1312";
+var VERSION = "0.0.1313";
 var CODING_AGENTS_CLIENT_IDENTITY = {
   name: "coding_agents",
   version: VERSION
@@ -47,6 +47,25 @@ var CODING_AGENTS_CLIENT_HEADERS = {
   "X-AgentChat-Client": CODING_AGENTS_CLIENT_IDENTITY.name,
   "X-AgentChat-Client-Version": CODING_AGENTS_CLIENT_IDENTITY.version
 };
+var SEC = 1e3;
+var MIN = 60 * SEC;
+var HOUR = 60 * MIN;
+var DAY = 24 * HOUR;
+function relativeAge(ms) {
+  if (ms < 45 * SEC) return "just now";
+  if (ms < 90 * SEC) return "1 minute ago";
+  if (ms < 45 * MIN) return `${Math.round(ms / MIN)} minutes ago`;
+  if (ms < 90 * MIN) return "1 hour ago";
+  if (ms < 22 * HOUR) return `${Math.round(ms / HOUR)} hours ago`;
+  if (ms < 36 * HOUR) return "1 day ago";
+  return `${Math.round(ms / DAY)} days ago`;
+}
+function relativeWhen(createdAt, now2 = Date.now()) {
+  if (!createdAt) return "";
+  const t = Date.parse(createdAt);
+  if (Number.isNaN(t)) return "";
+  return relativeAge(Math.max(0, now2 - t));
+}
 function atomicWriteFile(filePath, data, mode) {
   const dir = path2.dirname(filePath);
   fs2.mkdirSync(dir, { recursive: true, mode: 448 });
@@ -4207,8 +4226,11 @@ var SyncRowSchema = external_exports.object({
   // fallback against a future server-side rename).
   sender: external_exports.string().optional(),
   sender_handle: external_exports.string().optional(),
+  seq: external_exports.number().optional(),
   type: external_exports.string().optional(),
   content: external_exports.record(external_exports.unknown()).optional(),
+  metadata: external_exports.record(external_exports.unknown()).optional(),
+  status: external_exports.string().optional(),
   created_at: external_exports.string().optional()
 }).passthrough();
 function contextOf(row) {
@@ -4306,6 +4328,28 @@ async function claimReply(cfg, messageId, holder) {
     log.warn(`reply-claim failed (surfacing anyway): ${String(err)}`);
     return true;
   }
+}
+async function claimReplyBatch(cfg, messageIds, holder) {
+  if (messageIds.length === 0) return 0;
+  try {
+    const data = await request(cfg, "POST", "/v1/reply/claim-batch", {
+      message_ids: messageIds,
+      holder
+    });
+    const parsed = external_exports.object({ claimed_count: external_exports.number().int().min(0).max(messageIds.length) }).passthrough().safeParse(data);
+    return parsed.success ? parsed.data.claimed_count : messageIds.length;
+  } catch (err) {
+    if (!/AgentChat API (404|405)\b/.test(String(err))) {
+      log.warn(`reply-batch-claim failed (surfacing all): ${String(err)}`);
+      return messageIds.length;
+    }
+  }
+  let claimed = 0;
+  for (const messageId of messageIds) {
+    if (!await claimReply(cfg, messageId, holder)) break;
+    claimed += 1;
+  }
+  return claimed;
 }
 function lastDeliveryId(rows) {
   for (let i = rows.length - 1; i >= 0; i--) {
@@ -4604,7 +4648,7 @@ function createAgentChatError(body, status, headers) {
       return new AgentChatError(body, status, requestId);
   }
 }
-var VERSION2 = "1.0.221";
+var VERSION2 = "1.0.2212";
 function detectRuntime() {
   const g = globalThis;
   if (typeof g.Bun?.version === "string") return `bun/${g.Bun.version}`;
@@ -5219,6 +5263,7 @@ var AgentChatClient = class _AgentChatClient {
    * most one:
    *   - `beforeSeq` — backwards scrollback (rows with seq < N, newest first)
    *   - `afterSeq`  — forwards gap-fill (rows with seq > N, oldest first)
+   *   - `aroundMessageId` — backwards window ending at that exact message
    *
    * `afterSeq` is the path `RealtimeClient` uses for in-order recovery
    * when a per-conversation seq gap is detected. Application code usually
@@ -5229,6 +5274,9 @@ var AgentChatClient = class _AgentChatClient {
     params.set("limit", String(options?.limit ?? 50));
     if (options?.beforeSeq !== void 0) params.set("before_seq", String(options.beforeSeq));
     if (options?.afterSeq !== void 0) params.set("after_seq", String(options.afterSeq));
+    if (options?.aroundMessageId !== void 0) {
+      params.set("around_message_id", options.aroundMessageId);
+    }
     return this.get(
       `/v1/messages/${encodeURIComponent(conversationId)}?${params.toString()}`,
       options
@@ -5246,10 +5294,10 @@ var AgentChatClient = class _AgentChatClient {
    * Idempotent — hiding an already-hidden message is a success no-op.
    */
   /**
-   * Mark a message as read. Advances the caller's read cursor to the
-   * target message's seq — idempotent, monotonic (the server ignores
-   * attempts to walk the cursor backwards). A `message.read` event is
-   * fanned out to the sender via WebSocket + webhook.
+   * Mark one message as read for the caller. This updates that message's
+   * recipient envelope only; it does not implicitly mark earlier messages,
+   * so a conversation can legitimately contain unread gaps. A `message.read`
+   * event is fanned out to the sender via WebSocket + webhook.
    *
    * Realtime clients also have a WebSocket shortcut (`message.read_ack`
    * frame) that bypasses this HTTP call. The REST method exists for
@@ -5287,6 +5335,17 @@ var AgentChatClient = class _AgentChatClient {
     );
   }
   /**
+   * Fetch compact server-authored room metadata: group summary or DM
+   * counterparty, contact memory, and the exact unread seq boundary.
+   * Message bodies stay on `getMessages`.
+   */
+  getConversationContext(conversationId, opts) {
+    return this.get(
+      `/v1/conversations/${encodeURIComponent(conversationId)}/context`,
+      opts
+    );
+  }
+  /**
    * Hide a conversation from the caller's inbox (soft-delete, caller-scoped).
    * The other side's view is untouched — by design, matching the
    * hide-for-me semantics of message deletion. Unread counters and
@@ -5299,8 +5358,15 @@ var AgentChatClient = class _AgentChatClient {
       opts
     );
   }
-  listConversations(opts) {
-    return this.get("/v1/conversations", opts);
+  listConversations(options) {
+    const params = new URLSearchParams();
+    if (options?.limit !== void 0) params.set("limit", String(options.limit));
+    if (options?.offset !== void 0) params.set("offset", String(options.offset));
+    const qs = params.toString();
+    return this.get(
+      `/v1/conversations${qs ? `?${qs}` : ""}`,
+      options
+    );
   }
   // ─── Groups ───────────────────────────────────────────────────────────────
   /**
@@ -5706,10 +5772,10 @@ var AgentChatClient = class _AgentChatClient {
     );
   }
 };
-var SEC = 1e3;
-var MIN = 60 * SEC;
-var HOUR = 60 * MIN;
-var DAY = 24 * HOUR;
+var SEC2 = 1e3;
+var MIN2 = 60 * SEC2;
+var HOUR2 = 60 * MIN2;
+var DAY2 = 24 * HOUR2;
 var MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024;
 
 // @agentchatme/agent-core/dist/index.js
@@ -5916,25 +5982,6 @@ function stripAllBlocks(existing, start, end) {
   }
   return text;
 }
-var SEC2 = 1e3;
-var MIN2 = 60 * SEC2;
-var HOUR2 = 60 * MIN2;
-var DAY2 = 24 * HOUR2;
-function relativeAge(ms) {
-  if (ms < 45 * SEC2) return "just now";
-  if (ms < 90 * SEC2) return "1 minute ago";
-  if (ms < 45 * MIN2) return `${Math.round(ms / MIN2)} minutes ago`;
-  if (ms < 90 * MIN2) return "1 hour ago";
-  if (ms < 22 * HOUR2) return `${Math.round(ms / HOUR2)} hours ago`;
-  if (ms < 36 * HOUR2) return "1 day ago";
-  return `${Math.round(ms / DAY2)} days ago`;
-}
-function relativeWhen(createdAt, now2 = Date.now()) {
-  if (!createdAt) return "";
-  const t = Date.parse(createdAt);
-  if (Number.isNaN(t)) return "";
-  return relativeAge(Math.max(0, now2 - t));
-}
 var SNIPPET_MAX = 140;
 function snippetOf(row) {
   const content = row.content ?? {};
@@ -5955,9 +6002,11 @@ function digestConversations(rows, selfHandle = null) {
       existing.count += 1;
       if (!existing.senders.includes(sender)) existing.senders.push(sender);
       existing.latestSnippet = snippetOf(row);
+      existing.latestMessageId = row.id;
       existing.latestCreatedAt = row.created_at ?? existing.latestCreatedAt;
       existing.groupName = ctx.groupName ?? existing.groupName;
       existing.mentionsYou = existing.mentionsYou || mentionsSelf;
+      if (mentionsSelf) existing.mentionedMessageIds.push(row.id);
     } else {
       byConversation.set(row.conversation_id, {
         conversationId: row.conversation_id,
@@ -5965,9 +6014,11 @@ function digestConversations(rows, selfHandle = null) {
         senders: [sender],
         count: 1,
         latestSnippet: snippetOf(row),
+        latestMessageId: row.id,
         latestCreatedAt: row.created_at,
         groupName: ctx.groupName,
-        mentionsYou: mentionsSelf
+        mentionsYou: mentionsSelf,
+        mentionedMessageIds: mentionsSelf ? [row.id] : []
       });
     }
   }
@@ -5981,7 +6032,9 @@ function digestLines(digests) {
     const age = relativeWhen(d.latestCreatedAt);
     const recency = age ? `, latest ${age}` : "";
     const mention = d.mentionsYou ? " \u2014 mentions you" : "";
-    return `${i + 1}. ${who} (${count}, ${kind}${recency}${mention}), preview=${JSON.stringify(d.latestSnippet)}`;
+    const attentionIds = d.mentionedMessageIds.slice(-30);
+    const attention = attentionIds.length > 0 ? `, attention_message_ids=${JSON.stringify(attentionIds)}${d.mentionedMessageIds.length > attentionIds.length ? ` (+${d.mentionedMessageIds.length - attentionIds.length} older mentions in history)` : ""}` : "";
+    return `${i + 1}. ${who} (${count}, ${kind}${recency}${mention}), latest_message_id=${d.latestMessageId}${attention}, preview=${JSON.stringify(d.latestSnippet)}`;
   });
 }
 function formatSessionStart(handle, rows) {
@@ -5996,7 +6049,7 @@ function formatSessionStart(handle, rows) {
     "",
     ...digestLines(digests),
     "",
-    "Triage per your AgentChat skill: read a conversation with agentchat_get_conversation before replying; reply only where an open request is addressed to you; finished conversations get silence, not acknowledgments. Mention anything the user should know about."
+    "Triage per your AgentChat skill: read a conversation with agentchat_get_conversation before replying, passing its latest_message_id as around_message_id and any listed attention_message_ids exactly; reply only where an open request is addressed to you; finished conversations get silence, not acknowledgments. Mention anything the user should know about."
   ].join("\n");
 }
 function formatStopPickup(handle, rows) {
@@ -6010,7 +6063,7 @@ function formatStopPickup(handle, rows) {
     "",
     ...digestLines(digests),
     "",
-    "Handle these per your AgentChat skill, then finish. Reply via agentchat_send_message only where warranted \u2014 if nothing is actionable, simply end the turn (silence is a valid outcome)."
+    "Handle these per your AgentChat skill, opening each conversation with agentchat_get_conversation, its latest_message_id as around_message_id, and any listed attention_message_ids exactly. Reply via agentchat_send_message only where warranted \u2014 if nothing is actionable, simply end the turn (silence is a valid outcome)."
   ].join("\n");
 }
 function formatAlwaysOnDown(copy) {
@@ -6086,12 +6139,12 @@ function ackableRows(rows) {
   return usable;
 }
 async function claimContiguousPrefix(cfg, rows, holder) {
-  const won = await Promise.all(rows.map((r) => claimReply(cfg, r.id, holder)));
-  const prefix = [];
-  for (let i = 0; i < rows.length; i++) {
-    if (!won[i]) break;
-    prefix.push(rows[i]);
-  }
+  const claimed = await claimReplyBatch(
+    cfg,
+    rows.map((row) => row.id),
+    holder
+  );
+  const prefix = rows.slice(0, claimed);
   if (prefix.length < rows.length) {
     log.info(
       `coexistence: daemon owns ${rows.length - prefix.length} row(s); surfacing ${prefix.length}`
@@ -7144,11 +7197,11 @@ import * as crypto from "crypto";
 import { spawn as spawn2, spawnSync as spawnSync2 } from "child_process";
 
 // src/version.ts
-var VERSION3 = "0.0.1394113";
+var VERSION3 = "0.0.1394114";
 
 // src/adapter.ts
 var MAX_EVENT_TAIL_CHARS = 1024 * 1024;
-var AGENTCHAT_MCP_PACKAGE = "@agentchatme/mcp@0.1.11212";
+var AGENTCHAT_MCP_PACKAGE = "@agentchatme/mcp@0.1.11214";
 function claudeIsLoggedIn(configDir) {
   const status = spawnSync2("claude", ["auth", "status"], {
     encoding: "utf-8",

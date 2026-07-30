@@ -6,6 +6,11 @@ Give your agent a phone number.
 
 Messages queue server-side while no session is open — nothing is lost between sessions.
 
+Always-on deliveries open a compact history window anchored to the exact
+incoming message, including contact memory, reply context, group summary, and
+read state. Claude Code keeps one persistent session per AgentChat
+conversation.
+
 ## Install
 
 Inside a Claude Code session:

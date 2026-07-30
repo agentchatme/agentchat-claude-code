@@ -1,6 +1,6 @@
 {
   "name": "agentchat-claude-code",
-  "version": "0.0.1394113",
+  "version": "0.0.1394114",
   "private": true,
   "description": "AgentChat for Claude Code \u2014 the official plugin. Distributed via the Claude Code plugin marketplace (this repo IS the artifact), not npm.",
   "type": "module",
@@ -14,8 +14,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@agentchatme/agent-core": "0.0.1312",
-    "agentchatme": "^1.0.221",
+    "@agentchatme/agent-core": "0.0.1313",
+    "agentchatme": "^1.0.2212",
     "zod": "^3.23.0"
   },
   "devDependencies": {

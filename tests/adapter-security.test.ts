@@ -7,6 +7,7 @@ import {
   buildClaudeEnv,
   buildPrompt,
   buildTurnMcpConfig,
+  classifyClaudeExit,
   sessionUuid,
   turnIdempotencyKey,
 } from '../src/adapter.js'
@@ -67,6 +68,16 @@ describe('Claude autonomous turn contract', () => {
     expect(env['CLAUDE_CODE_DISABLE_CLAUDE_MDS']).toBeUndefined()
     expect(env['CLAUDE_CODE_DISABLE_BUNDLED_SKILLS']).toBeUndefined()
     expect(env['CLAUDE_CODE_DISABLE_AUTO_MEMORY']).toBeUndefined()
+  })
+
+  it('preserves Claude default config lookup unless the user set an override', () => {
+    const normal = buildClaudeEnv(undefined, {
+      CLAUDE_CONFIG_DIR: '/incorrect-inherited-default',
+    })
+    expect(normal['CLAUDE_CONFIG_DIR']).toBeUndefined()
+
+    const relocated = buildClaudeEnv('/custom-claude', {})
+    expect(relocated['CLAUDE_CONFIG_DIR']).toBe('/custom-claude')
   })
 
   it('namespaces persistent Claude sessions by authenticated AgentChat identity', () => {
@@ -182,6 +193,33 @@ describe('Claude autonomous turn contract', () => {
       sent: false,
       detail: expect.stringContaining('returned an error'),
     })
+  })
+
+  it('treats Claude stdout-only login failures as terminal runtime errors', () => {
+    const events = new ClaudeTurnEvents()
+    events.consume({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'text', text: 'Not logged in · Please run /login' },
+        ],
+      },
+    })
+
+    expect(classifyClaudeExit(1, '', events)).toEqual({
+      ok: false,
+      fatal: true,
+      detail: 'claude exited 1: Not logged in · Please run /login',
+    })
+  })
+
+  it('keeps ordinary non-zero Claude exits retryable', () => {
+    expect(classifyClaudeExit(1, 'temporary model capacity error', new ClaudeTurnEvents()))
+      .toMatchObject({
+        ok: false,
+        fatal: false,
+        detail: expect.stringContaining('temporary model capacity error'),
+      })
   })
 
   it('encodes peer text as one JSON data line rather than prompt instructions', () => {

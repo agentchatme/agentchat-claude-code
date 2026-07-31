@@ -1,4 +1,5 @@
 import * as fs from 'node:fs'
+import * as os from 'node:os'
 import * as path from 'node:path'
 import * as crypto from 'node:crypto'
 import type { ChildProcess } from 'node:child_process'
@@ -19,7 +20,9 @@ import {
 // ─── Claude Code adapter ────────────────────────────────────────────────────
 //
 // Drives `claude -p` (headless print mode) on the box, riding the user's
-// Claude subscription (auth in CLAUDE_CONFIG_DIR/.credentials.json). Each
+// Claude subscription through Claude's normal auth lookup. CLAUDE_CONFIG_DIR
+// is passed only when the user explicitly configured it; setting it to the
+// apparent default is observably different from leaving it unset. Each
 // AgentChat conversation maps to a STABLE claude session id (derived from the
 // conversation id) so turn N remembers turns 1..N-1.
 //
@@ -71,16 +74,27 @@ const PARENT_ENV_KEYS = [
  * daemon must never trigger a keychain prompt, so reading the secret is not an
  * option even if we wanted it.
  */
-export function claudeIsLoggedIn(configDir: string): boolean {
+function claudeProcessEnv(
+  configDirOverride: string | undefined,
+  source: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const env = { ...source }
+  if (configDirOverride === undefined) delete env['CLAUDE_CONFIG_DIR']
+  else env['CLAUDE_CONFIG_DIR'] = configDirOverride
+  return env
+}
+
+export function claudeIsLoggedIn(configDirOverride?: string): boolean {
   const status = spawnCommandSync('claude', ['auth', 'status'], {
     encoding: 'utf-8',
     timeout: 10_000,
-    env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
+    env: claudeProcessEnv(configDirOverride),
   })
   if (!status.error && status.status === 0) return true
 
   // Compatibility fallback for older Claude Code builds that predate
   // `claude auth status`. It is deliberately existence-only.
+  const configDir = configDirOverride ?? path.join(os.homedir(), '.claude')
   if (fs.existsSync(path.join(configDir, '.credentials.json'))) return true
   if (process.platform !== 'darwin') return false
   const keychain = spawnCommandSync(
@@ -92,12 +106,11 @@ export function claudeIsLoggedIn(configDir: string): boolean {
 }
 
 export function buildClaudeEnv(
-  configDir: string,
+  configDirOverride: string | undefined,
   source: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
-  const env = { ...source }
+  const env = claudeProcessEnv(configDirOverride, source)
   for (const key of PARENT_ENV_KEYS) delete env[key]
-  env['CLAUDE_CONFIG_DIR'] = configDir
   env['DISABLE_AUTOUPDATER'] = '1'
   // `alwaysLoad` guarantees the send tool is present on the first prompt, but
   // Claude's default blocking snapshot is only five seconds. An uncached npx
@@ -192,6 +205,7 @@ export class ClaudeTurnEvents {
   private readonly pending = new Set<string>()
   private successfulSends = 0
   private sendFailure: string | null = null
+  private runtimeAuthFailure: string | null = null
 
   consume(event: unknown): void {
     if (typeof event !== 'object' || event === null) return
@@ -241,6 +255,13 @@ export class ClaudeTurnEvents {
       for (const block of content) {
         if (typeof block !== 'object' || block === null) continue
         const tool = block as Record<string, unknown>
+        if (
+          tool['type'] === 'text' &&
+          typeof tool['text'] === 'string' &&
+          fatalRuntimeError(tool['text'])
+        ) {
+          this.runtimeAuthFailure = tool['text'].trim().slice(0, 500)
+        }
         if (
           tool['type'] === 'tool_use' &&
           tool['name'] === SEND_TOOL &&
@@ -324,6 +345,13 @@ export class ClaudeTurnEvents {
     }
     return { ok: true, sent: this.successfulSends > 0 }
   }
+
+  /** Claude reports host-auth failures as assistant text on stdout rather than
+   * stderr. Keep only the matching bounded diagnostic; ordinary model text is
+   * never surfaced as a runtime error. */
+  fatalDetail(): string | null {
+    return this.runtimeAuthFailure
+  }
 }
 
 function killProcessTree(child: ChildProcess): void {
@@ -350,6 +378,23 @@ function fatalRuntimeError(detail: string): boolean {
   return /not logged in|authentication|unauthorized|invalid api key|login required/i.test(detail)
 }
 
+/** Convert a non-zero Claude exit into the daemon contract. Exported so the
+ * observed stdout-only login failure remains pinned by a regression test. */
+export function classifyClaudeExit(
+  code: number | null,
+  stderr: string,
+  events: ClaudeTurnEvents,
+): TurnResult {
+  const structured = events.fatalDetail()
+  const diagnostic = structured ?? stderr.trim().slice(0, 500)
+  const detail = `claude exited ${code ?? 'without a status'}${diagnostic ? `: ${diagnostic}` : ''}`
+  return {
+    ok: false,
+    fatal: structured !== null || fatalRuntimeError(detail),
+    detail,
+  }
+}
+
 export class ClaudeAdapter implements RuntimeAdapter {
   readonly name = 'claude-code'
   // conversationId → true once we've created its session this process.
@@ -357,7 +402,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
   private sessionNamespace = 'unbound'
 
   constructor(
-    private readonly claudeConfigDir: string,
+    private readonly claudeConfigDir: string | undefined,
     private readonly identityHome: string,
     private readonly workdir: string,
   ) {}
@@ -512,8 +557,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
           log.info(`claude turn done for ${ctx.conversationId} (sent=${outcome.sent})`)
           finish({ ok: true, detail: outcome.sent ? 'replied' : 'silent' })
         } else {
-          const detail = `claude exited ${code}${stderr ? `: ${stderr.slice(0, 500)}` : ''}`
-          finish({ ok: false, fatal: fatalRuntimeError(detail), detail })
+          finish(classifyClaudeExit(code, stderr, events))
         }
       })
     })

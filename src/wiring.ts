@@ -516,11 +516,11 @@ function removeOwnedMcp(): { removed: boolean; warning?: string } {
  * default installations that misplaced our user MCP entry in
  * ~/.claude/.claude.json, a file normal Claude sessions do not read.
  *
- * Explicit uninstall removes only the exact AgentChat entry owned by this
- * integration and preserves every other part of the JSON state. Installation
- * deliberately leaves this file alone: without an old-version marker we
- * cannot distinguish our accidental nested entry from a user who intentionally
- * uses ~/.claude as an explicit CLAUDE_CONFIG_DIR in other shells.
+ * Once installation has verified the correct default user-scoped entry, it
+ * removes only the exact duplicate owned by this integration and preserves
+ * every other part of the nested JSON state. An explicitly configured
+ * CLAUDE_CONFIG_DIR is never migrated: in that case this is the user's real
+ * state file rather than the old default-location mistake.
  */
 function removeMisplacedDefaultMcp(): { removed: boolean; warning?: string } {
   const configured = process.env['CLAUDE_CONFIG_DIR']?.trim()
@@ -765,6 +765,10 @@ export function installClaude(handle: string | null): ClaudeInstallResult {
     warnings.push(`direct wiring could not be verified after installation (${mcp.detail})`)
   }
   if (complete) {
+    const misplacedMcp = removeMisplacedDefaultMcp()
+    if (misplacedMcp.removed) actions.push('misplaced AgentChat MCP server removed')
+    if (misplacedMcp.warning) warnings.push(misplacedMcp.warning)
+
     if (handle !== null) {
       writeAnchor(anchorFile(), renderClaudeAgents(handle), handle)
       actions.push(`CLAUDE.md ← identity + etiquette (@${handle})`)

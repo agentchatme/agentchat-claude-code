@@ -273,7 +273,7 @@ describe('status', () => {
 })
 
 describe('direct Claude Code wiring', () => {
-  it('uses Claude’s real default user state when CLAUDE_CONFIG_DIR is unset without rewriting an alternate config', async () => {
+  it('uses Claude’s real default user state and removes its exact old misplaced duplicate', async () => {
     const stable = path.join(sandbox, '.claude', 'agentchat', 'bin', 'agentchat.mjs')
     fs.writeFileSync(
       fakeClaude.mcpState,
@@ -313,9 +313,7 @@ describe('direct Claude Code wiring', () => {
     }
     expect(formerlyMisplaced.preserved).toBe('yes')
     expect(formerlyMisplaced.mcpServers.other.command).toBe('other-server')
-    expect(formerlyMisplaced.mcpServers.agentchat).toMatchObject({
-      command: 'node',
-    })
+    expect(formerlyMisplaced.mcpServers.agentchat).toBeUndefined()
 
     const removed = await run(['uninstall'], { CLAUDE_CONFIG_DIR: '' })
     expect(removed.code, removed.stdout + removed.stderr).toBe(0)

@@ -14,10 +14,15 @@ import * as path from 'node:path'
 // Honour Claude Code's supported relocation knob. The direct user-scoped MCP
 // entry invokes this bundle as a small proxy, so the CLI, hooks and MCP
 // subprocess all resolve exactly the same identity home.
-export function claudeHome(): string {
+export function claudeConfigOverride(): string | undefined {
   const override = process.env['CLAUDE_CONFIG_DIR']
-  if (override !== undefined && override.trim().length > 0) return path.resolve(override)
-  return path.join(os.homedir(), '.claude')
+  return override !== undefined && override.trim().length > 0
+    ? path.resolve(override)
+    : undefined
+}
+
+export function claudeHome(): string {
+  return claudeConfigOverride() ?? path.join(os.homedir(), '.claude')
 }
 
 /** THE identity home for this agent. Passed into every agent-core call. */
@@ -50,9 +55,7 @@ export function hostCopy(): { invoke: string; label: string } {
 
 export function serviceEnv(): Record<string, string> {
   const env: Record<string, string> = {}
-  const configDir = process.env['CLAUDE_CONFIG_DIR']
-  if (configDir !== undefined && configDir.trim().length > 0) {
-    env['CLAUDE_CONFIG_DIR'] = path.resolve(configDir)
-  }
+  const configDir = claudeConfigOverride()
+  if (configDir !== undefined) env['CLAUDE_CONFIG_DIR'] = configDir
   return env
 }

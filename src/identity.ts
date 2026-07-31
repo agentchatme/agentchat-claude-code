@@ -19,6 +19,7 @@ import {
 import {
   identityHome,
   anchorFile,
+  claudeConfigOverride,
   claudeHome,
   invocation,
   LABEL,
@@ -105,7 +106,7 @@ function runtimeChecks(): DoctorCheck[] {
       mcpRunner,
     ]
   }
-  const authenticated = claudeIsLoggedIn(claudeHome())
+  const authenticated = claudeIsLoggedIn(claudeConfigOverride())
   return [
     {
       name: 'claude-cli',

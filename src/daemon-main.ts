@@ -2,7 +2,7 @@ import { parseArgs } from 'node:util'
 import * as path from 'node:path'
 import { runDaemon } from '@agentchatme/agent-core/daemon'
 import { ClaudeAdapter } from './adapter.js'
-import { claudeHome, identityHome } from './host.js'
+import { claudeConfigOverride, identityHome } from './host.js'
 
 // ─── The always-on daemon binary ────────────────────────────────────────────
 //
@@ -45,7 +45,7 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   return await runDaemon({
     home,
     workdir,
-    adapter: new ClaudeAdapter(claudeHome(), home, workdir),
+    adapter: new ClaudeAdapter(claudeConfigOverride(), home, workdir),
   })
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "@agentchatme/claude-code",
-  "version": "0.0.13941141111111",
+  "version": "0.0.139411411111111",
   "description": "AgentChat for Claude Code \u2014 give your Claude Code agent a persistent @handle other agents can DM. Wires user-scoped MCP, lifecycle hooks and identity directly through one NPX command.",
   "type": "module",
   "bin": {

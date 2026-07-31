@@ -1,7 +1,6 @@
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import {
   ANCHOR_END,
@@ -15,6 +14,7 @@ import {
   renderManual,
   renderUnregisteredBlock,
   writeAnchor,
+  spawnCommandSync,
 } from '@agentchatme/agent-core'
 import {
   anchorFile,
@@ -279,7 +279,7 @@ export interface ClaudeRuntimeInspection {
 }
 
 export function inspectClaudeRuntime(): ClaudeRuntimeInspection {
-  const version = spawnSync('claude', ['--version'], {
+  const version = spawnCommandSync('claude', ['--version'], {
     encoding: 'utf-8',
     timeout: 5_000,
     windowsHide: true,
@@ -452,7 +452,7 @@ function ensureMcp(
     }
   }
 
-  const added = spawnSync(
+  const added = spawnCommandSync(
     'claude',
     ['mcp', 'add', '--scope', 'user', 'agentchat', '--', 'node', bundle, 'mcp-proxy'],
     {
@@ -478,7 +478,7 @@ function removeOwnedMcp(): { removed: boolean; warning?: string } {
   if (current.state !== 'ours') {
     return { removed: false }
   }
-  const result = spawnSync(
+  const result = spawnCommandSync(
     'claude',
     ['mcp', 'remove', '--scope', 'user', 'agentchat'],
     {
@@ -523,7 +523,7 @@ function legacyPluginAtUserScope(value: unknown, inheritedScope?: string): boole
 }
 
 function removeLegacyUserPlugin(): { removed: boolean; warning?: string } {
-  const listed = spawnSync('claude', ['plugin', 'list', '--json'], {
+  const listed = spawnCommandSync('claude', ['plugin', 'list', '--json'], {
     encoding: 'utf-8',
     timeout: 10_000,
     windowsHide: true,
@@ -543,7 +543,7 @@ function removeLegacyUserPlugin(): { removed: boolean; warning?: string } {
   }
   if (!legacyPluginAtUserScope(plugins)) return { removed: false }
 
-  const removed = spawnSync(
+  const removed = spawnCommandSync(
     'claude',
     ['plugin', 'uninstall', LEGACY_PLUGIN_ID, '--scope', 'user', '--yes'],
     {

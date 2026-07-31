@@ -35,5 +35,5 @@ export default defineConfig({
   // to resolve and the whole bundle fails to build.
   platform: 'node',
   banner: { js: BANNER },
-  noExternal: ['@agentchatme/agent-core', 'agentchatme', 'zod', 'ws'],
+  noExternal: ['@agentchatme/agent-core', 'agentchatme', 'cross-spawn', 'zod', 'ws'],
 })

@@ -1,6 +1,5 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { spawnSync } from 'node:child_process'
 import {
   alwaysOnOptedOut,
   alwaysOnState,
@@ -13,6 +12,7 @@ import {
   serviceDefinitionCurrent,
   serviceInstalled,
   writeAnchor,
+  spawnCommandSync,
   type DoctorCheck,
   type HostProfile,
 } from '@agentchatme/agent-core'
@@ -80,7 +80,7 @@ function concise(value: string): string {
 }
 
 function runtimeChecks(): DoctorCheck[] {
-  const npx = spawnSync('npx', ['--version'], {
+  const npx = spawnCommandSync('npx', ['--version'], {
     encoding: 'utf-8',
     timeout: 5_000,
     windowsHide: true,

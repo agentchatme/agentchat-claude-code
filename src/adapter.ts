@@ -1,8 +1,13 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as crypto from 'node:crypto'
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
-import { atomicWriteFile, log } from '@agentchatme/agent-core'
+import type { ChildProcess } from 'node:child_process'
+import {
+  atomicWriteFile,
+  log,
+  spawnCommand,
+  spawnCommandSync,
+} from '@agentchatme/agent-core'
 import { buildAgentChatTurnPrompt } from '@agentchatme/agent-core/daemon'
 import type { RuntimeAdapter, TurnContext, TurnResult } from '@agentchatme/agent-core/daemon'
 import { VERSION } from './version.js'
@@ -67,7 +72,7 @@ const PARENT_ENV_KEYS = [
  * option even if we wanted it.
  */
 export function claudeIsLoggedIn(configDir: string): boolean {
-  const status = spawnSync('claude', ['auth', 'status'], {
+  const status = spawnCommandSync('claude', ['auth', 'status'], {
     encoding: 'utf-8',
     timeout: 10_000,
     env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
@@ -78,7 +83,7 @@ export function claudeIsLoggedIn(configDir: string): boolean {
   // `claude auth status`. It is deliberately existence-only.
   if (fs.existsSync(path.join(configDir, '.credentials.json'))) return true
   if (process.platform !== 'darwin') return false
-  const keychain = spawnSync(
+  const keychain = spawnCommandSync(
     'security',
     ['find-generic-password', '-s', 'Claude Code-credentials'],
     { encoding: 'utf-8', timeout: 5_000 },
@@ -325,7 +330,7 @@ function killProcessTree(child: ChildProcess): void {
   if (child.pid === undefined) return
   try {
     if (process.platform === 'win32') {
-      spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+      spawnCommandSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
         windowsHide: true,
         stdio: 'ignore',
       })
@@ -363,7 +368,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
   }
 
   async preflight(): Promise<{ ok: boolean; detail?: string }> {
-    const which = spawnSync('claude', ['--version'], { encoding: 'utf-8' })
+    const which = spawnCommandSync('claude', ['--version'], { encoding: 'utf-8' })
     if (which.error) return { ok: false, detail: 'claude CLI not found on PATH' }
     const rendered = String(which.stdout || which.stderr).trim()
     if (which.status !== 0 || !semverAtLeast(rendered, MIN_CLAUDE_CODE_VERSION)) {
@@ -436,7 +441,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         settled = true
         resolve(result)
       }
-      const child = spawn('claude', args, {
+      const child = spawnCommand('claude', args, {
         cwd: this.workdir,
         stdio: ['pipe', 'pipe', 'pipe'],
         env,

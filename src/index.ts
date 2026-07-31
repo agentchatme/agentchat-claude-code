@@ -1,5 +1,4 @@
 import { parseArgs } from 'node:util'
-import { spawn } from 'node:child_process'
 import {
   alwaysOnState,
   clearAlwaysOnWanted,
@@ -7,6 +6,7 @@ import {
   markAlwaysOnOptOut,
   readCredentials,
   serviceStatus,
+  spawnCommand,
 } from '@agentchatme/agent-core'
 import { identityHome, invocation, SERVICE_LABEL, LABEL } from './host.js'
 import { installClaude, removeClaudeWiring } from './wiring.js'
@@ -211,7 +211,7 @@ async function runMcpProxy(): Promise<number> {
   env['AGENTCHAT_CLIENT_VERSION'] = VERSION
 
   return await new Promise<number>((resolve) => {
-    const child = spawn('npx', ['-y', AGENTCHAT_MCP_PACKAGE], {
+    const child = spawnCommand('npx', ['-y', AGENTCHAT_MCP_PACKAGE], {
       stdio: 'inherit',
       env,
       windowsHide: true,

@@ -39,7 +39,9 @@ but the command exits with a diagnostic and keeps the legacy plugin. Resolve
 the collision in Claude's `/mcp` panel, then re-run the installer.
 
 Start a new Claude Code session after installation. If this agent has no
-AgentChat identity yet, it offers to create one (email, handle, six-digit code).
+AgentChat account yet, it guides you through setup one answer at a time: first
+the verification and recovery email, then its AgentChat username (`@handle`),
+then the six-digit code AgentChat sends to that email.
 You can also register directly:
 
 ```sh

@@ -202,6 +202,34 @@ describe('status', () => {
     expect(out.stdout).not.toContain('bundle →')
     expect(out.stdout).not.toContain('settings.json ←')
     expect(out.stdout).not.toContain('SKILL.md ←')
+
+    const guidance = fs.readFileSync(path.join(sandbox, '.claude', 'CLAUDE.md'), 'utf-8')
+    const emailQuestion = guidance.indexOf('Ask only: "I need an email')
+    const handleQuestion = guidance.indexOf('Now we need to choose an AgentChat username for me')
+    const registration = guidance.indexOf('register --email <email> --handle <handle>')
+    const codeQuestion = guidance.indexOf('Only after registration confirms the code was sent')
+    expect(guidance).toContain('Ask only one question per turn')
+    expect(guidance).toContain('Use 3–30 characters: lowercase letters, numbers, and hyphens')
+    expect(guidance).toContain('Start with a letter; no double or trailing hyphens')
+    expect(emailQuestion).toBeGreaterThanOrEqual(0)
+    expect(handleQuestion).toBeGreaterThan(emailQuestion)
+    expect(registration).toBeGreaterThan(handleQuestion)
+    expect(codeQuestion).toBeGreaterThan(registration)
+    expect(guidance).not.toContain(
+      'I need an email for verification and recovery and the @handle you want me to use',
+    )
+    expect(guidance).toContain(
+      'Give me the AgentChat API key for this account. If you no longer have it, I can help you recover the account.',
+    )
+    expect(guidance).toContain('What email did you use for this AgentChat account?')
+    expect(guidance).toContain('AgentChat sent a 6-digit recovery code to <email>')
+    expect(guidance).toContain('The API key is stored at <credentials-path>')
+    expect(guidance).toContain('The new API key is stored at <credentials-path>')
+    expect(guidance).toContain('The old key no longer works')
+
+    const manual = fs.readFileSync(path.join(sandbox, '.claude', 'agentchat', 'SKILL.md'), 'utf-8')
+    expect(manual).toContain('local human directly asks to see or copy')
+    expect(manual).toContain('Never dump the whole credentials file or environment')
   })
 
   it('a bare command reports the connected account without setup instructions', async () => {

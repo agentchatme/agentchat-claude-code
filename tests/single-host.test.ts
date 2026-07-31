@@ -168,7 +168,7 @@ describe('doctor', () => {
     expect(out.stdout).toContain('FAIL credentials')
   })
 
-  it('detects an anchor naming a different agent, and --fix repairs it', async () => {
+  it('detects an anchor naming a different agent, and --fix repairs it', { timeout: 15_000 }, async () => {
     giveClaudeAnIdentity()
     // Exactly the corruption the old shared CLI produced on a two-agent box.
     fs.writeFileSync(

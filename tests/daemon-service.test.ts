@@ -47,10 +47,12 @@ function run(
         env: {
           PATH: process.env['PATH'] ?? '',
           HOME: sandbox,
+          USERPROFILE: sandbox,
           // HOME sandboxes where a unit FILE lands, but launchctl/systemctl
-          // always address the REAL user's domain. Without this, running these
-          // tests registers actual services on the developer's machine pointed
-          // at a temp dir that is about to be deleted. It did exactly that.
+          // always address the REAL user's domain. USERPROFILE is the Windows
+          // equivalent used by os.homedir(). Without both, running these tests
+          // can register actual services on the developer's machine pointed at
+          // a temp dir that is about to be deleted. It did exactly that.
           AGENTCHAT_SERVICE_DRY_RUN: '1',
           ...env,
         },
@@ -78,7 +80,13 @@ function runFor(
 ): Promise<{ out: string; alive: boolean }> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [script, ...args], {
-      env: { PATH: process.env['PATH'] ?? '', HOME: sandbox, AGENTCHAT_SERVICE_DRY_RUN: '1', ...env },
+      env: {
+        PATH: process.env['PATH'] ?? '',
+        HOME: sandbox,
+        USERPROFILE: sandbox,
+        AGENTCHAT_SERVICE_DRY_RUN: '1',
+        ...env,
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     let out = ''

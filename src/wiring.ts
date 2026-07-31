@@ -247,7 +247,19 @@ export function renderClaudeAgents(handle: string): string {
 }
 
 function claudeEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CONFIG_DIR: claudeHome() }
+  const env: NodeJS.ProcessEnv = { ...process.env }
+  const configured = process.env['CLAUDE_CONFIG_DIR']?.trim()
+  if (configured !== undefined && configured.length > 0) {
+    env['CLAUDE_CONFIG_DIR'] = path.resolve(configured)
+  } else {
+    // Unset is not equivalent to `~/.claude`. Claude keeps user-scoped MCP
+    // state at ~/.claude.json by default, but at
+    // $CLAUDE_CONFIG_DIR/.claude.json when this variable is explicit. Forcing
+    // the default directory here makes `claude mcp add` write the nested
+    // ~/.claude/.claude.json while our verifier (and normal Claude sessions)
+    // correctly read ~/.claude.json.
+    delete env['CLAUDE_CONFIG_DIR']
+  }
   // `npx @agentchatme/claude-code` is commonly run from Claude's own Bash
   // tool. Claude's management subcommands are safe there, but the nested
   // session sentinel can make the CLI reject child invocations wholesale.
@@ -498,6 +510,45 @@ function removeOwnedMcp(): { removed: boolean; warning?: string } {
   return { removed: true }
 }
 
+/**
+ * Versions through 0.0.1394114111111 forced CLAUDE_CONFIG_DIR to the default
+ * ~/.claude directory only for the `claude mcp add` subprocess. On otherwise
+ * default installations that misplaced our user MCP entry in
+ * ~/.claude/.claude.json, a file normal Claude sessions do not read.
+ *
+ * Explicit uninstall removes only the exact AgentChat entry owned by this
+ * integration and preserves every other part of the JSON state. Installation
+ * deliberately leaves this file alone: without an old-version marker we
+ * cannot distinguish our accidental nested entry from a user who intentionally
+ * uses ~/.claude as an explicit CLAUDE_CONFIG_DIR in other shells.
+ */
+function removeMisplacedDefaultMcp(): { removed: boolean; warning?: string } {
+  const configured = process.env['CLAUDE_CONFIG_DIR']?.trim()
+  if (configured !== undefined && configured.length > 0) return { removed: false }
+
+  const file = path.join(claudeHome(), '.claude.json')
+  if (!fs.existsSync(file)) return { removed: false }
+  try {
+    const doc = JSON.parse(fs.readFileSync(file, 'utf-8')) as Record<string, unknown>
+    const servers =
+      doc['mcpServers'] !== null && typeof doc['mcpServers'] === 'object'
+        ? (doc['mcpServers'] as Record<string, unknown>)
+        : null
+    if (servers === null || !mcpServerIsOurs(servers['agentchat'])) {
+      return { removed: false }
+    }
+    delete servers['agentchat']
+    if (Object.keys(servers).length === 0) delete doc['mcpServers']
+    atomicText(file, JSON.stringify(doc, null, 2) + '\n')
+    return { removed: true }
+  } catch (err) {
+    return {
+      removed: false,
+      warning: `could not remove the misplaced AgentChat MCP entry from ${file}: ${String(err)}`,
+    }
+  }
+}
+
 function legacyPluginAtUserScope(value: unknown, inheritedScope?: string): boolean {
   if (Array.isArray(value)) {
     return value.some((entry) => legacyPluginAtUserScope(entry, inheritedScope))
@@ -710,7 +761,8 @@ export function installClaude(handle: string | null): ClaudeInstallResult {
 
   const complete = isClaudeWired()
   if (!complete) {
-    warnings.push('direct wiring could not be verified after installation')
+    const mcp = inspectClaudeMcp()
+    warnings.push(`direct wiring could not be verified after installation (${mcp.detail})`)
   }
   if (complete) {
     if (handle !== null) {
@@ -767,6 +819,10 @@ export function removeClaudeWiring(
   const mcp = removeOwnedMcp()
   if (mcp.removed) removed.push('Claude user MCP server')
   if (mcp.warning) warnings.push(mcp.warning)
+
+  const misplacedMcp = removeMisplacedDefaultMcp()
+  if (misplacedMcp.removed) removed.push('misplaced AgentChat MCP server')
+  if (misplacedMcp.warning) warnings.push(misplacedMcp.warning)
 
   const legacy = removeLegacyUserPlugin()
   if (legacy.removed) removed.push('legacy marketplace plugin')

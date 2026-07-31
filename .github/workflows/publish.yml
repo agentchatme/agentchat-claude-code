@@ -138,8 +138,11 @@ jobs:
           #!/usr/bin/env node
           const fs = require('node:fs')
           const path = require('node:path')
-          const config = process.env.CLAUDE_CONFIG_DIR
-          const stateFile = path.join(config, '.claude.json')
+          const configured = (process.env.CLAUDE_CONFIG_DIR || '').trim()
+          const home = process.env.HOME || ''
+          const stateFile = configured
+            ? path.join(configured, '.claude.json')
+            : path.join(home, '.claude.json')
           const args = process.argv.slice(2)
           if (args[0] === '--version') {
             console.log('2.1.220 (Claude Code)')
@@ -180,10 +183,10 @@ jobs:
           chmod +x fake-bin/claude
 
           run_cli() {
-            HOME=/tmp/npxlike/home \
-            CLAUDE_CONFIG_DIR=/tmp/npxlike/home/.claude \
-            PATH="/tmp/npxlike/fake-bin:$PATH" \
-            AGENTCHAT_SERVICE_DRY_RUN=1 \
+            env -u CLAUDE_CONFIG_DIR \
+              HOME=/tmp/npxlike/home \
+              PATH="/tmp/npxlike/fake-bin:$PATH" \
+              AGENTCHAT_SERVICE_DRY_RUN=1 \
               ./node_modules/.bin/agentchat-claude-code "$@"
           }
 
@@ -202,10 +205,14 @@ jobs:
 
           node <<'NODE'
           const fs = require('node:fs')
-          const root = '/tmp/npxlike/home/.claude'
+          const home = '/tmp/npxlike/home'
+          const root = `${home}/.claude`
           const bundle = `${root}/agentchat/bin/agentchat.mjs`
           const settings = JSON.parse(fs.readFileSync(`${root}/settings.json`, 'utf8'))
-          const state = JSON.parse(fs.readFileSync(`${root}/.claude.json`, 'utf8'))
+          const state = JSON.parse(fs.readFileSync(`${home}/.claude.json`, 'utf8'))
+          if (fs.existsSync(`${root}/.claude.json`)) {
+            throw new Error('default install misplaced MCP state under ~/.claude')
+          }
           const expected = {
             SessionStart: ['session-start', 20, 'startup|resume|clear|fork'],
             UserPromptSubmit: ['user-prompt', 12, undefined],

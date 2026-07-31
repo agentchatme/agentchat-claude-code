@@ -273,6 +273,83 @@ describe('status', () => {
 })
 
 describe('direct Claude Code wiring', () => {
+  it('uses Claude’s real default user state when CLAUDE_CONFIG_DIR is unset without rewriting an alternate config', async () => {
+    const stable = path.join(sandbox, '.claude', 'agentchat', 'bin', 'agentchat.mjs')
+    fs.writeFileSync(
+      fakeClaude.mcpState,
+      JSON.stringify({
+        preserved: 'yes',
+        mcpServers: {
+          other: { type: 'stdio', command: 'other-server', args: [], env: {} },
+          agentchat: {
+            type: 'stdio',
+            command: 'node',
+            args: [stable, 'mcp-proxy'],
+            env: {},
+          },
+        },
+      }),
+    )
+
+    const out = await run([], { CLAUDE_CONFIG_DIR: '' })
+
+    expect(out.code, out.stdout + out.stderr).toBe(0)
+    expect(out.stdout).toContain('✓ Integration installed')
+    const defaultState = JSON.parse(
+      fs.readFileSync(fakeClaude.defaultMcpState, 'utf-8'),
+    ) as {
+      mcpServers: Record<string, { command: string; args: string[] }>
+    }
+    expect(defaultState.mcpServers.agentchat).toMatchObject({
+      command: 'node',
+      args: [stable, 'mcp-proxy'],
+    })
+
+    const formerlyMisplaced = JSON.parse(
+      fs.readFileSync(fakeClaude.mcpState, 'utf-8'),
+    ) as {
+      preserved: string
+      mcpServers: Record<string, { command: string }>
+    }
+    expect(formerlyMisplaced.preserved).toBe('yes')
+    expect(formerlyMisplaced.mcpServers.other.command).toBe('other-server')
+    expect(formerlyMisplaced.mcpServers.agentchat).toMatchObject({
+      command: 'node',
+    })
+
+    const removed = await run(['uninstall'], { CLAUDE_CONFIG_DIR: '' })
+    expect(removed.code, removed.stdout + removed.stderr).toBe(0)
+    const nestedAfterUninstall = JSON.parse(
+      fs.readFileSync(fakeClaude.mcpState, 'utf-8'),
+    ) as {
+      preserved: string
+      mcpServers: Record<string, { command: string }>
+    }
+    expect(nestedAfterUninstall.preserved).toBe('yes')
+    expect(nestedAfterUninstall.mcpServers.other.command).toBe('other-server')
+    expect(nestedAfterUninstall.mcpServers.agentchat).toBeUndefined()
+  })
+
+  it('never removes a foreign nested MCP entry while repairing the default location', async () => {
+    fs.writeFileSync(
+      fakeClaude.mcpState,
+      JSON.stringify({
+        mcpServers: {
+          agentchat: { type: 'stdio', command: 'someone-else', args: [], env: {} },
+        },
+      }),
+    )
+
+    const out = await run([], { CLAUDE_CONFIG_DIR: '' })
+
+    expect(out.code, out.stdout + out.stderr).toBe(0)
+    const nested = JSON.parse(fs.readFileSync(fakeClaude.mcpState, 'utf-8')) as {
+      mcpServers: Record<string, { command: string }>
+    }
+    expect(nested.mcpServers.agentchat.command).toBe('someone-else')
+    expect(fs.existsSync(fakeClaude.defaultMcpState)).toBe(true)
+  })
+
   it('refuses a Claude build that predates structured MCP startup errors', async () => {
     fakeClaude = installFakeClaude(sandbox, '2.1.218')
 

@@ -3,6 +3,7 @@ import * as path from 'node:path'
 
 export interface FakeClaude {
   binDir: string
+  defaultMcpState: string
   mcpState: string
   pluginState: string
 }
@@ -17,6 +18,7 @@ export interface FakeClaude {
 export function installFakeClaude(root: string, version = '2.1.220'): FakeClaude {
   const binDir = path.join(root, 'fake-bin')
   const configDir = path.join(root, '.claude')
+  const defaultMcpState = path.join(root, '.claude.json')
   const mcpState = path.join(configDir, '.claude.json')
   const pluginState = path.join(configDir, 'fake-claude-plugin')
   fs.mkdirSync(binDir, { recursive: true })
@@ -29,8 +31,10 @@ export function installFakeClaude(root: string, version = '2.1.220'): FakeClaude
       '#!/usr/bin/env node',
       "const fs = require('node:fs')",
       "const path = require('node:path')",
-      "const config = process.env.CLAUDE_CONFIG_DIR || path.join(process.env.HOME || '', '.claude')",
-      "const mcpState = path.join(config, '.claude.json')",
+      "const configured = (process.env.CLAUDE_CONFIG_DIR || '').trim()",
+      "const home = process.env.HOME || ''",
+      "const config = configured || path.join(home, '.claude')",
+      "const mcpState = configured ? path.join(config, '.claude.json') : path.join(home, '.claude.json')",
       "const pluginState = path.join(config, 'fake-claude-plugin')",
       'const args = process.argv.slice(2)',
       `if (args[0] === '--version') { console.log(${JSON.stringify(`${version} (Claude Code)`)}); process.exit(0) }`,
@@ -78,5 +82,5 @@ export function installFakeClaude(root: string, version = '2.1.220'): FakeClaude
     '@echo off\r\nnode "%~dp0claude" %*\r\n',
   )
 
-  return { binDir, mcpState, pluginState }
+  return { binDir, defaultMcpState, mcpState, pluginState }
 }

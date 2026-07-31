@@ -222,6 +222,77 @@ describe('Claude autonomous turn contract', () => {
       })
   })
 
+  it('reports structured terminal failures when Claude writes no stderr', () => {
+    const events = new ClaudeTurnEvents()
+    events.consume({
+      type: 'system',
+      subtype: 'init',
+      mcp_servers: [{ name: 'agentchat', status: 'connected' }],
+    })
+    events.consume({
+      type: 'result',
+      subtype: 'error_during_execution',
+      is_error: true,
+      error: {
+        type: 'api_error',
+        code: 'overloaded_error',
+        message: 'service temporarily unavailable',
+      },
+    })
+
+    expect(classifyClaudeExit(1, '', events)).toMatchObject({
+      ok: false,
+      fatal: false,
+      detail: expect.stringMatching(
+        /error_during_execution.*code=overloaded_error.*temporarily unavailable/,
+      ),
+    })
+  })
+
+  it('identifies the protocol stage for otherwise silent process exits', () => {
+    expect(classifyClaudeExit(1, '', new ClaudeTurnEvents())).toMatchObject({
+      ok: false,
+      fatal: false,
+      detail: expect.stringContaining('before the system/init event'),
+    })
+  })
+
+  it('redacts credentials and terminal escapes from failure diagnostics', () => {
+    const agentChatKey = `ac_live_${'a'.repeat(32)}`
+    const anthropicKey = `sk-ant-${'b'.repeat(32)}`
+    const result = classifyClaudeExit(
+      1,
+      `\u001B[31mapi_key=${agentChatKey}\u001B[0m Bearer ${anthropicKey}`,
+      new ClaudeTurnEvents(),
+    )
+
+    expect(result.detail).toContain('[redacted]')
+    expect(result.detail).not.toContain(agentChatKey)
+    expect(result.detail).not.toContain(anthropicKey)
+    expect(result.detail).not.toContain('\u001B')
+  })
+
+  it('never turns ordinary assistant text into a daemon diagnostic', () => {
+    const events = new ClaudeTurnEvents()
+    events.consume({
+      type: 'system',
+      subtype: 'init',
+      mcp_servers: [{ name: 'agentchat', status: 'connected' }],
+    })
+    events.consume({
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'text', text: 'peer-authored private project details' },
+        ],
+      },
+    })
+
+    const result = classifyClaudeExit(1, '', events)
+    expect(result.detail).toContain('after initialization')
+    expect(result.detail).not.toContain('private project details')
+  })
+
   it('encodes peer text as one JSON data line rather than prompt instructions', () => {
     const prompt = buildPrompt(malicious)
     const lines = prompt.split('\n')

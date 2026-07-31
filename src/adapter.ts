@@ -45,6 +45,7 @@ import {
 const TURN_TIMEOUT_MS = 240_000
 const MAX_EVENT_TAIL_CHARS = 1024 * 1024
 const MAX_STDERR_CHARS = 16_384
+const MAX_DIAGNOSTIC_CHARS = 500
 export const AGENTCHAT_MCP_PACKAGE = '@agentchatme/mcp@0.1.1121411'
 export const AGENTCHAT_TOOL_ALLOW = 'mcp__agentchat__*'
 
@@ -195,6 +196,78 @@ export function turnIdempotencyKey(
 
 const SEND_TOOL = 'mcp__agentchat__agentchat_send_message'
 
+function boundedDiagnostic(value: string): string {
+  return value
+    // Terminal styling makes launchd logs unreadable and can hide text from
+    // simple searches. Strip CSI escape sequences before bounding the line.
+    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '')
+    // Runtime stderr and structured API errors are useful, but credentials
+    // never are. Cover the key shapes either integration or Claude commonly
+    // emits without trying to preserve a secret prefix.
+    .replace(/\b(api[_ -]?key\s*[:=]\s*)\S+/gi, '$1[redacted]')
+    .replace(/\b(Bearer)\s+[A-Za-z0-9._~-]{8,}\b/gi, '$1 [redacted]')
+    .replace(/\bac_[A-Za-z0-9_-]{8,}\b/g, '[redacted AgentChat key]')
+    .replace(/\bsk-ant-[A-Za-z0-9_-]{8,}\b/g, '[redacted Anthropic key]')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAX_DIAGNOSTIC_CHARS)
+}
+
+function diagnosticToken(value: unknown): string | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null
+  const rendered = String(value).trim()
+  return /^[A-Za-z0-9_.:/-]{1,80}$/.test(rendered) ? rendered : null
+}
+
+function nestedErrorDetail(value: unknown): string | null {
+  if (typeof value === 'string') return boundedDiagnostic(value) || null
+  if (typeof value !== 'object' || value === null) return null
+  const error = value as Record<string, unknown>
+  const labels = ['type', 'code', 'name', 'status', 'status_code'].flatMap((key) => {
+    const token = diagnosticToken(error[key])
+    return token === null ? [] : [`${key}=${token}`]
+  })
+  const message =
+    typeof error['message'] === 'string'
+      ? boundedDiagnostic(error['message'])
+      : ''
+  return boundedDiagnostic(
+    [...labels, ...(message ? [message] : [])].join(labels.length > 0 ? '; ' : ''),
+  ) || null
+}
+
+/** Extract only protocol/control-plane failures. Assistant result text is
+ * deliberately excluded because it can contain peer-authored content. */
+function controlFailureDetail(record: Record<string, unknown>): string | null {
+  const type = diagnosticToken(record['type'])
+  const subtype = diagnosticToken(record['subtype'])
+  const terminalFailure =
+    type === 'result' &&
+    (record['is_error'] === true || (subtype !== null && subtype !== 'success'))
+  const controlFailure =
+    type === 'error' ||
+    (type === 'system' && subtype !== null && /error|fail/i.test(subtype))
+  if (!terminalFailure && !controlFailure) return null
+
+  const label = terminalFailure
+    ? `terminal result ${subtype ?? 'reported an error'}`
+    : `stream ${[type, subtype].filter(Boolean).join('/') || 'error'}`
+  const error = nestedErrorDetail(record['error'])
+  const permissionDenials = Array.isArray(record['permission_denials'])
+    ? record['permission_denials'].length
+    : 0
+  return boundedDiagnostic(
+    [
+      label,
+      ...(error ? [error] : []),
+      ...(permissionDenials > 0
+        ? [`${permissionDenials} permission denial(s)`]
+        : []),
+    ].join('; '),
+  )
+}
+
 /** Delivery-critical state from Claude's stream-json protocol. */
 export class ClaudeTurnEvents {
   private initSeen = false
@@ -206,10 +279,12 @@ export class ClaudeTurnEvents {
   private successfulSends = 0
   private sendFailure: string | null = null
   private runtimeAuthFailure: string | null = null
+  private controlFailure: string | null = null
 
   consume(event: unknown): void {
     if (typeof event !== 'object' || event === null) return
     const record = event as Record<string, unknown>
+    this.controlFailure ??= controlFailureDetail(record)
 
     if (record['type'] === 'system' && record['subtype'] === 'init') {
       this.initSeen = true
@@ -242,8 +317,10 @@ export class ClaudeTurnEvents {
       ) as Record<string, unknown> | undefined
       if (error !== undefined) {
         const message =
-          typeof error['message'] === 'string' ? `: ${error['message']}` : ''
-        this.initFailure = `AgentChat MCP configuration was skipped${message}`
+          typeof error['message'] === 'string'
+            ? boundedDiagnostic(error['message'])
+            : ''
+        this.initFailure = `AgentChat MCP configuration was skipped${message ? `: ${message}` : ''}`
       }
     }
 
@@ -260,7 +337,7 @@ export class ClaudeTurnEvents {
           typeof tool['text'] === 'string' &&
           fatalRuntimeError(tool['text'])
         ) {
-          this.runtimeAuthFailure = tool['text'].trim().slice(0, 500)
+          this.runtimeAuthFailure = boundedDiagnostic(tool['text'])
         }
         if (
           tool['type'] === 'tool_use' &&
@@ -352,6 +429,23 @@ export class ClaudeTurnEvents {
   fatalDetail(): string | null {
     return this.runtimeAuthFailure
   }
+
+  /** A bounded, non-peer-text explanation of how far the Claude protocol got
+   * before a non-zero process exit. */
+  exitDetail(): string {
+    if (this.runtimeAuthFailure) return this.runtimeAuthFailure
+    if (this.controlFailure) return this.controlFailure
+    if (this.initFailure) return boundedDiagnostic(this.initFailure)
+    if (this.terminalSeen && this.terminalFailure) {
+      return 'Claude emitted a failed terminal result'
+    }
+    if (this.initSeen) {
+      return this.mcpConnected
+        ? 'Claude exited after initialization with AgentChat MCP connected but no successful terminal result'
+        : 'Claude exited after initialization before AgentChat MCP connected'
+    }
+    return 'Claude exited before the system/init event'
+  }
 }
 
 function killProcessTree(child: ChildProcess): void {
@@ -386,7 +480,10 @@ export function classifyClaudeExit(
   events: ClaudeTurnEvents,
 ): TurnResult {
   const structured = events.fatalDetail()
-  const diagnostic = structured ?? stderr.trim().slice(0, 500)
+  const diagnostics = [structured, boundedDiagnostic(stderr), events.exitDetail()]
+    .filter((value): value is string => Boolean(value))
+    .filter((value, index, values) => values.indexOf(value) === index)
+  const diagnostic = boundedDiagnostic(diagnostics.join('; '))
   const detail = `claude exited ${code ?? 'without a status'}${diagnostic ? `: ${diagnostic}` : ''}`
   return {
     ok: false,
@@ -516,9 +613,9 @@ export class ClaudeAdapter implements RuntimeAdapter {
         if (buf.length > MAX_EVENT_TAIL_CHARS) buf = buf.slice(-MAX_EVENT_TAIL_CHARS)
       })
       child.stderr.on('data', (d) => {
-        if (stderr.length < MAX_STDERR_CHARS) {
-          stderr += String(d).slice(0, MAX_STDERR_CHARS - stderr.length)
-        }
+        // Preserve the most recent bounded tail: command runners commonly
+        // print the actionable reason only after setup/progress chatter.
+        stderr = (stderr + String(d)).slice(-MAX_STDERR_CHARS)
       })
 
       // The prompt goes on stdin (see header) — write it and close.

@@ -191,11 +191,29 @@ describe('doctor', () => {
 })
 
 describe('status', () => {
-  it('a bare command installs the direct integration', async () => {
+  it('a bare command installs the direct integration with concise next steps', async () => {
     const out = await run([])
     expect(out.code, out.stderr).toBe(0)
-    expect(out.stdout).toContain('Claude Code: wired ✓')
-    expect(out.stdout).toContain('Last step')
+    expect(out.stdout).toContain('AgentChat for Claude Code')
+    expect(out.stdout).toContain('✓ Integration installed')
+    expect(out.stdout).toContain('✓ Background delivery enabled')
+    expect(out.stdout).toContain('1. Open a new Claude Code session')
+    expect(out.stdout).toContain('2. Ask Claude Code: "Set up your AgentChat account."')
+    expect(out.stdout).not.toContain('bundle →')
+    expect(out.stdout).not.toContain('settings.json ←')
+    expect(out.stdout).not.toContain('SKILL.md ←')
+  })
+
+  it('a bare command reports the connected account without setup instructions', async () => {
+    giveClaudeAnIdentity()
+
+    const out = await run([])
+
+    expect(out.code, out.stderr).toBe(0)
+    expect(out.stdout).toContain('AgentChat for Claude Code')
+    expect(out.stdout).toContain('✓ AgentChat account connected as @claude-agent')
+    expect(out.stdout).toContain('Next: Open a new Claude Code session.')
+    expect(out.stdout).not.toContain('Set up your AgentChat account')
   })
 
   it('honours CLAUDE_CONFIG_DIR for identity and always-on state', async () => {
@@ -218,7 +236,8 @@ describe('status', () => {
     const upgraded = await run([])
 
     expect(upgraded.code).toBe(0)
-    expect(upgraded.stdout).toContain('always-on remains off (user choice)')
+    expect(upgraded.stdout).toContain('○ Background delivery is off (your choice)')
+    expect(upgraded.stdout).not.toContain('✓ Background delivery enabled')
     expect(
       fs.existsSync(path.join(sandbox, '.claude', 'agentchat', 'always-on.optout')),
     ).toBe(true)
@@ -354,7 +373,8 @@ describe('direct Claude Code wiring', () => {
     fs.writeFileSync(fakeClaude.pluginState, 'installed')
     const out = await run([])
     expect(out.code, out.stderr).toBe(0)
-    expect(out.stdout).toContain('legacy marketplace plugin removed')
+    expect(out.stdout).toContain('✓ Integration installed')
+    expect(out.stdout).not.toContain('legacy marketplace plugin removed')
     expect(fs.existsSync(fakeClaude.pluginState)).toBe(false)
   })
 

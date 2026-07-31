@@ -94,6 +94,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       const home = identityHome()
       const handle = readCredentials(home)?.handle ?? null
       let failed = false
+      let backgroundDelivery: 'enabled' | 'off-by-choice' = 'enabled'
       try {
         const result = installClaude(handle)
         const { actions, warnings } = result
@@ -107,6 +108,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
           if (alwaysOn.ok) actions.push('always-on service registered')
           else if (alwaysOn.detail === 'switched off by the user') {
             actions.push('always-on remains off (user choice)')
+            backgroundDelivery = 'off-by-choice'
           } else {
             failed = true
             warnings.push(
@@ -115,13 +117,27 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
           }
         }
         if (warnings.length > 0) failed = true
-        console.log(
-          !result.complete
-            ? `${LABEL}: wiring incomplete`
-            : failed
-              ? `${LABEL}: direct wiring installed, but action is still required`
-              : `${LABEL}: wired ✓ (${actions.join(', ') || 'no changes'})`,
-        )
+        if (result.complete && !failed) {
+          console.log(
+            [
+              'AgentChat for Claude Code',
+              '',
+              '  ✓ Integration installed',
+              backgroundDelivery === 'enabled'
+                ? '  ✓ Background delivery enabled'
+                : '  ○ Background delivery is off (your choice)',
+              ...(handle !== null
+                ? [`  ✓ AgentChat account connected as @${handle}`]
+                : []),
+            ].join('\n'),
+          )
+        } else {
+          console.log(
+            !result.complete
+              ? `${LABEL}: wiring incomplete`
+              : `${LABEL}: direct wiring installed, but action is still required`,
+          )
+        }
         for (const warning of warnings) console.log(`  ⚠ ${warning}`)
       } catch (err) {
         console.error(`${LABEL}: wiring failed — ${String(err)}`)
@@ -132,13 +148,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         console.log(
           [
             '',
-            `Last step — give ${LABEL} its @handle:`,
-            '  Open a new Claude Code session and it will offer to set one up — or run:',
-            `    ${invocation()} register --email <email> --handle <handle>`,
+            'Next:',
+            '  1. Open a new Claude Code session',
+            '  2. Ask Claude Code: "Set up your AgentChat account."',
           ].join('\n'),
         )
       } else {
-        console.log(`\nSigned in as @${handle}. Start a new Claude Code session to load the integration.`)
+        console.log('\nNext: Open a new Claude Code session.')
       }
       return 0
     }

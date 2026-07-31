@@ -190,12 +190,15 @@ jobs:
           first="$(run_cli 2>&1)"
           echo "--- first install ---"
           echo "$first"
-          echo "$first" | grep -q "Claude Code: wired ✓"
+          echo "$first" | grep -q "AgentChat for Claude Code"
+          echo "$first" | grep -q "✓ Integration installed"
+          echo "$first" | grep -q 'Ask Claude Code: "Set up your AgentChat account."'
 
           second="$(run_cli 2>&1)"
           echo "--- idempotent install ---"
           echo "$second"
-          echo "$second" | grep -q "Claude user MCP already current"
+          echo "$second" | grep -q "AgentChat for Claude Code"
+          echo "$second" | grep -q "✓ Integration installed"
 
           node <<'NODE'
           const fs = require('node:fs')

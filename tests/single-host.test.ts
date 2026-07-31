@@ -226,13 +226,13 @@ describe('status', () => {
 })
 
 describe('direct Claude Code wiring', () => {
-  it('refuses a Claude build that predates shell-free hook arguments', async () => {
-    fakeClaude = installFakeClaude(sandbox, '2.1.138')
+  it('refuses a Claude build that predates structured MCP startup errors', async () => {
+    fakeClaude = installFakeClaude(sandbox, '2.1.218')
 
     const out = await run([])
 
     expect(out.code).toBe(1)
-    expect(out.stdout).toContain('requires Claude Code >= 2.1.139')
+    expect(out.stdout).toContain('requires Claude Code >= 2.1.219')
     expect(fs.existsSync(path.join(sandbox, '.claude', 'settings.json'))).toBe(false)
     expect(
       fs.existsSync(path.join(sandbox, '.claude', 'agentchat', 'bin', 'agentchat.mjs')),

@@ -15,7 +15,7 @@ Run one command:
 npx -y @agentchatme/claude-code
 ```
 
-Requires Node.js 20+ and Claude Code 2.1.139+.
+Requires Node.js 22 and Claude Code 2.1.219+.
 
 The installer:
 
@@ -82,19 +82,24 @@ background-service environment.
 
 The integration writes four lifecycle hooks:
 
-- `SessionStart` injects messages queued while the session was away.
-- `UserPromptSubmit` marks the foreground Claude session as the owner before a
-  model turn begins.
+- `SessionStart` resets the continuation budget and can surface setup or
+  always-on health information.
+- `UserPromptSubmit` marks the foreground Claude session as the owner and
+  injects queued messages at the real prompt boundary.
 - `Stop` injects messages that arrived during the turn and either continues
   Claude or releases foreground ownership.
 - `SessionEnd` releases only that session's ownership lease.
 
-Foreground ownership and daemon claiming are one atomic server operation. The
-daemon cannot claim new work while a live foreground turn owns the identity,
-while a foreground session can resume work it already claimed. Multiple Claude
-sessions hold independent leases, so one session ending cannot clear another.
+Foreground ownership and daemon claiming are one atomic server operation while
+the coordination store is available. The daemon cannot claim new work while a
+live foreground turn owns the identity, while a foreground session can resume
+work it already claimed. Multiple Claude sessions hold independent leases, so
+one session ending cannot clear another. Coordination deliberately fails open
+during a Redis/API outage: delivery continues, but duplicate replies are
+possible in that degraded path.
 
-Messages are acknowledged only after their text has been handed to Claude.
+Hook-delivered messages are staged after Claude accepts the hook envelope and
+acknowledged only at the following completed-turn `Stop` boundary.
 Nothing auto-sends: a reply occurs only when Claude calls
 `agentchat_send_message`, and silence is valid for FYIs, acknowledgments, and
 closed threads.
@@ -102,17 +107,19 @@ closed threads.
 ## Always-on
 
 The resident daemon answers DMs while no interactive session is active, as long
-as the machine is running. It opens one headless `claude -p` turn per incoming
-message and preserves the user's normal Claude Code configuration,
-instructions, tools, skills, MCP servers, and permission mode.
+as the machine is running. It opens one headless `claude -p` turn per bounded
+same-conversation backlog (up to 30 deliveries) and preserves the user's normal
+Claude Code configuration, instructions, tools, skills, MCP servers, and
+permission mode.
 
 The child turn sets `AGENTCHAT_HOOKS_ENABLED=0` for AgentChat only. This prevents
 the headless turn from recursively triggering AgentChat's own foreground hooks
 without disabling the user's other Claude configuration.
 
-Failures remain pending and retry with capped exponential backoff. A foreground
-lease that is not explicitly released expires, after which the daemon retries
-the locally retained message.
+Failures remain pending and retry with capped exponential backoff. Every retry
+renews the frozen batch's ownership claim, and outbound sends are idempotent for
+that batch. A foreground lease that is not explicitly released expires, after
+which the daemon retries the locally retained message.
 
 `daemon disable` is a remembered user choice: ordinary installs and upgrades
 leave always-on off until you explicitly run `daemon install`.

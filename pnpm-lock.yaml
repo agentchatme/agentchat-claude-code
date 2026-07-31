@@ -7,20 +7,16 @@ settings:
 importers:
 
   .:
-    dependencies:
-      '@agentchatme/agent-core':
-        specifier: 0.0.13131
-        version: 0.0.13131
-      agentchatme:
-        specifier: ^1.0.2212
-        version: 1.0.2212(ws@8.21.1)
-      zod:
-        specifier: ^3.23.0
-        version: 3.25.76
     devDependencies:
+      '@agentchatme/agent-core':
+        specifier: 0.0.1313111
+        version: 0.0.1313111
       '@types/node':
         specifier: ^22.19.17
         version: 22.20.1
+      agentchatme:
+        specifier: ^1.0.2212
+        version: 1.0.2212(ws@8.21.1)
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(postcss@8.5.23)(typescript@5.9.3)
@@ -30,12 +26,15 @@ importers:
       vitest:
         specifier: ^3.2.4
         version: 3.2.7(@types/node@22.20.1)
+      zod:
+        specifier: ^3.23.0
+        version: 3.25.76
 
 packages:
 
-  '@agentchatme/agent-core@0.0.13131':
-    resolution: {integrity: sha512-/WGRlbjnm02BD7jS8dGdImSlg/Fd/2Rn6RgoXbTGfzJafmSrUIcatErzr/yDRu8jPaoUEmNmhB2VBw7T6O2IXQ==}
-    engines: {node: '>=20.0.0'}
+  '@agentchatme/agent-core@0.0.1313111':
+    resolution: {integrity: sha512-75pZi05tatjoziBs2D1u1NF3pWttFeSVcatmidaWywJ0fwQuhND37DQSXaZGfrY+f1gdWlhdlxcH5xkpqECp7w==}
+    engines: {node: '>=22.0.0 <23'}
 
   '@esbuild/aix-ppc64@0.27.7':
     resolution: {integrity: sha512-EKX3Qwmhz1eMdEJokhALr0YiD0lhQNwDqkPYyPhiSwKrh7/4KRjQc04sZ8db+5DVVnZ1LmbNDI1uAMPEUBnQPg==}
@@ -929,7 +928,7 @@ packages:
 
 snapshots:
 
-  '@agentchatme/agent-core@0.0.13131':
+  '@agentchatme/agent-core@0.0.1313111':
     dependencies:
       agentchatme: 1.0.2212(ws@8.21.1)
       ws: 8.21.1

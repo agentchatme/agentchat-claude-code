@@ -11,6 +11,15 @@ export function sessionStartOutput(context: string): Record<string, unknown> {
   return { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } }
 }
 
+export function userPromptOutput(context: string): Record<string, unknown> {
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'UserPromptSubmit',
+      additionalContext: context,
+    },
+  }
+}
+
 export function stopOutput(reason: string): Record<string, unknown> {
   return { decision: 'block', reason }
 }

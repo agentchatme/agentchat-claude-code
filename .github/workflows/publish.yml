@@ -66,6 +66,7 @@ jobs:
       - run: pnpm build
 
       - name: the published tarball is self-contained and direct wiring works
+        id: pack
         run: |
           set -euo pipefail
           workspace="$PWD"
@@ -270,5 +271,6 @@ jobs:
 
           echo "published-package boundary and direct Claude wiring are green ✓"
           cd "$workspace"
+          echo "tgz=/tmp/verify/$tgz" >> "$GITHUB_OUTPUT"
 
-      - run: npm publish --provenance --access public
+      - run: npm publish "${{ steps.pack.outputs.tgz }}" --ignore-scripts --provenance --access public

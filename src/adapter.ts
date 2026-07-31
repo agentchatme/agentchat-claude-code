@@ -6,6 +6,10 @@ import { atomicWriteFile, log } from '@agentchatme/agent-core'
 import { buildAgentChatTurnPrompt } from '@agentchatme/agent-core/daemon'
 import type { RuntimeAdapter, TurnContext, TurnResult } from '@agentchatme/agent-core/daemon'
 import { VERSION } from './version.js'
+import {
+  MIN_CLAUDE_CODE_VERSION,
+  semverAtLeast,
+} from './runtime-version.js'
 
 // ─── Claude Code adapter ────────────────────────────────────────────────────
 //
@@ -14,7 +18,7 @@ import { VERSION } from './version.js'
 // AgentChat conversation maps to a STABLE claude session id (derived from the
 // conversation id) so turn N remembers turns 1..N-1.
 //
-// Empirically load-bearing (verified 2026-07-23 against claude 2.1.216):
+// Empirically load-bearing (verified 2026-07-30 against claude 2.1.220):
 //   * The prompt goes on STDIN, not as a positional — the variadic
 //     `--allowedTools` otherwise swallows a trailing positional prompt.
 //   * `--session-id <uuid>` CREATES a session and ERRORS "already in use" if it
@@ -33,8 +37,8 @@ import { VERSION } from './version.js'
 const TURN_TIMEOUT_MS = 240_000
 const MAX_EVENT_TAIL_CHARS = 1024 * 1024
 const MAX_STDERR_CHARS = 16_384
-export const AGENTCHAT_MCP_PACKAGE = '@agentchatme/mcp@0.1.11214'
-export const AGENTCHAT_TOOL_ALLOW = 'mcp__agentchat'
+export const AGENTCHAT_MCP_PACKAGE = '@agentchatme/mcp@0.1.1121411'
+export const AGENTCHAT_TOOL_ALLOW = 'mcp__agentchat__*'
 
 // Env a parent Claude Code session leaks that would confuse a child `claude`.
 const PARENT_ENV_KEYS = [
@@ -90,6 +94,18 @@ export function buildClaudeEnv(
   for (const key of PARENT_ENV_KEYS) delete env[key]
   env['CLAUDE_CONFIG_DIR'] = configDir
   env['DISABLE_AUTOUPDATER'] = '1'
+  // `alwaysLoad` guarantees the send tool is present on the first prompt, but
+  // Claude's default blocking snapshot is only five seconds. An uncached npx
+  // MCP launch can legitimately take longer. Give this isolated unattended
+  // child the same 30-second budget as an MCP server's default startup timer,
+  // while preserving any larger operator-provided value.
+  const configuredConnectTimeout = Number(env['MCP_CONNECT_TIMEOUT_MS'])
+  if (
+    !Number.isFinite(configuredConnectTimeout) ||
+    configuredConnectTimeout < 30_000
+  ) {
+    env['MCP_CONNECT_TIMEOUT_MS'] = '30000'
+  }
   // The unattended child reads the same user configuration as the interactive
   // host. It must not recursively run AgentChat's own SessionStart/Stop hooks:
   // those would announce a false foreground turn and contend for this inbox.
@@ -121,19 +137,187 @@ export function buildClaudeArgs(
 
 export function buildTurnMcpConfig(
   identityHome: string,
+  idempotencyKey: string,
 ): Record<string, unknown> {
   return {
     mcpServers: {
       agentchat: {
         command: 'npx',
         args: ['-y', AGENTCHAT_MCP_PACKAGE],
+        // Without this, Claude can emit system/init while the server is still
+        // pending and begin a turn that has no AgentChat send tool.
+        alwaysLoad: true,
         env: {
           AGENTCHAT_HOME: identityHome,
           AGENTCHAT_CLIENT_NAME: 'claude-code',
           AGENTCHAT_CLIENT_VERSION: VERSION,
+          AGENTCHAT_TURN_IDEMPOTENCY_KEY: idempotencyKey,
         },
       },
     },
+  }
+}
+
+export function turnIdempotencyKey(
+  ctx: TurnContext,
+  identityNamespace: string,
+): string {
+  const messageIds = ctx.pendingBatch?.messageIds ?? [ctx.messageId]
+  const digest = crypto
+    .createHash('sha256')
+    .update('agentchat-daemon-turn-v1\0')
+    .update(identityNamespace)
+    .update('\0')
+    .update(ctx.conversationId)
+    .update('\0')
+    .update(messageIds.join('\0'))
+    .digest('hex')
+  return `ac_turn_${digest}`
+}
+
+const SEND_TOOL = 'mcp__agentchat__agentchat_send_message'
+
+/** Delivery-critical state from Claude's stream-json protocol. */
+export class ClaudeTurnEvents {
+  private initSeen = false
+  private mcpConnected = false
+  private initFailure: string | null = null
+  private terminalSeen = false
+  private terminalFailure = false
+  private readonly pending = new Set<string>()
+  private successfulSends = 0
+  private sendFailure: string | null = null
+
+  consume(event: unknown): void {
+    if (typeof event !== 'object' || event === null) return
+    const record = event as Record<string, unknown>
+
+    if (record['type'] === 'system' && record['subtype'] === 'init') {
+      this.initSeen = true
+      const servers = Array.isArray(record['mcp_servers'])
+        ? record['mcp_servers']
+        : []
+      const agentchat = servers.find(
+        (candidate) =>
+          typeof candidate === 'object' &&
+          candidate !== null &&
+          (candidate as Record<string, unknown>)['name'] === 'agentchat',
+      ) as Record<string, unknown> | undefined
+      this.mcpConnected = agentchat?.['status'] === 'connected'
+      if (!this.mcpConnected) {
+        const status =
+          typeof agentchat?.['status'] === 'string'
+            ? agentchat['status']
+            : 'missing'
+        this.initFailure = `AgentChat MCP status is ${status}`
+      }
+
+      const skipped = Array.isArray(record['mcp_server_errors'])
+        ? record['mcp_server_errors']
+        : []
+      const error = skipped.find(
+        (candidate) =>
+          typeof candidate === 'object' &&
+          candidate !== null &&
+          (candidate as Record<string, unknown>)['name'] === 'agentchat',
+      ) as Record<string, unknown> | undefined
+      if (error !== undefined) {
+        const message =
+          typeof error['message'] === 'string' ? `: ${error['message']}` : ''
+        this.initFailure = `AgentChat MCP configuration was skipped${message}`
+      }
+    }
+
+    if (record['type'] === 'assistant') {
+      const message = record['message'] as Record<string, unknown> | undefined
+      const content = Array.isArray(message?.['content'])
+        ? message['content']
+        : []
+      for (const block of content) {
+        if (typeof block !== 'object' || block === null) continue
+        const tool = block as Record<string, unknown>
+        if (
+          tool['type'] === 'tool_use' &&
+          tool['name'] === SEND_TOOL &&
+          typeof tool['id'] === 'string'
+        ) {
+          this.pending.add(tool['id'])
+        }
+      }
+    }
+
+    if (record['type'] === 'user') {
+      const message = record['message'] as Record<string, unknown> | undefined
+      const content = Array.isArray(message?.['content'])
+        ? message['content']
+        : []
+      for (const block of content) {
+        if (typeof block !== 'object' || block === null) continue
+        const result = block as Record<string, unknown>
+        const id =
+          typeof result['tool_use_id'] === 'string'
+            ? result['tool_use_id']
+            : null
+        if (
+          result['type'] !== 'tool_result' ||
+          id === null ||
+          !this.pending.has(id)
+        ) {
+          continue
+        }
+        this.pending.delete(id)
+        if (result['is_error'] === true) {
+          this.sendFailure = 'AgentChat send tool returned an error'
+        } else {
+          this.successfulSends += 1
+        }
+      }
+    }
+
+    if (record['type'] === 'result') {
+      this.terminalSeen = true
+      this.terminalFailure =
+        record['is_error'] === true ||
+        (typeof record['subtype'] === 'string' &&
+          record['subtype'] !== 'success')
+    }
+  }
+
+  outcome(): { ok: boolean; sent: boolean; detail?: string } {
+    if (!this.initSeen) {
+      return { ok: false, sent: false, detail: 'Claude emitted no system/init event' }
+    }
+    if (!this.mcpConnected || this.initFailure !== null) {
+      return {
+        ok: false,
+        sent: this.successfulSends > 0,
+        detail: this.initFailure ?? 'AgentChat MCP did not connect',
+      }
+    }
+    if (!this.terminalSeen || this.terminalFailure) {
+      return {
+        ok: false,
+        sent: this.successfulSends > 0,
+        detail: this.terminalSeen
+          ? 'Claude reported a failed terminal result'
+          : 'Claude emitted no terminal result event',
+      }
+    }
+    if (this.sendFailure !== null) {
+      return {
+        ok: false,
+        sent: this.successfulSends > 0,
+        detail: this.sendFailure,
+      }
+    }
+    if (this.pending.size > 0) {
+      return {
+        ok: false,
+        sent: this.successfulSends > 0,
+        detail: `${this.pending.size} AgentChat send tool call(s) never completed`,
+      }
+    }
+    return { ok: true, sent: this.successfulSends > 0 }
   }
 }
 
@@ -181,6 +365,15 @@ export class ClaudeAdapter implements RuntimeAdapter {
   async preflight(): Promise<{ ok: boolean; detail?: string }> {
     const which = spawnSync('claude', ['--version'], { encoding: 'utf-8' })
     if (which.error) return { ok: false, detail: 'claude CLI not found on PATH' }
+    const rendered = String(which.stdout || which.stderr).trim()
+    if (which.status !== 0 || !semverAtLeast(rendered, MIN_CLAUDE_CODE_VERSION)) {
+      return {
+        ok: false,
+        detail:
+          `${rendered || `claude exited ${which.status}`}; AgentChat requires ` +
+          `Claude Code >= ${MIN_CLAUDE_CODE_VERSION}`,
+      }
+    }
     if (!claudeIsLoggedIn(this.claudeConfigDir)) {
       return { ok: false, detail: 'claude is not logged in (run `claude` once and sign in)' }
     }
@@ -221,7 +414,12 @@ export class ClaudeAdapter implements RuntimeAdapter {
     try {
       atomicWriteFile(
         mcpConfigPath,
-        JSON.stringify(buildTurnMcpConfig(this.identityHome)),
+        JSON.stringify(
+          buildTurnMcpConfig(
+            this.identityHome,
+            turnIdempotencyKey(ctx, this.sessionNamespace),
+          ),
+        ),
         0o600,
       )
     } catch (err) {
@@ -244,33 +442,26 @@ export class ClaudeAdapter implements RuntimeAdapter {
         env,
         detached: process.platform !== 'win32',
       })
-      let sawSend = false
-      let isError: boolean | undefined
+      const events = new ClaudeTurnEvents()
       let buf = ''
       let stderr = ''
+      const consumeLine = (line: string): void => {
+        if (!line.trim()) return
+        try {
+          events.consume(JSON.parse(line))
+        } catch {
+          /* malformed CLI output is ignored; close status remains authoritative */
+        }
+      }
 
       child.stdout.on('data', (d) => {
-        buf += d
-        // stream-json is newline-delimited JSON events. Detect an
-        // agentchat_send_message tool call and the terminal result.
+        buf += String(d)
+        // stream-json is newline-delimited JSON events.
         let nl: number
         while ((nl = buf.indexOf('\n')) >= 0) {
           const line = buf.slice(0, nl)
           buf = buf.slice(nl + 1)
-          if (!line.trim()) continue
-          try {
-            const e = JSON.parse(line)
-            if (e.type === 'assistant' && Array.isArray(e.message?.content)) {
-              for (const c of e.message.content) {
-                if (c?.type === 'tool_use' && typeof c.name === 'string' && c.name.includes('agentchat_send_message')) {
-                  sawSend = true
-                }
-              }
-            }
-            if (e.type === 'result') isError = e.is_error === true
-          } catch {
-            /* partial or non-json line */
-          }
+          consumeLine(line)
         }
         if (buf.length > MAX_EVENT_TAIL_CHARS) buf = buf.slice(-MAX_EVENT_TAIL_CHARS)
       })
@@ -300,11 +491,21 @@ export class ClaudeAdapter implements RuntimeAdapter {
 
       child.on('close', (code) => {
         clearTimeout(killTimer)
+        consumeLine(buf)
         // We DISCARD the turn text — the reply (if any) went via the MCP send
-        // tool. Success = clean exit AND the result event wasn't an error.
-        if (code === 0 && isError !== true) {
-          log.info(`claude turn done for ${ctx.conversationId} (sent=${sawSend})`)
-          finish({ ok: true, detail: sawSend ? 'replied' : 'silent' })
+        // tool. Success requires a connected MCP server, a clean terminal
+        // result, and completed tool results for every attempted send.
+        if (code === 0) {
+          const outcome = events.outcome()
+          if (!outcome.ok) {
+            finish({
+              ok: false,
+              detail: outcome.detail ?? 'AgentChat send outcome was not successful',
+            })
+            return
+          }
+          log.info(`claude turn done for ${ctx.conversationId} (sent=${outcome.sent})`)
+          finish({ ok: true, detail: outcome.sent ? 'replied' : 'silent' })
         } else {
           const detail = `claude exited ${code}${stderr ? `: ${stderr.slice(0, 500)}` : ''}`
           finish({ ok: false, fatal: fatalRuntimeError(detail), detail })

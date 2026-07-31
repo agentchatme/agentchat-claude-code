@@ -73,6 +73,10 @@ export function installFakeClaude(root: string, version = '2.1.220'): FakeClaude
     ].join('\n'),
     { mode: 0o755 },
   )
+  fs.writeFileSync(
+    path.join(binDir, 'claude.cmd'),
+    '@echo off\r\nnode "%~dp0claude" %*\r\n',
+  )
 
   return { binDir, mcpState, pluginState }
 }

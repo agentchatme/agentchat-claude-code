@@ -295,7 +295,7 @@ function runDaemonCmd(sub: string | undefined): number {
       clearAlwaysOnWanted(home)
       // Remembered, so no later install or upgrade quietly switches it back on.
       markAlwaysOnOptOut(home)
-      console.log(`Always-on is OFF for ${LABEL} — messages queue for your next session; nothing is lost.`)
+      console.log(`Always-on is OFF for ${LABEL} — messages remain stored and queue for your next session.`)
       return 0
     }
     case 'status': {

@@ -5,10 +5,11 @@ on:
   pull_request:
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        node: [22, 24]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -16,7 +17,7 @@ jobs:
           version: 11
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 22
           cache: pnpm
       # --frozen-lockfile now that the engine is a published, pinned version
       # rather than a filesystem link to a checkout of its moving main branch.
@@ -34,6 +35,7 @@ jobs:
       # earlier version of this step waited for an exit that no longer comes
       # and hung the job until it timed out.
       - name: the daemon entry is resident and idles without an identity
+        if: runner.os == 'Linux'
         run: |
           out="$(mktemp)"
           ( cd "$(mktemp -d)" && node "$GITHUB_WORKSPACE/dist/daemon-main.js" --home "$(mktemp -d)" >"$out" 2>&1 ) &

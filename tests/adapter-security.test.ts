@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest'
 import {
   AGENTCHAT_MCP_PACKAGE,
   AGENTCHAT_TOOL_ALLOW,
+  ClaudeTurnEvents,
   buildClaudeArgs,
   buildClaudeEnv,
   buildPrompt,
   buildTurnMcpConfig,
   sessionUuid,
+  turnIdempotencyKey,
 } from '../src/adapter.js'
 import type { TurnContext } from '@agentchatme/agent-core/daemon'
 
@@ -36,11 +38,15 @@ describe('Claude autonomous turn contract', () => {
   })
 
   it('configures the normal MCP identity without turn-specific policy', () => {
-    const config = buildTurnMcpConfig('/identity') as {
-      mcpServers: { agentchat: { env: Record<string, string> } }
+    const config = buildTurnMcpConfig('/identity', 'ac_turn_test') as {
+      mcpServers: {
+        agentchat: { alwaysLoad: boolean; env: Record<string, string> }
+      }
     }
+    expect(config.mcpServers.agentchat.alwaysLoad).toBe(true)
     expect(config.mcpServers.agentchat.env).toMatchObject({
       AGENTCHAT_HOME: '/identity',
+      AGENTCHAT_TURN_IDEMPOTENCY_KEY: 'ac_turn_test',
     })
     expect(config.mcpServers.agentchat.env).not.toHaveProperty('AGENTCHAT_TURN_SCOPE')
     expect(config.mcpServers.agentchat.env).not.toHaveProperty('AGENTCHAT_ALLOW_SENSITIVE_SENDS')
@@ -53,6 +59,7 @@ describe('Claude autonomous turn contract', () => {
     expect(env).toMatchObject({
       CLAUDE_CONFIG_DIR: '/claude',
       AGENTCHAT_HOOKS_ENABLED: '0',
+      MCP_CONNECT_TIMEOUT_MS: '30000',
     })
     expect(env['CLAUDECODE']).toBeUndefined()
     expect(env['AGENTCHAT_TURN_SCOPE']).toBeUndefined()
@@ -69,6 +76,112 @@ describe('Claude autonomous turn contract', () => {
     expect(sessionUuid('conv_1', 'https://api:a')).toBe(
       sessionUuid('conv_1', 'https://api:a'),
     )
+  })
+
+  it('derives one stable idempotency key from the frozen inbound batch', () => {
+    const batch = {
+      ...malicious,
+      pendingBatch: {
+        count: 2,
+        messageIds: ['msg_1', 'msg_2'],
+        oldestMessageId: 'msg_1',
+        newestMessageId: 'msg_2',
+        mentionedMessages: [],
+      },
+    }
+    expect(turnIdempotencyKey(batch, 'identity-a')).toBe(
+      turnIdempotencyKey(batch, 'identity-a'),
+    )
+    expect(turnIdempotencyKey(batch, 'identity-b')).not.toBe(
+      turnIdempotencyKey(batch, 'identity-a'),
+    )
+  })
+
+  it('requires AgentChat MCP connection and a matching successful tool result', () => {
+    const events = new ClaudeTurnEvents()
+    events.consume({
+      type: 'system',
+      subtype: 'init',
+      mcp_servers: [{ name: 'agentchat', status: 'connected' }],
+    })
+    events.consume({
+      type: 'assistant',
+      message: {
+        content: [
+          {
+            type: 'tool_use',
+            id: 'tool_1',
+            name: 'mcp__agentchat__agentchat_send_message',
+          },
+        ],
+      },
+    })
+    expect(events.outcome()).toMatchObject({ ok: false, sent: false })
+
+    events.consume({
+      type: 'user',
+      message: {
+        content: [
+          { type: 'tool_result', tool_use_id: 'tool_1', is_error: false },
+        ],
+      },
+    })
+    events.consume({ type: 'result', subtype: 'success', is_error: false })
+    expect(events.outcome()).toEqual({ ok: true, sent: true })
+  })
+
+  it('rejects a clean CLI exit when AgentChat MCP was skipped or a send failed', () => {
+    const skipped = new ClaudeTurnEvents()
+    skipped.consume({
+      type: 'system',
+      subtype: 'init',
+      mcp_servers: [],
+      mcp_server_errors: [
+        {
+          name: 'agentchat',
+          type: 'invalid_config',
+          message: 'bad server config',
+        },
+      ],
+    })
+    skipped.consume({ type: 'result', subtype: 'success', is_error: false })
+    expect(skipped.outcome()).toMatchObject({
+      ok: false,
+      detail: expect.stringContaining('skipped'),
+    })
+
+    const failed = new ClaudeTurnEvents()
+    failed.consume({
+      type: 'system',
+      subtype: 'init',
+      mcp_servers: [{ name: 'agentchat', status: 'connected' }],
+    })
+    failed.consume({
+      type: 'assistant',
+      message: {
+        content: [
+          {
+            type: 'tool_use',
+            id: 'tool_2',
+            name: 'mcp__agentchat__agentchat_send_message',
+          },
+        ],
+      },
+    })
+    failed.consume({
+      type: 'user',
+      message: {
+        content: [
+          { type: 'tool_result', tool_use_id: 'tool_2', is_error: true },
+        ],
+      },
+    })
+    failed.consume({ type: 'result', subtype: 'success', is_error: false })
+    expect(failed.outcome()).toMatchObject({
+      ok: false,
+      sent: false,
+      detail: expect.stringContaining('returned an error'),
+    })
   })
 
   it('encodes peer text as one JSON data line rather than prompt instructions', () => {

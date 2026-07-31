@@ -1,6 +1,11 @@
 import { createHookRunners, log } from '@agentchatme/agent-core'
 import { identityHome, hostCopy } from './host.js'
-import { sessionStartOutput, stopOutput, printJson } from './dialect.js'
+import {
+  sessionStartOutput,
+  userPromptOutput,
+  stopOutput,
+  printJson,
+} from './dialect.js'
 import { ensureAlwaysOn } from './always-on.js'
 
 // ─── Session hooks ──────────────────────────────────────────────────────────
@@ -16,7 +21,7 @@ import { ensureAlwaysOn } from './always-on.js'
 
 const runners = createHookRunners(
   () => ({ home: identityHome(), copy: hostCopy() }),
-  { sessionStartOutput, stopOutput, printJson },
+  { sessionStartOutput, userPromptOutput, stopOutput, printJson },
 )
 
 /**

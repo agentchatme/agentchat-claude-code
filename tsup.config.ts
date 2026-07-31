@@ -29,7 +29,7 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   splitting: false,
-  target: 'node20',
+  target: 'node22',
   // Subpath builtins (readline/promises) are only recognised as builtins when
   // the platform is explicit; without it the engine's inlined CLI prompts fail
   // to resolve and the whole bundle fails to build.

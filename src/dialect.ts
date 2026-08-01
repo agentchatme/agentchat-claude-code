@@ -7,12 +7,22 @@
 // Verified 2026-07-07: SessionStart carries additionalContext via
 // hookSpecificOutput; Stop continues with {decision:"block", reason}.
 
-export function sessionStartOutput(context: string): Record<string, unknown> {
-  return { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context } }
+export function sessionStartOutput(
+  context: string,
+  notification: string | null = null,
+): Record<string, unknown> {
+  return {
+    ...(notification === null ? {} : { systemMessage: notification }),
+    hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: context },
+  }
 }
 
-export function userPromptOutput(context: string): Record<string, unknown> {
+export function userPromptOutput(
+  context: string,
+  notification: string | null = null,
+): Record<string, unknown> {
   return {
+    ...(notification === null ? {} : { systemMessage: notification }),
     hookSpecificOutput: {
       hookEventName: 'UserPromptSubmit',
       additionalContext: context,

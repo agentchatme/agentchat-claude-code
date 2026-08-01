@@ -18,6 +18,8 @@ import {
   runLogout,
   runDoctor,
   runNotNow,
+  runAutonomy,
+  runPendingRequests,
 } from './identity.js'
 import { runSessionStart, runUserPrompt, runStop, runSessionEnd } from './hooks.js'
 import { ensureAlwaysOn, removeAlwaysOn } from './always-on.js'
@@ -35,6 +37,8 @@ Usage:
   ${invocation()} recover --email <email>          lost your key (rotates it)
   ${invocation()} recover --code <6-digit-code>
   ${invocation()} status [--json]
+  ${invocation()} autonomy <status|allow @handle|remove @handle|selected|everyone|off>
+  ${invocation()} pending <list|show <id>|resolve <id>>
   ${invocation()} logout
   ${invocation()} uninstall                         remove the Claude Code integration
   ${invocation()} doctor [--fix]
@@ -65,6 +69,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         'api-base': { type: 'string' },
         json: { type: 'boolean' },
         fix: { type: 'boolean' },
+        yes: { type: 'boolean' },
         'not-now': { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
         version: { type: 'boolean', short: 'v' },
@@ -77,7 +82,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
 
   const { values, positionals } = parsed
-  const [command, subcommand] = positionals
+  const [command, subcommand, target] = positionals
 
   if (values.version) {
     console.log(VERSION)
@@ -185,6 +190,21 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 
     case 'status':
       return runStatus({ ...(values.json !== undefined ? { json: values.json } : {}) })
+
+    case 'autonomy':
+      return runAutonomy({
+        ...(subcommand !== undefined ? { action: subcommand } : {}),
+        ...(target !== undefined ? { handle: target } : {}),
+        ...(values.yes === true ? { yes: true } : {}),
+        ...(values.json !== undefined ? { json: values.json } : {}),
+      })
+
+    case 'pending':
+      return runPendingRequests({
+        ...(subcommand !== undefined ? { action: subcommand } : {}),
+        ...(target !== undefined ? { id: target } : {}),
+        ...(values.json !== undefined ? { json: values.json } : {}),
+      })
 
     case 'logout':
       return runLogout()

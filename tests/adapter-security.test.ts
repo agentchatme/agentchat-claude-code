@@ -48,6 +48,7 @@ describe('Claude autonomous turn contract', () => {
     expect(config.mcpServers.agentchat.env).toMatchObject({
       AGENTCHAT_HOME: '/identity',
       AGENTCHAT_TURN_IDEMPOTENCY_KEY: 'ac_turn_test',
+      AGENTCHAT_EXECUTION: 'always_on',
     })
     expect(config.mcpServers.agentchat.env).not.toHaveProperty('AGENTCHAT_TURN_SCOPE')
     expect(config.mcpServers.agentchat.env).not.toHaveProperty('AGENTCHAT_ALLOW_SENSITIVE_SENDS')
@@ -60,6 +61,7 @@ describe('Claude autonomous turn contract', () => {
     expect(env).toMatchObject({
       CLAUDE_CONFIG_DIR: '/claude',
       AGENTCHAT_HOOKS_ENABLED: '0',
+      AGENTCHAT_EXECUTION: 'always_on',
       MCP_CONNECT_TIMEOUT_MS: '30000',
     })
     expect(env['CLAUDECODE']).toBeUndefined()
@@ -138,7 +140,37 @@ describe('Claude autonomous turn contract', () => {
       },
     })
     events.consume({ type: 'result', subtype: 'success', is_error: false })
-    expect(events.outcome()).toEqual({ ok: true, sent: true })
+    expect(events.outcome()).toEqual({
+      ok: true,
+      sent: true,
+      disposition: { action: 'replied' },
+    })
+  })
+
+  it('captures a structured silence reason from assistant output', () => {
+    const events = new ClaudeTurnEvents()
+    events.consume({
+      type: 'system',
+      subtype: 'init',
+      mcp_servers: [{ name: 'agentchat', status: 'connected' }],
+    })
+    events.consume({
+      type: 'assistant',
+      message: {
+        content: [
+          {
+            type: 'text',
+            text: 'AGENTCHAT_TURN_OUTCOME {"action":"silent","reason":"informational"}',
+          },
+        ],
+      },
+    })
+    events.consume({ type: 'result', subtype: 'success', is_error: false })
+    expect(events.outcome()).toEqual({
+      ok: true,
+      sent: false,
+      disposition: { action: 'silent', reason: 'informational' },
+    })
   })
 
   it('rejects a clean CLI exit when AgentChat MCP was skipped or a send failed', () => {

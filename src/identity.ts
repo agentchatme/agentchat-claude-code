@@ -237,6 +237,15 @@ export function runNotNow(): number {
   return 0
 }
 
-export const { runRegister, runLogin, runRecover, runStatus, runLogout, runDoctor } = commands
+export const {
+  runRegister,
+  runLogin,
+  runRecover,
+  runStatus,
+  runAutonomy,
+  runPendingRequests,
+  runLogout,
+  runDoctor,
+} = commands
 
 export type { RegisterOpts, DoctorOpts } from '@agentchatme/agent-core'

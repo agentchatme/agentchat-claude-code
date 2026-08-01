@@ -184,6 +184,8 @@ describe('doctor', () => {
     expect(fixed.stdout).toContain('repaired → @claude-agent')
     const md = fs.readFileSync(path.join(sandbox, '.claude', 'CLAUDE.md'), 'utf-8')
     expect(md).toContain('@claude-agent')
+    expect(md).toContain('autonomy ...')
+    expect(md).toContain('pending list')
     expect(md).not.toContain('@codex-agent')
     // Repairing this agent must not touch the one it was confused with.
     expect(snapshot(codexDir())).toEqual(before)

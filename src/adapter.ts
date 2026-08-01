@@ -9,8 +9,17 @@ import {
   spawnCommand,
   spawnCommandSync,
 } from '@agentchatme/agent-core'
-import { buildAgentChatTurnPrompt } from '@agentchatme/agent-core/daemon'
-import type { RuntimeAdapter, TurnContext, TurnResult } from '@agentchatme/agent-core/daemon'
+import {
+  buildAgentChatTurnPrompt,
+  parseAgentChatTurnOutcome,
+  resolveTurnDisposition,
+} from '@agentchatme/agent-core/daemon'
+import type {
+  RuntimeAdapter,
+  TurnContext,
+  TurnDisposition,
+  TurnResult,
+} from '@agentchatme/agent-core/daemon'
 import { VERSION } from './version.js'
 import {
   MIN_CLAUDE_CODE_VERSION,
@@ -130,6 +139,7 @@ export function buildClaudeEnv(
   // those would announce a false foreground turn and contend for this inbox.
   // Other user hooks, skills, plugins, MCP servers and permissions stay intact.
   env['AGENTCHAT_HOOKS_ENABLED'] = '0'
+  env['AGENTCHAT_EXECUTION'] = 'always_on'
   return env
 }
 
@@ -171,6 +181,7 @@ export function buildTurnMcpConfig(
           AGENTCHAT_CLIENT_NAME: 'claude-code',
           AGENTCHAT_CLIENT_VERSION: VERSION,
           AGENTCHAT_TURN_IDEMPOTENCY_KEY: idempotencyKey,
+          AGENTCHAT_EXECUTION: 'always_on',
         },
       },
     },
@@ -280,6 +291,7 @@ export class ClaudeTurnEvents {
   private sendFailure: string | null = null
   private runtimeAuthFailure: string | null = null
   private controlFailure: string | null = null
+  private reportedDisposition: TurnDisposition | null = null
 
   consume(event: unknown): void {
     if (typeof event !== 'object' || event === null) return
@@ -334,10 +346,14 @@ export class ClaudeTurnEvents {
         const tool = block as Record<string, unknown>
         if (
           tool['type'] === 'text' &&
-          typeof tool['text'] === 'string' &&
-          fatalRuntimeError(tool['text'])
+          typeof tool['text'] === 'string'
         ) {
-          this.runtimeAuthFailure = boundedDiagnostic(tool['text'])
+          this.reportedDisposition =
+            parseAgentChatTurnOutcome(tool['text']) ??
+            this.reportedDisposition
+          if (fatalRuntimeError(tool['text'])) {
+            this.runtimeAuthFailure = boundedDiagnostic(tool['text'])
+          }
         }
         if (
           tool['type'] === 'tool_use' &&
@@ -386,7 +402,12 @@ export class ClaudeTurnEvents {
     }
   }
 
-  outcome(): { ok: boolean; sent: boolean; detail?: string } {
+  outcome(): {
+    ok: boolean
+    sent: boolean
+    disposition?: TurnDisposition
+    detail?: string
+  } {
     if (!this.initSeen) {
       return { ok: false, sent: false, detail: 'Claude emitted no system/init event' }
     }
@@ -420,7 +441,12 @@ export class ClaudeTurnEvents {
         detail: `${this.pending.size} AgentChat send tool call(s) never completed`,
       }
     }
-    return { ok: true, sent: this.successfulSends > 0 }
+    const sent = this.successfulSends > 0
+    return {
+      ok: true,
+      sent,
+      disposition: resolveTurnDisposition(sent, this.reportedDisposition),
+    }
   }
 
   /** Claude reports host-auth failures as assistant text on stdout rather than
@@ -652,7 +678,13 @@ export class ClaudeAdapter implements RuntimeAdapter {
             return
           }
           log.info(`claude turn done for ${ctx.conversationId} (sent=${outcome.sent})`)
-          finish({ ok: true, detail: outcome.sent ? 'replied' : 'silent' })
+          finish({
+            ok: true,
+            detail: outcome.sent ? 'replied' : 'silent',
+            ...(outcome.disposition
+              ? { disposition: outcome.disposition }
+              : {}),
+          })
         } else {
           finish(classifyClaudeExit(code, stderr, events))
         }

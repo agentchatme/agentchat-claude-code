@@ -34,7 +34,7 @@ Usage:
   ${invocation()} register --code <6-digit-code>
   ${invocation()} register --not-now                stop offering to set this up
   ${invocation()} login --api-key <ac_…>           already have an account
-  ${invocation()} recover --email <email>          lost your key (rotates it)
+  ${invocation()} recover --handle <h> --email <e>  lost your key (rotates it; --handle defaults to yours)
   ${invocation()} recover --code <6-digit-code>
   ${invocation()} status [--json]
   ${invocation()} autonomy <status|allow @handle|remove @handle|selected|everyone|off>
@@ -182,8 +182,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       })
 
     case 'recover':
+      // One email can back several agents, so recovery names the agent too.
+      // The engine falls back to this agent's stored handle when the flag is
+      // omitted; it is passed through verbatim here.
       return runRecover({
         ...(values.email !== undefined ? { email: values.email } : {}),
+        ...(values.handle !== undefined ? { handle: values.handle } : {}),
         ...(values.code !== undefined ? { code: values.code } : {}),
         ...(values['api-base'] !== undefined ? { apiBase: values['api-base'] } : {}),
       })

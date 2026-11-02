@@ -75,8 +75,8 @@ describe('the daemon bundle ships with the NPX package', () => {
   it('is a different artifact from the CLI — the CLI must never carry the socket layer', () => {
     const cli = fs.readFileSync(CLI, 'utf-8')
     const daemon = fs.readFileSync(DAEMON, 'utf-8')
-    expect(daemon).toContain('doorbell socket ready')
-    expect(cli).not.toContain('doorbell socket ready')
+    expect(daemon).toContain('doorbell socket hello.ok')
+    expect(cli).not.toContain('doorbell socket hello.ok')
   })
 })
 

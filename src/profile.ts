@@ -17,6 +17,13 @@ import { MCP_SERVER_NAME } from './host.js'
 //   --allowedTools <rules>      pre-approves. `mcp__agentchat__*` is the whole
 //                               hosted server; `Bash` pre-approves every shell
 //                               command (dropped as a broad rule only in auto mode).
+//   --disallowedTools <rules>   denies. Deny rules win over allow rules, and a
+//                               `Read(<path>)` rule covers every built-in tool
+//                               that reads files (Read, Grep, Glob — docs:
+//                               permissions.md "Read & Edit"). Used to keep a
+//                               run's file tools off the key store: the
+//                               identity home and ~/.claude.json. `//` prefixes
+//                               an absolute path in rule syntax.
 //   --permission-mode default   Manual: reads need no approval, everything else
 //                               prompts (and is therefore denied here).
 //   --permission-mode acceptEdits  file edits and common filesystem commands in
@@ -64,6 +71,26 @@ export function claudeProfileArgs(profile: RunProfile): string[] {
 export interface ClaudeRunArgOptions {
   /** `AGENTCHAT_RUN_MAX_BUDGET_USD`: stop the run once estimated spend reaches this (print mode only). */
   readonly maxBudgetUsd?: string | undefined
+  /**
+   * Absolute paths the run's file tools may not read (a directory covers its
+   * tree). Rendered as `Read(//<path>)` / `Read(//<dir>/**)` deny rules. A
+   * prompt-injected run could otherwise read the key and send it; the wake
+   * text should not be the only guard. POSIX paths only — on Windows the
+   * rule syntax for drive paths is undocumented, so nothing is rendered.
+   */
+  readonly denyReadPaths?: readonly string[] | undefined
+}
+
+/** `/Users/x/.claude/agentchat` → `Read(//Users/x/.claude/agentchat/**)` and `Read(//Users/x/.claude/agentchat)`. */
+export function readDenyRules(paths: readonly string[]): string[] {
+  if (process.platform === 'win32') return []
+  const rules: string[] = []
+  for (const raw of paths) {
+    if (!raw.startsWith('/') || raw.includes(',') || raw.includes(' ')) continue // not expressible in a comma/space list
+    const clean = raw.replace(/\/+$/, '')
+    rules.push(`Read(/${clean})`, `Read(/${clean}/**)`)
+  }
+  return rules
 }
 
 /**
@@ -74,6 +101,7 @@ export interface ClaudeRunArgOptions {
  */
 export function claudeRunArgs(profile: RunProfile, options: ClaudeRunArgOptions = {}): string[] {
   const budget = options.maxBudgetUsd?.trim()
+  const deny = readDenyRules(options.denyReadPaths ?? [])
   return [
     '-p',
     '--output-format',
@@ -83,5 +111,8 @@ export function claudeRunArgs(profile: RunProfile, options: ClaudeRunArgOptions 
     '--no-session-persistence',
     ...(budget !== undefined && /^\d+(\.\d+)?$/.test(budget) ? ['--max-budget-usd', budget] : []),
     ...claudeProfileArgs(profile),
+    // Last: the option is variadic and the prompt arrives on stdin, so there
+    // is no positional for it to swallow.
+    ...(deny.length > 0 ? ['--disallowedTools', deny.join(',')] : []),
   ]
 }

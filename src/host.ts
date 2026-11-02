@@ -24,7 +24,12 @@ export function claudeHome(): string {
 
 /** THE identity home for this agent. Passed into every agent-core call. */
 export function identityHome(): string {
-  return path.join(claudeHome(), 'agentchat')
+  return identityHomeFor(claudeConfigOverride())
+}
+
+/** The identity home for a given config dir (the daemon's runner carries it as an option). */
+export function identityHomeFor(configDirOverride: string | undefined): string {
+  return path.join(configDirOverride ?? path.join(os.homedir(), '.claude'), 'agentchat')
 }
 
 /** Claude Code's always-loaded user instruction file: the identity line goes here. */
@@ -38,8 +43,11 @@ export function anchorFile(): string {
  * (code.claude.com/docs/en/mcp.md, "User scope").
  */
 export function claudeUserStatePath(): string {
-  const override = claudeConfigOverride()
-  return override !== undefined ? path.join(override, '.claude.json') : path.join(os.homedir(), '.claude.json')
+  return claudeUserStatePathFor(claudeConfigOverride())
+}
+
+export function claudeUserStatePathFor(configDirOverride: string | undefined): string {
+  return configDirOverride !== undefined ? path.join(configDirOverride, '.claude.json') : path.join(os.homedir(), '.claude.json')
 }
 
 export function settingsPath(): string {

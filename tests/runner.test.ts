@@ -4,7 +4,8 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { buildDoorbellPrompts, manualPointer, mcpToolNamer, wakeInstruction } from '@agentchatme/agent-core'
 import { ClaudeRunner, buildClaudeEnv } from '../src/runner.js'
-import { AGENTCHAT_TOOL_ALLOW, claudeRunArgs } from '../src/profile.js'
+import { AGENTCHAT_TOOL_ALLOW, claudeRunArgs, readDenyRules } from '../src/profile.js'
+import { claudeUserStatePathFor, identityHomeFor } from '../src/host.js'
 import { installFakeClaude, readRuns, type FakeClaude } from './helpers/fake-claude.js'
 
 // ─── One headless Claude Code run: the exact flags, the prompt on stdin ─────
@@ -92,6 +93,28 @@ describe('the permission profiles, as Claude Code flags', () => {
     expect(claudeRunArgs('answer', { maxBudgetUsd: '2.50' })).toContain('--max-budget-usd')
     expect(claudeRunArgs('answer', { maxBudgetUsd: 'lots' })).not.toContain('--max-budget-usd')
   })
+
+  it('the key store is denied to the run’s file tools: Read deny rules for the identity home and ~/.claude.json, last on the line', () => {
+    const rules = readDenyRules(['/Users/x/.claude/agentchat', '/Users/x/.claude.json'])
+    if (process.platform === 'win32') {
+      expect(rules).toEqual([])
+      return
+    }
+    expect(rules).toEqual([
+      'Read(//Users/x/.claude/agentchat)',
+      'Read(//Users/x/.claude/agentchat/**)',
+      'Read(//Users/x/.claude.json)',
+      'Read(//Users/x/.claude.json/**)',
+    ])
+    for (const profile of ['answer', 'work', 'full'] as const) {
+      const args = claudeRunArgs(profile, { denyReadPaths: ['/Users/x/.claude/agentchat', '/Users/x/.claude.json'] })
+      expect(args.at(-2)).toBe('--disallowedTools')
+      expect(args.at(-1)).toBe(rules.join(','))
+      expect(args.slice(0, -2)).toEqual(claudeRunArgs(profile))
+    }
+    // Paths the comma/space list cannot carry are skipped rather than mangled; relative paths too.
+    expect(readDenyRules(['/with space/x', '/with,comma', 'relative/path'])).toEqual([])
+  })
 })
 
 describe('the child environment', () => {
@@ -131,10 +154,10 @@ describe('ClaudeRunner', () => {
     }
   })
 
-  it('preflight fails on a claude older than the flag floor', async () => {
-    fake = installFakeClaude(sandbox, '2.1.258')
+  it('preflight fails on a claude older than the floor (2.1.274: --permission-prompts none AND CLAUDE_CODE_MCP_STARTUP_WAIT_MS)', async () => {
+    fake = installFakeClaude(sandbox, '2.1.273')
     const runner = new ClaudeRunner({ configDir: undefined, workdir, profile: 'answer', env: env() })
-    expect(await runner.preflight()).toMatchObject({ ok: false, detail: expect.stringMatching(/>= 2\.1\.259/) })
+    expect(await runner.preflight()).toMatchObject({ ok: false, detail: expect.stringMatching(/>= 2\.1\.274/) })
   })
 
   it('a knock run: the server’s wake text on stdin, the profile flags, the workdir, the scrubbed env — output discarded', async () => {
@@ -147,7 +170,13 @@ describe('ClaudeRunner', () => {
     const runs = readRuns(fake)
     expect(runs).toHaveLength(1)
     const run = runs[0]!
-    expect(run.argv).toEqual(claudeRunArgs('answer'))
+    // The profile flags, then the key-store deny rules for THIS config dir.
+    expect(run.argv).toEqual(claudeRunArgs('answer', { denyReadPaths: [identityHomeFor(undefined), claudeUserStatePathFor(undefined)] }))
+    if (process.platform !== 'win32') {
+      expect(run.argv.at(-2)).toBe('--disallowedTools')
+      expect(run.argv.at(-1)).toContain(`Read(/${identityHomeFor(undefined)}/**)`)
+      expect(run.argv.at(-1)).toContain(`Read(/${claudeUserStatePathFor(undefined)})`)
+    }
     expect(run.stdin).toBe(prompts.knock)
     expect(run.stdin.startsWith(wakeInstruction(mcpToolNamer('agentchat')))).toBe(true)
     expect(run.stdin).toContain('mcp__agentchat__agentchat_inbox')
@@ -164,8 +193,33 @@ describe('ClaudeRunner', () => {
     await runner.start({ kind: 'invite', prompt: prompts.invite, runId: 'r2', budgetMs: 10_000 })
     const run = readRuns(fake)[0]!
     expect(run.stdin).toBe(prompts.invite)
-    expect(run.argv).toEqual(claudeRunArgs('work'))
+    expect(run.argv).toEqual(claudeRunArgs('work', { denyReadPaths: [identityHomeFor(undefined), claudeUserStatePathFor(undefined)] }))
   })
+
+  it('a relocated config dir moves the deny rules with it', async () => {
+    const relocated = path.join(sandbox, 'relocated')
+    fs.mkdirSync(relocated, { recursive: true })
+    const runner = new ClaudeRunner({ configDir: relocated, workdir, profile: 'answer', env: env() })
+    fs.mkdirSync(workdir, { recursive: true })
+    await runner.start({ kind: 'knock', prompt: 'P', runId: 'r3', budgetMs: 10_000 })
+    const run = readRuns(fake)[0]!
+    if (process.platform !== 'win32') {
+      expect(run.argv.at(-1)).toContain(`Read(/${path.join(relocated, 'agentchat')}/**)`)
+      expect(run.argv.at(-1)).toContain(`Read(/${path.join(relocated, '.claude.json')})`)
+    }
+  })
+
+  it('the doorbell stopping aborts the run: the signal reaches spawnRun and the process group is gone', async () => {
+    const runner = new ClaudeRunner({ configDir: undefined, workdir, profile: 'answer', env: env({ FAKE_CLAUDE_RUN: 'hang' }) })
+    fs.mkdirSync(workdir, { recursive: true })
+    const controller = new AbortController()
+    const pending = runner.start({ kind: 'knock', prompt: 'P', runId: 'r4', budgetMs: 60_000, signal: controller.signal })
+    await new Promise((r) => setTimeout(r, 400))
+    controller.abort()
+    const outcome = await pending
+    expect(outcome.state).toBe('failed')
+    expect(outcome.detail).toMatch(/interrupted/)
+  }, 15_000)
 
   it('classifies: a failure after output is failed, a silent non-zero exit is not_started, a hang is timed_out', async () => {
     fs.mkdirSync(workdir, { recursive: true })
@@ -177,6 +231,11 @@ describe('ClaudeRunner', () => {
 
     const nostart = await new ClaudeRunner({ configDir: undefined, workdir, profile: 'answer', env: env({ FAKE_CLAUDE_RUN: 'nostart' }) }).start(request)
     expect(nostart).toMatchObject({ state: 'not_started', exitCode: 2 })
+
+    // README § Verify step 8: a signed-out Claude Code complains on stderr and exits — `run not_started`, complaint attached.
+    const signedOut = await new ClaudeRunner({ configDir: undefined, workdir, profile: 'answer', env: env({ FAKE_CLAUDE_RUN: 'signedout' }) }).start(request)
+    expect(signedOut).toMatchObject({ state: 'not_started', exitCode: 1 })
+    expect(signedOut.detail).toMatch(/nothing on stdout: Not logged in/)
 
     const hang = await new ClaudeRunner({ configDir: undefined, workdir, profile: 'answer', env: env({ FAKE_CLAUDE_RUN: 'hang' }) }).start({ ...request, budgetMs: 1_500 })
     expect(hang.state).toBe('timed_out')

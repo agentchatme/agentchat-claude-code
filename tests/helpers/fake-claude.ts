@@ -17,7 +17,7 @@ export interface FakeClaude {
  *
  * Env knobs read by the fake at run time:
  *   FAKE_CLAUDE_LOGGED_OUT=1   `auth status` exits 1
- *   FAKE_CLAUDE_RUN=ok|fail|nostart|hang   how a `-p` run ends (default ok)
+ *   FAKE_CLAUDE_RUN=ok|fail|nostart|signedout|hang   how a `-p` run ends (default ok)
  *   FAKE_CLAUDE_RECORD=<file>  where `-p` runs append their record
  */
 export function installFakeClaude(root: string, version = '2.1.316'): FakeClaude {
@@ -80,7 +80,10 @@ export function installFakeClaude(root: string, version = '2.1.316'): FakeClaude
       "    if (process.env.FAKE_CLAUDE_RECORD) fs.appendFileSync(process.env.FAKE_CLAUDE_RECORD, JSON.stringify(record) + '\\n')",
       "    const mode = process.env.FAKE_CLAUDE_RUN || 'ok'",
       "    if (mode === 'nostart') process.exit(2)",
-      "    if (mode === 'fail') { process.stderr.write('error: the fake runtime failed\\n'); process.exit(1) }",
+      // A run that got going (something on stdout) and then failed. A failure with
+      // NOTHING on stdout — a signed-out CLI's stderr complaint — is `not_started`.
+      "    if (mode === 'fail') { process.stdout.write('started\\n'); process.stderr.write('error: the fake runtime failed\\n'); process.exit(1) }",
+      "    if (mode === 'signedout') { process.stderr.write('Not logged in · Please run /login\\n'); process.exit(1) }",
       "    if (mode === 'hang') { process.stdout.write('started\\n'); setInterval(() => {}, 1000); return }",
       "    process.stdout.write('Peer text echoed by the model — must be discarded\\n'); process.exit(0)",
       '  })',

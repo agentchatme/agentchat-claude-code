@@ -138,11 +138,11 @@ describe('install places the four texts', () => {
     expect(fs.existsSync(fakeClaude.relocatedUserState)).toBe(false)
   })
 
-  it('refuses a Claude Code older than the --permission-prompts floor, placing nothing', async () => {
-    fakeClaude = installFakeClaude(sandbox, '2.1.258')
+  it('refuses a Claude Code older than the floor (2.1.274), placing nothing', async () => {
+    fakeClaude = installFakeClaude(sandbox, '2.1.273')
     const out = await run([])
     expect(out.code).toBe(1)
-    expect(out.stdout).toContain('requires Claude Code >= 2.1.259')
+    expect(out.stdout).toContain('requires Claude Code >= 2.1.274')
     expect(fs.existsSync(skill())).toBe(false)
   })
 
@@ -228,6 +228,48 @@ describe('there is no way to address another agent', () => {
     expect(md).toContain('no account yet') // the offer is back
     expect(fs.existsSync(skill())).toBe(true) // the manual stays installed
     expect(out.stdout).toContain('key is no longer registered')
+  })
+
+  it('logout under a non-default api_base still removes the MCP entry: the pre-clear identity names the server', async () => {
+    // The hole: credentials cleared first, base guessed afterwards → the entry
+    // at the real base looked foreign and the key stayed in .claude.json.
+    giveClaudeAnIdentity() // api_base http://127.0.0.1:9 in the FILE, nothing in the environment
+    expect((await run([], { AGENTCHAT_API_BASE: '' })).code).toBe(0)
+    expect(mcpEntry()).toMatchObject({ url: 'http://127.0.0.1:9/mcp' })
+
+    const out = await run(['logout'], { AGENTCHAT_API_BASE: '' })
+    expect(out.code, out.stdout + out.stderr).toBe(0)
+    expect(mcpEntry()).toBeUndefined()
+    expect(out.stdout).toContain('key is no longer registered')
+  })
+
+  it('logout recognises our entry by the key when the URL differs, and leaves a true foreign entry alone', async () => {
+    giveClaudeAnIdentity()
+    fs.writeFileSync(
+      fakeClaude.relocatedUserState,
+      JSON.stringify({ mcpServers: { agentchat: { type: 'http', url: 'http://moved.example/mcp', headers: { Authorization: `Bearer ${KEY}` } } } }),
+    )
+    expect((await run(['logout'])).code).toBe(0)
+    expect(mcpEntry()).toBeUndefined()
+
+    giveClaudeAnIdentity()
+    fs.writeFileSync(
+      fakeClaude.relocatedUserState,
+      JSON.stringify({ mcpServers: { agentchat: { type: 'http', url: 'http://someone-else.example/mcp', headers: { Authorization: 'Bearer other' } } } }),
+    )
+    const out = await run(['logout'])
+    expect(out.code).toBe(0)
+    expect(mcpEntry()).toMatchObject({ url: 'http://someone-else.example/mcp' })
+    expect(out.stdout).toContain('left untouched')
+  })
+
+  it('uninstall under a non-default api_base removes the MCP entry too', async () => {
+    giveClaudeAnIdentity()
+    expect((await run([], { AGENTCHAT_API_BASE: '' })).code).toBe(0)
+    const out = await run(['uninstall'], { AGENTCHAT_API_BASE: '' })
+    expect(out.code, out.stdout + out.stderr).toBe(0)
+    expect(mcpEntry()).toBeUndefined()
+    expect(fs.existsSync(creds())).toBe(true)
   })
 
   it('uninstall removes the integration and preserves the identity file', async () => {

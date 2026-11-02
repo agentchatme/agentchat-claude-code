@@ -3,6 +3,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { log, spawnCommandSync, type RunProfile } from '@agentchatme/agent-core'
 import { spawnRun, type RunOutcome, type RunRequest, type RunRunner } from '@agentchatme/agent-core/daemon'
+import { claudeUserStatePathFor, identityHomeFor } from './host.js'
 import { claudeRunArgs } from './profile.js'
 import { MIN_CLAUDE_CODE_VERSION, semverAtLeast } from './runtime-version.js'
 
@@ -29,9 +30,11 @@ export const PARENT_ENV_KEYS = [
 
 /**
  * How long the first turn of a `-p` run waits for a still-connecting MCP
- * server that `--allowedTools` names (`CLAUDE_CODE_MCP_STARTUP_WAIT_MS`,
- * default 2 s per the Claude Code changelog). A remote server over a cold
- * network can take longer; the run must not start without the inbox tool.
+ * server that `--allowedTools` names: `CLAUDE_CODE_MCP_STARTUP_WAIT_MS`, in
+ * Claude Code since 2.1.274 (the floor in runtime-version.ts). Claude Code's
+ * own built-in wait is short — 2.1.284 made the first turn "still wait up to
+ * 2s" even when the variable is 0 — and a remote server over a cold network
+ * can take longer; the run must not start without the inbox tool.
  */
 const MCP_STARTUP_WAIT_MS = '15000'
 
@@ -105,7 +108,7 @@ export function inspectClaudeRuntime(configDirOverride?: string, command = 'clau
     ? { ok: true, detail: rendered }
     : {
         ok: false,
-        detail: `${rendered || 'unrecognized version'}; AgentChat requires Claude Code >= ${MIN_CLAUDE_CODE_VERSION} (for --permission-prompts none)`,
+        detail: `${rendered || 'unrecognized version'}; AgentChat requires Claude Code >= ${MIN_CLAUDE_CODE_VERSION} (for --permission-prompts none and CLAUDE_CODE_MCP_STARTUP_WAIT_MS)`,
       }
 }
 
@@ -141,6 +144,10 @@ export class ClaudeRunner implements RunRunner {
   args(): string[] {
     return claudeRunArgs(this.options.profile, {
       maxBudgetUsd: (this.options.env ?? process.env)['AGENTCHAT_RUN_MAX_BUDGET_USD'],
+      // The key store: the identity home (credentials, status, logs) and
+      // ~/.claude.json, where the user-scope MCP entry carries the key. A run
+      // judging peer text must not be able to read either and send it.
+      denyReadPaths: [identityHomeFor(this.options.configDir), claudeUserStatePathFor(this.options.configDir)],
     })
   }
 
@@ -154,6 +161,9 @@ export class ClaudeRunner implements RunRunner {
       env: buildClaudeEnv(this.options.configDir, this.options.env ?? process.env),
       stdin: request.prompt,
       budgetMs: request.budgetMs,
+      // The doorbell stopping (shutdown, identity change, refused key)
+      // SIGTERMs this run's process group instead of orphaning it.
+      ...(request.signal ? { signal: request.signal } : {}),
     })
   }
 }

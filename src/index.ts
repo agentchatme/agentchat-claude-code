@@ -12,7 +12,7 @@ import {
   serviceStatus,
   doorbellDisabled,
 } from '@agentchatme/agent-core'
-import { identityHome, invocation, SERVICE_LABEL, LABEL } from './host.js'
+import { identityHome, invocation, serviceLabel, LABEL } from './host.js'
 import { formatPlacement, placeAll, removePlacement } from './placement.js'
 import { currentPlacementIdentity, runRegister, runLogin, runRecover, runStatus, runLogout, runDoctor, runNotNow } from './identity.js'
 import { inspectClaudeRuntime } from './runner.js'
@@ -27,7 +27,7 @@ Usage:
   ${invocation()} register --email <e> --handle <h>
   ${invocation()} register --code <6-digit-code>
   ${invocation()} register --not-now                stop offering to set this up
-  ${invocation()} login --api-key <ac_…>           already have an account
+  ${invocation()} login --api-key -                 already have an account: key on stdin (or AGENTCHAT_API_KEY=…, or --api-key <ac_…>)
   ${invocation()} recover --handle <h> --email <e>  lost your key (rotates it; --handle defaults to yours)
   ${invocation()} recover --code <6-digit-code>
   ${invocation()} status [--json]
@@ -175,7 +175,7 @@ function runInstall(): number {
       ...(failed
         ? [`  ✗ service: not registered until the failed step above is resolved — re-run \`${invocation()}\``]
         : service === 'enabled'
-          ? [`  ✓ service: doorbell daemon registered (${SERVICE_LABEL}); profile ${profile}${doorbellDisabled() ? '; AGENTCHAT_DOORBELL=off — holding no socket' : ''}`]
+          ? [`  ✓ service: doorbell daemon registered (${serviceLabel()}); profile ${profile}${doorbellDisabled() ? '; AGENTCHAT_DOORBELL=off — holding no socket' : ''}`]
           : service === 'off-by-choice'
             ? ['  ○ service: doorbell daemon off (your choice; `daemon install` turns it on)']
             : [`  ✗ service: could not be registered (${serviceDetail}) — \`${invocation()} daemon install\` retries it`]),
@@ -248,13 +248,18 @@ function runDaemonCmd(sub: string | undefined): number {
         return 1
       }
       console.log(
-        `Doorbell daemon is ON for ${LABEL} (${SERVICE_LABEL}): a peer's message starts one headless Claude Code run with profile ${resolveRunProfile()} while this machine is up.${doorbellDisabled() ? ' AGENTCHAT_DOORBELL=off was captured: it holds no socket until re-installed without it.' : ''}`,
+        `Doorbell daemon is ON for ${LABEL} (${serviceLabel()}): a peer's message starts one headless Claude Code run with profile ${resolveRunProfile()} while this machine is up.${doorbellDisabled() ? ' AGENTCHAT_DOORBELL=off was captured: it holds no socket until re-installed without it.' : ''}`,
       )
       return 0
     }
     case 'disable':
     case 'uninstall': {
-      removeDoorbellService()
+      try {
+        removeDoorbellService()
+      } catch (err) {
+        console.error(`Could not turn off the doorbell daemon: ${String(err instanceof Error ? err.message : err)}`)
+        return 1
+      }
       clearAlwaysOnWanted(home)
       markAlwaysOnOptOut(home)
       console.log(`Doorbell daemon is OFF for ${LABEL} — messages stay stored on the server; the hosted tools and the manual still work in every session.`)
@@ -269,7 +274,7 @@ function runDaemonCmd(sub: string | undefined): number {
         connected: 'daemon: connected ✓ — holding the socket',
         down: 'daemon: NOT running — signed in, but nothing is holding the socket',
       }[state]
-      console.log([serviceStatus({ label: SERVICE_LABEL, home }), line, ...formatDoorbellStatus(readDoorbellStatus(home))].join('\n'))
+      console.log([serviceStatus({ label: serviceLabel(), home }), line, ...formatDoorbellStatus(readDoorbellStatus(home))].join('\n'))
       return 0
     }
     default:

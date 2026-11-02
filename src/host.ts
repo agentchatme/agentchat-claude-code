@@ -1,6 +1,6 @@
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { MANUAL_FILENAME, MANUAL_SKILL_NAME } from '@agentchatme/agent-core'
+import { MANUAL_FILENAME, MANUAL_SKILL_NAME, serviceLabelFor } from '@agentchatme/agent-core'
 
 // ─── The only file in this repo that knows a host exists ────────────────────
 //
@@ -69,7 +69,25 @@ export function skillPath(): string {
 }
 
 export const LABEL = 'Claude Code'
-export const SERVICE_LABEL = 'agentchatd-claude-code'
+
+/** The service label of the default config (`~/.claude`) — the label every install before per-home labels used. */
+export const SERVICE_BASE_LABEL = 'agentchatd-claude-code'
+
+/**
+ * The doorbell service's label for THIS config. `launchctl` / `systemctl
+ * --user` address the user's domain whatever HOME or CLAUDE_CONFIG_DIR say, so
+ * a relocated config dir gets its own label (`agentchatd-claude-code-<8 hex>`)
+ * and can never address the default config's service; `~/.claude` keeps the
+ * plain label, so existing installs keep working.
+ */
+export function serviceLabel(): string {
+  return serviceLabelFor(SERVICE_BASE_LABEL, identityHome(), identityHomeFor(undefined))
+}
+
+/** Labels this config's service replaces: a relocated config was installed under the plain label before. */
+export function supersededServiceLabels(): string[] {
+  return serviceLabel() === SERVICE_BASE_LABEL ? [] : [SERVICE_BASE_LABEL]
+}
 
 /**
  * The user-scope MCP server name. Changing it changes every tool name the

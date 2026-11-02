@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { execFile, spawn } from 'node:child_process'
+import * as crypto from 'node:crypto'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
@@ -160,5 +161,72 @@ describe('daemon install points the service at the daemon, not the CLI', () => {
     const { code, out } = await run(CLI, ['hook', 'session-start'])
     expect(code).toBe(1)
     expect(out).toContain('Unknown command: hook')
+  })
+})
+
+// ─── One service per config dir; never touch another config's service ───────
+//
+// Live-fire E5: the label was global, so a relocated CLAUDE_CONFIG_DIR (a
+// sandbox) reported the machine's real service as its own, and `uninstall`
+// there would have removed it. Everything here runs with
+// AGENTCHAT_SERVICE_DRY_RUN=1 and a temp HOME: only definition files move.
+
+const serviceOs = process.platform === 'darwin' || process.platform === 'linux'
+
+function definitionPath(label: string): string {
+  return process.platform === 'darwin'
+    ? path.join(sandbox, 'Library', 'LaunchAgents', `me.agentchat.${label}.plist`)
+    : path.join(sandbox, '.config', 'systemd', 'user', `${label}.service`)
+}
+
+function writeForeignDefinition(label: string, home: string): string {
+  const file = definitionPath(label)
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(
+    file,
+    process.platform === 'darwin'
+      ? `<plist version="1.0"><dict><key>Label</key><string>me.agentchat.${label}</string><key>ProgramArguments</key><array><string>/usr/bin/node</string><string>${home}/bin/agentchat-daemon.mjs</string><string>--home</string><string>${home}</string></array></dict></plist>\n`
+      : `[Service]\nExecStart="/usr/bin/node" "${home}/bin/agentchat-daemon.mjs" --home "${home}"\n`,
+  )
+  return file
+}
+
+describe.skipIf(!serviceOs)('the service label follows the config dir', () => {
+  it('~/.claude keeps agentchatd-claude-code; a relocated CLAUDE_CONFIG_DIR gets its own hashed label', async () => {
+    expect((await run(CLI, ['daemon', 'install'])).out).toContain('(agentchatd-claude-code)')
+    expect(fs.existsSync(definitionPath('agentchatd-claude-code'))).toBe(true)
+
+    const cfg = path.join(sandbox, 'relocated-claude')
+    const label = `agentchatd-claude-code-${crypto.createHash('sha256').update(path.resolve(cfg, 'agentchat')).digest('hex').slice(0, 8)}`
+    const installed = await run(CLI, ['daemon', 'install'], { CLAUDE_CONFIG_DIR: cfg })
+    expect(installed.out).toContain(`(${label})`)
+    expect(fs.existsSync(definitionPath(label))).toBe(true)
+    const status = await run(CLI, ['daemon', 'status'], { CLAUDE_CONFIG_DIR: cfg })
+    expect(status.out).toContain(label)
+    // Dry run: the service manager is not consulted, so the machine's real
+    // service can never be reported as this config's.
+    expect(status.out).toContain('not queried (AGENTCHAT_SERVICE_DRY_RUN)')
+    expect(status.out).not.toMatch(/: loaded/)
+  })
+
+  it('uninstall refuses a definition under this label that serves another config, and leaves it in place', async () => {
+    const foreign = writeForeignDefinition('agentchatd-claude-code', '/Users/someone-else/.claude/agentchat')
+    const { code, out } = await run(CLI, ['daemon', 'uninstall'])
+    expect(code).toBe(1)
+    expect(out).toMatch(/refusing to remove .* serves \/Users\/someone-else\/\.claude\/agentchat/)
+    expect(out).not.toMatch(/Doorbell daemon is OFF/)
+    expect(fs.existsSync(foreign)).toBe(true)
+  })
+
+  it('installing a relocated config retires its own pre-upgrade plain-label service, never another config’s', async () => {
+    const cfg = path.join(sandbox, 'relocated-claude')
+    const home = path.resolve(cfg, 'agentchat')
+    const legacy = writeForeignDefinition('agentchatd-claude-code', home) // installed before labels were per config
+    await run(CLI, ['daemon', 'install'], { CLAUDE_CONFIG_DIR: cfg })
+    expect(fs.existsSync(legacy)).toBe(false)
+
+    const other = writeForeignDefinition('agentchatd-claude-code', path.join(sandbox, '.claude', 'agentchat'))
+    await run(CLI, ['daemon', 'install'], { CLAUDE_CONFIG_DIR: cfg })
+    expect(fs.existsSync(other)).toBe(true)
   })
 })

@@ -48,7 +48,7 @@ jobs:
           # RESIDENT means it is still running after 6s. The old daemon exited
           # here, and a check that waited for an exit hung this job instead.
           [ "$alive" = "1" ] || { echo "::error::the daemon exited instead of idling"; exit 1; }
-          grep -q "always-on resident" "$out" || { echo "::error::the daemon did not come up"; exit 1; }
+          grep -q "doorbell resident" "$out" || { echo "::error::the daemon did not come up"; exit 1; }
           if grep -qE "Unknown option|Dynamic require|Cannot find module" "$out"; then
             echo "::error::the daemon failed at startup"; exit 1
           fi

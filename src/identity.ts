@@ -1,61 +1,40 @@
-import * as fs from 'node:fs'
 import * as path from 'node:path'
 import {
   alwaysOnOptedOut,
   alwaysOnState,
-  alwaysOnWanted,
   createIdentityCommands,
-  readAlwaysOnInstalledVersion,
+  doorbellStatusAge,
+  probeHostedMcp,
   readCredentials,
+  readDoorbellStatus,
   recordOfferDeclined,
+  renderAnchorBlock,
   renderDeclinedBlock,
-  serviceDefinitionCurrent,
-  serviceInstalled,
+  resolveIdentity,
   writeAnchor,
-  spawnCommandSync,
   type DoctorCheck,
+  type DoctorOpts,
   type HostProfile,
 } from '@agentchatme/agent-core'
-import {
-  identityHome,
-  anchorFile,
-  claudeConfigOverride,
-  claudeHome,
-  invocation,
-  LABEL,
-  SERVICE_LABEL,
-  serviceEnv,
-} from './host.js'
-import {
-  inspectClaudeMcp,
-  inspectCurrentProjectMcp,
-  inspectClaudeRuntime,
-  installClaude,
-  isClaudeWired,
-  manualPath,
-  renderClaudeAgents,
-  settingsPath,
-  stableBundlePath,
-  stableDaemonPath,
-} from './wiring.js'
-import { AGENTCHAT_MCP_PACKAGE, claudeIsLoggedIn } from './adapter.js'
-import { ensureAlwaysOn } from './always-on.js'
+import { identityHome, anchorFile, claudeConfigOverride, invocation, LABEL } from './host.js'
+import { checkPlacement, placeAll, skillIsCurrent, unplaceIdentity, type PlacementIdentity } from './placement.js'
+import { claudeIsLoggedIn, inspectClaudeRuntime } from './runner.js'
+import { doorbellServiceCurrent, ensureDoorbellService } from './service.js'
 import { VERSION } from './version.js'
 
 // ─── This agent, described once ─────────────────────────────────────────────
 //
 // register / login / recover / status / logout / doctor are a contract with the
-// AgentChat server — the pending-state machine, the error vocabulary, what a
-// credential file holds — so the flows live in @agentchatme/agent-core and this
-// file only says which agent they act on.
-//
-// It used to be ~510 lines here and ~515 in the Codex integration, 94%
-// identical, and they had already drifted: this copy reported `"host": "codex"`
-// in `status --json`.
-//
-// Sharing the flow does not weaken the guarantee. A profile can only describe
-// its OWN agent — there is no field naming another host, and nothing here reads
-// a `--platform`. The commands built from it can reach exactly one home.
+// AgentChat server, so the flows live in @agentchatme/agent-core and this file
+// only says which agent they act on and how to PLACE for it: every time the key
+// changes, the hosted MCP entry is re-registered with the new key, the manual is
+// refreshed and the identity line rewritten.
+
+export function currentPlacementIdentity(): PlacementIdentity | null {
+  const identity = resolveIdentity(identityHome())
+  if (identity === null || identity.handle === null) return null
+  return { handle: identity.handle, apiKey: identity.apiKey, apiBase: identity.apiBase }
+}
 
 const profile: HostProfile = {
   label: LABEL,
@@ -63,17 +42,16 @@ const profile: HostProfile = {
   home: identityHome,
   anchorFile,
   invocation,
-  renderAnchor: renderClaudeAgents,
-  isWired: isClaudeWired,
-  logoutHints: () => [
-    `To remove the integration too, run \`${invocation()} uninstall\`.`,
-  ],
-  extraDoctorChecks: (opts): DoctorCheck[] => [
-    ...runtimeChecks(),
-    wiringCheck(opts.fix === true),
-    projectMcpCheck(),
-    alwaysOnCheck(opts.fix === true),
-  ],
+  renderAnchor: renderAnchorBlock,
+  isWired: skillIsCurrent,
+  place: (handle, apiKey) => {
+    const identity = resolveIdentity(identityHome())
+    const steps = placeAll({ handle, apiKey, apiBase: identity?.apiBase ?? 'https://api.agentchat.me' })
+    return steps.map((s) => `  ${s.status === 'failed' ? 'FAILED' : s.name}: ${s.detail}`)
+  },
+  unplace: () => unplaceIdentity(process.env['AGENTCHAT_API_BASE']?.trim() || 'https://api.agentchat.me').map((s) => `  ${s.name}: ${s.detail}`),
+  logoutHints: () => [`To remove the integration too, run \`${invocation()} uninstall\`.`],
+  extraDoctorChecks: (opts): DoctorCheck[] => [...runtimeChecks(), ...placementChecks(opts.fix === true), serviceCheck(opts.fix === true), doorbellCheck()],
 }
 
 function concise(value: string): string {
@@ -81,139 +59,73 @@ function concise(value: string): string {
 }
 
 function runtimeChecks(): DoctorCheck[] {
-  const npx = spawnCommandSync('npx', ['--version'], {
-    encoding: 'utf-8',
-    timeout: 5_000,
-    windowsHide: true,
-  })
-  const mcpRunner: DoctorCheck = {
-    name: 'mcp-runner',
-    verdict: !npx.error && npx.status === 0 ? 'PASS' : 'FAIL',
-    detail:
-      !npx.error && npx.status === 0
-        ? `npx ${concise(npx.stdout || npx.stderr)}`
-        : npx.error?.message ?? `npx exited ${npx.status}`,
-  }
-  const version = inspectClaudeRuntime()
+  const version = inspectClaudeRuntime(claudeConfigOverride())
   if (!version.ok) {
     return [
-      {
-        name: 'claude-cli',
-        verdict: 'FAIL',
-        detail: version.detail,
-      },
+      { name: 'claude-cli', verdict: 'FAIL', detail: version.detail },
       { name: 'claude-auth', verdict: 'FAIL', detail: 'cannot check until the Claude CLI works' },
-      mcpRunner,
     ]
   }
   const authenticated = claudeIsLoggedIn(claudeConfigOverride())
   return [
-    {
-      name: 'claude-cli',
-      verdict: 'PASS',
-      detail: concise(version.detail) || 'available',
-    },
+    { name: 'claude-cli', verdict: 'PASS', detail: concise(version.detail) || 'available' },
     {
       name: 'claude-auth',
       verdict: authenticated ? 'PASS' : 'FAIL',
-      detail: authenticated
-        ? 'Claude Code is authenticated for autonomous turns'
-        : 'Claude Code is not authenticated',
+      detail: authenticated ? 'Claude Code is signed in; headless runs can start' : 'Claude Code is not signed in — run `claude` once and sign in',
     },
-    mcpRunner,
   ]
 }
 
-function wiringCheck(fix: boolean): DoctorCheck {
-  const current = (): boolean =>
-    isClaudeWired() &&
-    fs.existsSync(settingsPath()) &&
-    fs.existsSync(stableBundlePath()) &&
-    fs.existsSync(manualPath())
-
-  if (fix && !current()) {
-    try {
-      const repaired = installClaude(readCredentials(identityHome())?.handle ?? null)
-      if (!repaired.complete) {
-        return {
-          name: 'wiring',
-          verdict: 'FAIL',
-          detail: repaired.warnings.join('; ') || 'repair did not complete',
-        }
-      }
-    } catch (err) {
-      return { name: 'wiring', verdict: 'FAIL', detail: `repair failed: ${String(err)}` }
-    }
-  }
-
-  if (current()) {
-    return {
-      name: 'wiring',
-      verdict: 'PASS',
-      detail: `current user MCP (${AGENTCHAT_MCP_PACKAGE}), four lifecycle hooks, bundle and manual`,
-    }
-  }
-
-  const mcp = inspectClaudeMcp()
-  return {
-    name: 'wiring',
-    verdict: 'FAIL',
-    detail:
-      `missing or stale direct integration (${mcp.detail}) — ` +
-      `run \`${invocation()}${fix ? '' : ' doctor --fix'}\``,
-  }
+function placementChecks(fix: boolean): DoctorCheck[] {
+  const identity = currentPlacementIdentity()
+  if (fix) placeAll(identity)
+  const checks: DoctorCheck[] = checkPlacement(identity)
+    .filter((c) => c.name !== 'identity') // the shared doctor already reports the identity line
+    .map((c) => ({ name: c.name === 'mcp' ? 'hosted-mcp' : c.name, verdict: c.ok ? 'PASS' : c.name === 'legacy' ? 'WARN' : identity ? 'FAIL' : 'WARN', detail: c.ok ? c.detail : `${c.detail} — run \`${invocation()}${fix ? '' : ' doctor --fix'}\`` }))
+  return checks
 }
 
-function projectMcpCheck(): DoctorCheck {
-  const availability = inspectCurrentProjectMcp()
-  return {
-    name: 'project-mcp',
-    verdict: availability.state === 'clear' ? 'PASS' : 'FAIL',
-    detail: availability.detail,
-  }
+/** One MCP `initialize` with the key: can this agent's tools be reached from here? */
+export async function hostedMcpReachCheck(): Promise<DoctorCheck> {
+  const identity = currentPlacementIdentity()
+  if (identity === null) return { name: 'hosted-mcp-reach', verdict: 'WARN', detail: 'no identity — nothing to probe with' }
+  const probe = await probeHostedMcp({ apiKey: identity.apiKey, apiBase: identity.apiBase, clientName: '@agentchatme/claude-code doctor', clientVersion: VERSION })
+  return probe.ok
+    ? { name: 'hosted-mcp-reach', verdict: 'PASS', detail: `initialize ok${probe.serverName ? ` (${probe.serverName}${probe.serverVersion ? ` ${probe.serverVersion}` : ''})` : ''}` }
+    : { name: 'hosted-mcp-reach', verdict: 'FAIL', detail: probe.error ?? `HTTP ${probe.status ?? '?'}` }
 }
 
-function alwaysOnCheck(fix: boolean): DoctorCheck {
+function serviceCheck(fix: boolean): DoctorCheck {
   const home = identityHome()
-  if (alwaysOnOptedOut(home)) {
-    return { name: 'always-on', verdict: 'PASS', detail: 'disabled by the user' }
+  if (alwaysOnOptedOut(home)) return { name: 'service', verdict: 'PASS', detail: 'disabled by the user (`daemon install` re-enables)' }
+  if (fix && !doorbellServiceCurrent()) {
+    const repaired = ensureDoorbellService()
+    if (!repaired.ok) return { name: 'service', verdict: 'FAIL', detail: `repair failed: ${repaired.detail ?? 'unknown error'}` }
   }
-  const service = {
-    label: SERVICE_LABEL,
-    home,
-    entry: stableDaemonPath(),
-    env: serviceEnv(),
-  }
-  const current = (): boolean =>
-    alwaysOnWanted(home) &&
-    fs.existsSync(service.entry) &&
-    readAlwaysOnInstalledVersion(home) === VERSION &&
-    serviceInstalled(service) &&
-    serviceDefinitionCurrent(service)
-
-  if (fix && isClaudeWired() && !current()) {
-    const repaired = ensureAlwaysOn()
-    if (!repaired.ok) {
-      return {
-        name: 'always-on',
-        verdict: 'FAIL',
-        detail: `repair failed: ${repaired.detail ?? 'unknown error'}`,
-      }
-    }
-  }
-  if (!current()) {
-    return {
-      name: 'always-on',
-      verdict: isClaudeWired() ? 'FAIL' : 'WARN',
-      detail: `service, durable bundle or version marker is missing/stale — run \`${invocation()} doctor --fix\``,
-    }
+  if (!doorbellServiceCurrent()) {
+    return { name: 'service', verdict: 'WARN', detail: `service, durable daemon bundle or version marker is missing/stale — run \`${invocation()} doctor --fix\`` }
   }
   const state = alwaysOnState(home)
-  return {
-    name: 'always-on',
-    verdict: state === 'down' ? 'FAIL' : 'PASS',
-    detail: `${state}; service definition and daemon bundle match ${VERSION}`,
+  return { name: 'service', verdict: state === 'down' ? 'FAIL' : 'PASS', detail: `${state}; service definition and daemon bundle match ${VERSION}` }
+}
+
+function doorbellCheck(): DoctorCheck {
+  const home = identityHome()
+  if (readCredentials(home) === null) return { name: 'doorbell', verdict: 'PASS', detail: 'no identity — the daemon idles by design' }
+  const status = readDoorbellStatus(home)
+  if (status === null) return { name: 'doorbell', verdict: 'WARN', detail: 'no status written yet — the daemon has not run, or is still starting' }
+  const age = doorbellStatusAge(status) ?? Number.POSITIVE_INFINITY
+  if (age > 3 * 60_000) return { name: 'doorbell', verdict: 'FAIL', detail: `status last written ${Math.round(age / 60_000)} min ago — the daemon is not running` }
+  if (status.socket === 'off') return { name: 'doorbell', verdict: 'PASS', detail: 'AGENTCHAT_DOORBELL=off — resident, holding no socket' }
+  if (status.socket === 'ready') {
+    return {
+      name: 'doorbell',
+      verdict: status.ack_negotiated === false ? 'WARN' : 'PASS',
+      detail: `socket ready, ack ${status.ack_negotiated === null ? 'pending' : status.ack_negotiated ? 'negotiated' : 'NOT echoed'}, ${status.knocks} knock(s), ${status.runs_started} run(s) (${status.runs_ok} ok), profile ${status.profile}`,
+    }
   }
+  return { name: 'doorbell', verdict: 'WARN', detail: `socket ${status.socket}${status.last_error ? ` — ${status.last_error}` : ''}` }
 }
 
 const commands = createIdentityCommands(profile)
@@ -228,24 +140,32 @@ export function runNotNow(): number {
     console.error(`Recorded, but could not update ${path.basename(anchorFile())}: ${String(err)}`)
     return 1
   }
-  console.log(
-    [
-      `Noted — ${LABEL} will not ask about AgentChat again.`,
-      `Changed your mind? ${invocation()} register --email <email> --handle <handle>`,
-    ].join('\n'),
-  )
+  console.log([`Noted — ${LABEL} will not ask about AgentChat again.`, `Changed your mind? ${invocation()} register --email <email> --handle <handle>`].join('\n'))
   return 0
 }
 
-export const {
-  runRegister,
-  runLogin,
-  runRecover,
-  runStatus,
-  runAutonomy,
-  runPendingRequests,
-  runLogout,
-  runDoctor,
-} = commands
+export const { runRegister, runLogin, runRecover, runLogout } = commands
+
+/** The shared status, then the placement checks and the hosted-MCP probe the brief asks status to show. */
+export async function runStatus(opts: { json?: boolean }): Promise<number> {
+  const code = await commands.runStatus(opts)
+  if (opts.json) return code
+  const identity = currentPlacementIdentity()
+  const checks = checkPlacement(identity)
+  console.log('Placement:')
+  for (const c of checks) console.log(`  ${c.ok ? '✓' : '✗'} ${c.name}: ${c.detail}`)
+  if (identity) {
+    const reach = await hostedMcpReachCheck()
+    console.log(`  ${reach.verdict === 'PASS' ? '✓' : '✗'} hosted MCP: ${reach.detail}`)
+  }
+  return code
+}
+
+export async function runDoctor(opts: DoctorOpts = {}): Promise<number> {
+  const base = await commands.runDoctor(opts)
+  const reach = await hostedMcpReachCheck()
+  console.log(`${reach.verdict.padEnd(4)} ${reach.name}: ${reach.detail}`)
+  return base !== 0 || reach.verdict === 'FAIL' ? 1 : 0
+}
 
 export type { RegisterOpts, DoctorOpts } from '@agentchatme/agent-core'

@@ -7,6 +7,7 @@ import {
   formatDoorbellStatus,
   markAlwaysOnOptOut,
   readDoorbellStatus,
+  resolveIdentity,
   resolveRunProfile,
   serviceStatus,
   doorbellDisabled,
@@ -201,8 +202,13 @@ function runUninstall(): number {
   // Remembered, so no later install or upgrade quietly switches it back on.
   markAlwaysOnOptOut(home)
 
-  const identity = currentPlacementIdentity()
-  const steps = removePlacement(identity?.apiBase ?? process.env['AGENTCHAT_API_BASE']?.trim() ?? 'https://api.agentchat.me')
+  // The credential is preserved by uninstall, so it is still readable here;
+  // the MCP entry is recognised by its key and its server.
+  const identity = resolveIdentity(identityHome())
+  const steps = removePlacement({
+    apiKey: identity?.apiKey ?? null,
+    apiBase: identity?.apiBase ?? process.env['AGENTCHAT_API_BASE']?.trim() ?? 'https://api.agentchat.me',
+  })
   for (const step of steps) if (step.status === 'failed') warnings.push(step.detail)
   // The durable daemon bundle goes only once the service is verifiably gone:
   // deleting a binary a still-loaded restart policy points to creates a

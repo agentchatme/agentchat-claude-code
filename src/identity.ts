@@ -49,7 +49,13 @@ const profile: HostProfile = {
     const steps = placeAll({ handle, apiKey, apiBase: identity?.apiBase ?? 'https://api.agentchat.me' })
     return steps.map((s) => `  ${s.status === 'failed' ? 'FAILED' : s.name}: ${s.detail}`)
   },
-  unplace: () => unplaceIdentity(process.env['AGENTCHAT_API_BASE']?.trim() || 'https://api.agentchat.me').map((s) => `  ${s.name}: ${s.detail}`),
+  // agent-core resolves the identity BEFORE it clears the credential and hands
+  // it here: the MCP entry is recognised by this key and this server.
+  unplace: (identity) =>
+    unplaceIdentity({
+      apiKey: identity?.apiKey ?? null,
+      apiBase: identity?.apiBase ?? process.env['AGENTCHAT_API_BASE']?.trim() ?? 'https://api.agentchat.me',
+    }).map((s) => `  ${s.name}: ${s.detail}`),
   logoutHints: () => [`To remove the integration too, run \`${invocation()} uninstall\`.`],
   extraDoctorChecks: (opts): DoctorCheck[] => [...runtimeChecks(), ...placementChecks(opts.fix === true), serviceCheck(opts.fix === true), doorbellCheck()],
 }

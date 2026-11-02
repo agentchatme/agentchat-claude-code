@@ -125,7 +125,13 @@ function isLegacyStdioEntry(entry: Record<string, unknown>): boolean {
   )
 }
 
-/** Classify the user-scope `agentchat` server. `apiKey` decides `currentKey`. */
+/**
+ * Classify the user-scope `agentchat` server. Ours when it is an HTTP entry at
+ * this identity's hosted MCP URL, OR one carrying this identity's key in its
+ * `Authorization` header — the key is the stronger evidence, and it is what
+ * keeps a non-default `api_base` registration from being left behind as
+ * "foreign" on logout. `apiKey` also decides `currentKey`.
+ */
 export function inspectHostedMcp(apiKey: string | null, apiBase: string): McpEntryState {
   let state: Record<string, unknown> | null
   try {
@@ -144,13 +150,14 @@ export function inspectHostedMcp(apiKey: string | null, apiBase: string): McpEnt
   if (isLegacyStdioEntry(record)) return { state: 'legacy' }
   const type = record['type']
   const url = record['url']
-  if ((type === 'http' || type === 'streamable-http') && url === hostedMcpUrl(apiBase)) {
-    const headers = record['headers']
-    const auth =
-      headers && typeof headers === 'object' && !Array.isArray(headers)
-        ? ((headers as Record<string, unknown>)['Authorization'] ?? (headers as Record<string, unknown>)['authorization'])
-        : undefined
-    const currentKey = apiKey !== null && typeof auth === 'string' && auth === `Bearer ${apiKey}`
+  const headers = record['headers']
+  const auth =
+    headers && typeof headers === 'object' && !Array.isArray(headers)
+      ? ((headers as Record<string, unknown>)['Authorization'] ?? (headers as Record<string, unknown>)['authorization'])
+      : undefined
+  const currentKey = apiKey !== null && typeof auth === 'string' && auth === `Bearer ${apiKey}`
+  const isHttp = type === 'http' || type === 'streamable-http'
+  if (isHttp && typeof url === 'string' && (url === hostedMcpUrl(apiBase) || currentKey)) {
     return { state: 'ours', url, currentKey }
   }
   return { state: 'foreign', detail: `the user-scope server named "agentchat" points at ${typeof url === 'string' ? url : 'a different command'} and is not this integration's` }
@@ -197,9 +204,15 @@ export function placeHostedMcp(identity: PlacementIdentity): PlacementStep {
   }
 }
 
+/** What `unplace` / uninstall know about the identity whose placement is undone. */
+export interface UnplaceIdentity {
+  readonly apiKey: string | null
+  readonly apiBase: string
+}
+
 /** Remove the entry when it is ours (hosted or legacy stdio). A foreign one is never touched. */
-export function removeHostedMcp(apiBase: string): PlacementStep {
-  const current = inspectHostedMcp(null, apiBase)
+export function removeHostedMcp(identity: UnplaceIdentity): PlacementStep {
+  const current = inspectHostedMcp(identity.apiKey, identity.apiBase)
   if (current.state === 'missing') return { name: 'mcp', status: 'ok', detail: 'no AgentChat MCP entry to remove' }
   if (current.state === 'foreign') return { name: 'mcp', status: 'skipped', detail: `${current.detail} — left untouched` }
   if (current.state === 'unavailable') return { name: 'mcp', status: 'failed', detail: current.detail }
@@ -413,19 +426,24 @@ export function placeAll(identity: PlacementIdentity | null): PlacementStep[] {
   return steps
 }
 
-/** Logout: the key leaves Claude Code; the manual and the skill stay. */
-export function unplaceIdentity(apiBase: string): PlacementStep[] {
-  const steps = [removeHostedMcp(apiBase)]
+/**
+ * Logout: the key leaves Claude Code; the manual and the skill stay.
+ * `identity` is the identity as it was BEFORE the credential was cleared
+ * (agent-core hands it over), so the entry is recognised by its key and its
+ * server rather than by a guessed default base.
+ */
+export function unplaceIdentity(identity: UnplaceIdentity): PlacementStep[] {
+  const steps = [removeHostedMcp(identity)]
   steps.push(placeOffer())
   return steps
 }
 
 /** Uninstall: everything this integration placed, the identity line included. */
-export function removePlacement(apiBase: string): PlacementStep[] {
+export function removePlacement(identity: UnplaceIdentity): PlacementStep[] {
   const steps: PlacementStep[] = []
   const legacy = removeLegacyWiring()
   if (legacy) steps.push(legacy)
-  steps.push(removeHostedMcp(apiBase))
+  steps.push(removeHostedMcp(identity))
   steps.push(removeSkill())
   steps.push({
     name: 'identity',

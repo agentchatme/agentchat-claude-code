@@ -5,47 +5,32 @@ import * as crypto from 'node:crypto'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
+import { MANUAL, IDENTITY_LINE_TEMPLATE } from '@agentchatme/agent-core'
 import { installFakeClaude, type FakeClaude } from './helpers/fake-claude.js'
 
 const exec = promisify(execFile)
-// Drives the publishable NPX bundle — the exact file the stable copy derives
-// from and Claude Code's direct hooks run.
+// Drives the publishable NPX bundle — the exact file users run.
 const BIN = path.join(__dirname, '..', 'dist', 'index.js')
 
-// ─── This binary can only act on Claude Code ────────────────────────────────
+// ─── Placement, through the CLI, against a fake Claude Code ─────────────────
 //
-// The property is structural, not defensive. The host is a compile-time fact
-// of this package: no `--platform` option exists, no host detection, and no
-// branch that could resolve another agent's home.
-//
-// Its predecessor was one CLI serving every coding agent, whose commands had
-// to choose a host. They chose wrong: registering one agent rewrote another's
-// instruction file, and logout deleted both agents' credentials. Those bugs
-// are not fixed here — they are unwritable.
+// The host is a compile-time fact of this package: no `--platform`, no host
+// detection, no branch that could resolve another agent's home. A fully set-up
+// Codex agent shares the sandbox and must be byte-identical after every command.
 
 let sandbox: string
 let fakeClaude: FakeClaude
+const KEY = 'ac_live_' + 'a'.repeat(40)
 
 beforeEach(() => {
   sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-integration-'))
   fs.mkdirSync(path.join(sandbox, '.claude'), { recursive: true })
   fakeClaude = installFakeClaude(sandbox)
-  // A fully set-up Codex agent sharing the machine.
   fs.mkdirSync(path.join(sandbox, '.codex', 'agentchat'), { recursive: true })
-  fs.writeFileSync(
-    path.join(sandbox, '.codex', 'agentchat', 'credentials'),
-    JSON.stringify({ api_key: 'ac_live_' + 'c'.repeat(40), handle: 'codex-agent' }),
-  )
-  fs.writeFileSync(
-    path.join(sandbox, '.codex', 'AGENTS.md'),
-    '<!-- agentchat:start -->\nYou are **@codex-agent** on AgentChat.\n<!-- agentchat:end -->\n',
-  )
-  fs.writeFileSync(
-    path.join(sandbox, '.codex', 'config.toml'),
-    '[model]\nname = "o4"\n\n# agentchat:start\n[mcp_servers.agentchat]\n# agentchat:end\n',
-  )
+  fs.writeFileSync(path.join(sandbox, '.codex', 'agentchat', 'credentials'), JSON.stringify({ api_key: 'ac_live_' + 'c'.repeat(40), handle: 'codex-agent' }))
+  fs.writeFileSync(path.join(sandbox, '.codex', 'AGENTS.md'), '<!-- agentchat:start -->\nI am @codex-agent on AgentChat (api.agentchat.me).\n<!-- agentchat:end -->\n')
+  fs.writeFileSync(path.join(sandbox, '.codex', 'config.toml'), '[model]\nname = "o4"\n\n# agentchat:start\n[mcp_servers.agentchat]\n# agentchat:end\n')
 })
-
 afterEach(() => fs.rmSync(sandbox, { recursive: true, force: true }))
 
 function snapshot(dir: string): Record<string, string> {
@@ -62,10 +47,7 @@ function snapshot(dir: string): Record<string, string> {
   return out
 }
 
-async function run(
-  args: string[],
-  env: Record<string, string> = {},
-): Promise<{ code: number; stdout: string; stderr: string }> {
+async function run(args: string[], env: Record<string, string> = {}): Promise<{ code: number; stdout: string; stderr: string }> {
   try {
     const { stdout, stderr } = await exec(process.execPath, [BIN, ...args], {
       env: {
@@ -90,16 +72,139 @@ async function run(
 }
 
 const codexDir = (): string => path.join(sandbox, '.codex')
-const claudeCreds = (): string => path.join(sandbox, '.claude', 'agentchat', 'credentials')
+const home = (): string => path.join(sandbox, '.claude', 'agentchat')
+const creds = (): string => path.join(home(), 'credentials')
+const claudeMd = (): string => path.join(sandbox, '.claude', 'CLAUDE.md')
+const skill = (): string => path.join(sandbox, '.claude', 'skills', 'agentchat', 'SKILL.md')
+const userState = (): Record<string, unknown> => JSON.parse(fs.readFileSync(fakeClaude.relocatedUserState, 'utf-8')) as Record<string, unknown>
+const mcpEntry = (): Record<string, unknown> | undefined => (userState()['mcpServers'] as Record<string, Record<string, unknown>> | undefined)?.['agentchat']
 
 function giveClaudeAnIdentity(): void {
-  fs.mkdirSync(path.join(sandbox, '.claude', 'agentchat'), { recursive: true })
-  fs.writeFileSync(claudeCreds(), JSON.stringify({ api_key: 'ac_live_' + 'a'.repeat(40), handle: 'claude-agent' }))
-  fs.writeFileSync(
-    path.join(sandbox, '.claude', 'CLAUDE.md'),
-    '# My notes\n\n<!-- agentchat:start -->\nYou are **@claude-agent** on AgentChat.\n<!-- agentchat:end -->\n',
-  )
+  fs.mkdirSync(home(), { recursive: true })
+  fs.writeFileSync(creds(), JSON.stringify({ api_key: KEY, handle: 'claude-agent', api_base: 'http://127.0.0.1:9' }))
 }
+
+describe('install places the four texts', () => {
+  it('without an identity: the manual as a skill, the setup offer in CLAUDE.md, no MCP entry (no key yet), the service registered', async () => {
+    const out = await run([])
+    expect(out.code, out.stdout + out.stderr).toBe(0)
+    expect(fs.readFileSync(skill(), 'utf-8')).toBe(MANUAL)
+    const md = fs.readFileSync(claudeMd(), 'utf-8')
+    expect(md).toContain('this agent has no account yet')
+    expect(md).toContain('register --email <email> --handle <handle>')
+    expect(fs.existsSync(fakeClaude.relocatedUserState)).toBe(false)
+    expect(fs.existsSync(path.join(home(), 'always-on.wanted'))).toBe(true)
+    expect(fs.existsSync(path.join(home(), 'bin', 'agentchat-daemon.mjs'))).toBe(true)
+    expect(out.stdout).toContain('Ask Claude Code: "Set up your AgentChat account."')
+    expect(out.stdout).toContain('✓ skill:')
+    expect(out.stdout).toContain('✓ service:')
+  })
+
+  it('with an identity: the hosted MCP server at user scope with the key, the identity line, the skill', async () => {
+    giveClaudeAnIdentity()
+    const out = await run([])
+    expect(out.code, out.stdout + out.stderr).toBe(0)
+
+    expect(mcpEntry()).toEqual({
+      type: 'http',
+      url: 'http://127.0.0.1:9/mcp',
+      headers: { Authorization: `Bearer ${KEY}` },
+    })
+    if (process.platform !== 'win32') expect(fs.statSync(fakeClaude.relocatedUserState).mode & 0o777).toBe(0o600)
+
+    const md = fs.readFileSync(claudeMd(), 'utf-8')
+    expect(md).toContain(IDENTITY_LINE_TEMPLATE.split('<handle>').join('claude-agent'))
+    expect(md).not.toContain('no account yet')
+    expect(fs.readFileSync(skill(), 'utf-8')).toBe(MANUAL)
+    expect(out.stdout).toContain('Connected as @claude-agent')
+    // Re-running converges: no second entry, no second block, exit 0.
+    const again = await run([])
+    expect(again.code, again.stdout).toBe(0)
+    expect(fs.readFileSync(claudeMd(), 'utf-8').split('<!-- agentchat:start -->')).toHaveLength(2)
+    expect(again.stdout).toContain('✓ mcp: hosted tools registered')
+  })
+
+  it('honours CLAUDE_CONFIG_DIR: everything lands under the relocated directory, nothing under ~/.claude', async () => {
+    const relocated = path.join(sandbox, 'relocated-claude')
+    fs.mkdirSync(path.join(relocated, 'agentchat'), { recursive: true })
+    fs.writeFileSync(path.join(relocated, 'agentchat', 'credentials'), JSON.stringify({ api_key: KEY, handle: 'moved-agent', api_base: 'http://127.0.0.1:9' }))
+    const out = await run([], { CLAUDE_CONFIG_DIR: relocated })
+    expect(out.code, out.stdout + out.stderr).toBe(0)
+    expect(fs.existsSync(path.join(relocated, 'skills', 'agentchat', 'SKILL.md'))).toBe(true)
+    expect(fs.readFileSync(path.join(relocated, 'CLAUDE.md'), 'utf-8')).toContain('@moved-agent')
+    const state = JSON.parse(fs.readFileSync(path.join(relocated, '.claude.json'), 'utf-8')) as { mcpServers: Record<string, unknown> }
+    expect(state.mcpServers['agentchat']).toBeDefined()
+    expect(fs.existsSync(skill())).toBe(false)
+    expect(fs.existsSync(fakeClaude.relocatedUserState)).toBe(false)
+  })
+
+  it('refuses a Claude Code older than the floor (2.1.274), placing nothing', async () => {
+    fakeClaude = installFakeClaude(sandbox, '2.1.273')
+    const out = await run([])
+    expect(out.code).toBe(1)
+    expect(out.stdout).toContain('requires Claude Code >= 2.1.274')
+    expect(fs.existsSync(skill())).toBe(false)
+  })
+
+  it('refuses to replace a foreign user MCP server named agentchat', async () => {
+    giveClaudeAnIdentity()
+    fs.writeFileSync(fakeClaude.relocatedUserState, JSON.stringify({ mcpServers: { agentchat: { type: 'http', url: 'https://someone-else.example/mcp' } } }))
+    const out = await run([])
+    expect(out.code).toBe(1)
+    expect(out.stdout).toContain('left untouched')
+    expect(mcpEntry()).toEqual({ type: 'http', url: 'https://someone-else.example/mcp' })
+  })
+
+  it('does not undo an explicit daemon disable during an upgrade', async () => {
+    expect((await run([])).code).toBe(0)
+    expect((await run(['daemon', 'disable'])).code).toBe(0)
+    const upgraded = await run([])
+    expect(upgraded.code, upgraded.stdout).toBe(0)
+    expect(upgraded.stdout).toContain('○ service: doorbell daemon off (your choice')
+    expect(fs.existsSync(path.join(home(), 'always-on.optout'))).toBe(true)
+  })
+})
+
+describe('upgrading from the pre-doorbell release', () => {
+  it('removes the four lifecycle hooks, the stdio mcp-proxy entry, the stable bundle and the old manual — and keeps the user’s own hooks', async () => {
+    giveClaudeAnIdentity()
+    const stable = path.join(home(), 'bin', 'agentchat.mjs')
+    fs.mkdirSync(path.dirname(stable), { recursive: true })
+    fs.writeFileSync(stable, '// old bundle')
+    fs.writeFileSync(path.join(home(), 'SKILL.md'), '# old rendered manual')
+    const ours = (sub: string) => ({ hooks: [{ type: 'command', command: 'node', args: [stable, 'hook', sub], timeout: 20 }] })
+    fs.writeFileSync(
+      path.join(sandbox, '.claude', 'settings.json'),
+      JSON.stringify({
+        theme: 'dark',
+        hooks: {
+          SessionStart: [{ matcher: 'startup|resume|clear|fork', ...ours('session-start') }],
+          UserPromptSubmit: [ours('user-prompt')],
+          Stop: [{ hooks: [{ type: 'command', command: '/usr/local/bin/user-hook' }, ...ours('stop').hooks] }],
+          SessionEnd: [ours('session-end')],
+        },
+      }),
+    )
+    fs.writeFileSync(fakeClaude.relocatedUserState, JSON.stringify({ preserved: 'yes', mcpServers: { other: { type: 'stdio', command: 'other-server', args: [], env: {} }, agentchat: { type: 'stdio', command: 'node', args: [stable, 'mcp-proxy'], env: {} } } }))
+
+    const out = await run([])
+    expect(out.code, out.stdout + out.stderr).toBe(0)
+    expect(out.stdout).toContain('lifecycle hooks removed')
+
+    const settings = JSON.parse(fs.readFileSync(path.join(sandbox, '.claude', 'settings.json'), 'utf-8')) as { theme: string; hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>> }
+    expect(settings.theme).toBe('dark')
+    expect(Object.keys(settings.hooks)).toEqual(['Stop'])
+    expect(settings.hooks['Stop']).toEqual([{ hooks: [{ type: 'command', command: '/usr/local/bin/user-hook' }] }])
+
+    const state = userState() as { preserved: string; mcpServers: Record<string, Record<string, unknown>> }
+    expect(state.preserved).toBe('yes')
+    expect(state.mcpServers['other']?.['command']).toBe('other-server')
+    expect(state.mcpServers['agentchat']).toMatchObject({ type: 'http', url: 'http://127.0.0.1:9/mcp' })
+    expect(fs.existsSync(stable)).toBe(false)
+    expect(fs.existsSync(path.join(home(), 'SKILL.md'))).toBe(false)
+    expect(fs.readFileSync(skill(), 'utf-8')).toBe(MANUAL)
+  })
+})
 
 describe('there is no way to address another agent', () => {
   it('--platform is not a recognised option at all', async () => {
@@ -108,44 +213,78 @@ describe('there is no way to address another agent', () => {
     expect(out.stderr).toContain("Unknown option '--platform'")
   })
 
-  it('logout removes only this agent’s footprint', async () => {
+  it('logout removes the credential, the identity line and the key from Claude Code — and only for this agent', async () => {
     giveClaudeAnIdentity()
+    expect((await run([])).code).toBe(0)
     const before = snapshot(codexDir())
 
     const out = await run(['logout'])
-
-    expect(out.code).toBe(0)
-    // The Codex agent's credentials, anchor and wiring all survive.
+    expect(out.code, out.stdout + out.stderr).toBe(0)
     expect(snapshot(codexDir())).toEqual(before)
-    expect(fs.readFileSync(path.join(codexDir(), 'config.toml'), 'utf-8')).toContain('[mcp_servers.agentchat]')
-    expect(fs.readFileSync(path.join(codexDir(), 'AGENTS.md'), 'utf-8')).toContain('@codex-agent')
-    // …while this agent really is signed out.
-    expect(fs.existsSync(claudeCreds())).toBe(false)
-    expect(fs.readFileSync(path.join(sandbox, '.claude', 'CLAUDE.md'), 'utf-8')).not.toContain('@claude-agent')
+    expect(fs.existsSync(creds())).toBe(false)
+    expect(mcpEntry()).toBeUndefined()
+    const md = fs.readFileSync(claudeMd(), 'utf-8')
+    expect(md).not.toContain('@claude-agent')
+    expect(md).toContain('no account yet') // the offer is back
+    expect(fs.existsSync(skill())).toBe(true) // the manual stays installed
+    expect(out.stdout).toContain('key is no longer registered')
   })
 
-  it('uninstall stops the durable integration but preserves this agent identity', async () => {
-    const installed = await run([])
-    expect(installed.code, installed.stderr).toBe(0)
+  it('logout under a non-default api_base still removes the MCP entry: the pre-clear identity names the server', async () => {
+    // The hole: credentials cleared first, base guessed afterwards → the entry
+    // at the real base looked foreign and the key stayed in .claude.json.
+    giveClaudeAnIdentity() // api_base http://127.0.0.1:9 in the FILE, nothing in the environment
+    expect((await run([], { AGENTCHAT_API_BASE: '' })).code).toBe(0)
+    expect(mcpEntry()).toMatchObject({ url: 'http://127.0.0.1:9/mcp' })
+
+    const out = await run(['logout'], { AGENTCHAT_API_BASE: '' })
+    expect(out.code, out.stdout + out.stderr).toBe(0)
+    expect(mcpEntry()).toBeUndefined()
+    expect(out.stdout).toContain('key is no longer registered')
+  })
+
+  it('logout recognises our entry by the key when the URL differs, and leaves a true foreign entry alone', async () => {
     giveClaudeAnIdentity()
+    fs.writeFileSync(
+      fakeClaude.relocatedUserState,
+      JSON.stringify({ mcpServers: { agentchat: { type: 'http', url: 'http://moved.example/mcp', headers: { Authorization: `Bearer ${KEY}` } } } }),
+    )
+    expect((await run(['logout'])).code).toBe(0)
+    expect(mcpEntry()).toBeUndefined()
+
+    giveClaudeAnIdentity()
+    fs.writeFileSync(
+      fakeClaude.relocatedUserState,
+      JSON.stringify({ mcpServers: { agentchat: { type: 'http', url: 'http://someone-else.example/mcp', headers: { Authorization: 'Bearer other' } } } }),
+    )
+    const out = await run(['logout'])
+    expect(out.code).toBe(0)
+    expect(mcpEntry()).toMatchObject({ url: 'http://someone-else.example/mcp' })
+    expect(out.stdout).toContain('left untouched')
+  })
+
+  it('uninstall under a non-default api_base removes the MCP entry too', async () => {
+    giveClaudeAnIdentity()
+    expect((await run([], { AGENTCHAT_API_BASE: '' })).code).toBe(0)
+    const out = await run(['uninstall'], { AGENTCHAT_API_BASE: '' })
+    expect(out.code, out.stdout + out.stderr).toBe(0)
+    expect(mcpEntry()).toBeUndefined()
+    expect(fs.existsSync(creds())).toBe(true)
+  })
+
+  it('uninstall removes the integration and preserves the identity file', async () => {
+    giveClaudeAnIdentity()
+    expect((await run([])).code).toBe(0)
     const before = snapshot(codexDir())
 
     const out = await run(['uninstall'])
-
-    expect(out.code).toBe(0)
-    expect(out.stdout).toContain('identity was preserved')
-    expect(fs.existsSync(claudeCreds())).toBe(true)
-    expect(fs.existsSync(path.join(sandbox, '.claude', 'agentchat', 'always-on.optout'))).toBe(true)
-    expect(fs.existsSync(path.join(sandbox, '.claude', 'agentchat', 'bin', 'agentchat-daemon.mjs'))).toBe(false)
-    expect(fs.existsSync(path.join(sandbox, '.claude', 'agentchat', 'bin', 'agentchat.mjs'))).toBe(false)
-    const userState = JSON.parse(fs.readFileSync(fakeClaude.mcpState, 'utf-8')) as {
-      mcpServers?: Record<string, unknown>
-    }
-    expect(userState.mcpServers?.['agentchat']).toBeUndefined()
-    expect(fs.existsSync(path.join(sandbox, '.claude', 'settings.json'))).toBe(false)
-    expect(fs.readFileSync(path.join(sandbox, '.claude', 'CLAUDE.md'), 'utf-8')).not.toContain(
-      '@claude-agent',
-    )
+    expect(out.code, out.stdout + out.stderr).toBe(0)
+    expect(fs.existsSync(creds())).toBe(true)
+    expect(fs.existsSync(path.join(home(), 'always-on.optout'))).toBe(true)
+    expect(fs.existsSync(path.join(home(), 'bin', 'agentchat-daemon.mjs'))).toBe(false)
+    expect(mcpEntry()).toBeUndefined()
+    expect(fs.existsSync(skill())).toBe(false)
+    expect(fs.readFileSync(claudeMd(), 'utf-8')).not.toContain('agentchat:start')
     expect(snapshot(codexDir())).toEqual(before)
   })
 
@@ -155,26 +294,30 @@ describe('there is no way to address another agent', () => {
     expect(out.stdout.toLowerCase()).toContain('separate agentchat agent')
   })
 
-  it('keeps the user’s own CLAUDE.md content when signing out', async () => {
+  it('keeps the user’s own CLAUDE.md content throughout', async () => {
+    fs.writeFileSync(claudeMd(), '# My notes\n')
     giveClaudeAnIdentity()
+    await run([])
     await run(['logout'])
-    expect(fs.readFileSync(path.join(sandbox, '.claude', 'CLAUDE.md'), 'utf-8')).toBe('# My notes\n')
+    await run(['uninstall'])
+    expect(fs.readFileSync(claudeMd(), 'utf-8')).toBe('# My notes\n')
   })
 })
 
 describe('doctor', () => {
-  it('reports the missing identity before registration', async () => {
+  it('reports the missing identity before registration, and the placement that exists', { timeout: 30_000 }, async () => {
+    await run([])
     const out = await run(['doctor'])
     expect(out.stdout).toContain('FAIL credentials')
+    expect(out.stdout).toContain('PASS skill')
+    expect(out.stdout).toContain('WARN hosted-mcp')
   })
 
-  it('detects an anchor naming a different agent, and --fix repairs it', { timeout: 15_000 }, async () => {
+  it('detects an identity line naming a different agent, and --fix repairs it', { timeout: 30_000 }, async () => {
     giveClaudeAnIdentity()
+    await run([])
     // Exactly the corruption the old shared CLI produced on a two-agent box.
-    fs.writeFileSync(
-      path.join(sandbox, '.claude', 'CLAUDE.md'),
-      '<!-- agentchat:start -->\nYou are **@codex-agent** on AgentChat.\n<!-- agentchat:end -->\n',
-    )
+    fs.writeFileSync(claudeMd(), '<!-- agentchat:start -->\nI am @codex-agent on AgentChat (api.agentchat.me).\n<!-- agentchat:end -->\n')
     const before = snapshot(codexDir())
 
     const seen = await run(['doctor'])
@@ -182,366 +325,38 @@ describe('doctor', () => {
 
     const fixed = await run(['doctor', '--fix'])
     expect(fixed.stdout).toContain('repaired → @claude-agent')
-    const md = fs.readFileSync(path.join(sandbox, '.claude', 'CLAUDE.md'), 'utf-8')
-    expect(md).toContain('@claude-agent')
-    expect(md).toContain('autonomy ...')
-    expect(md).toContain('pending list')
+    const md = fs.readFileSync(claudeMd(), 'utf-8')
+    expect(md).toContain('I am @claude-agent on AgentChat')
     expect(md).not.toContain('@codex-agent')
-    // Repairing this agent must not touch the one it was confused with.
     expect(snapshot(codexDir())).toEqual(before)
   })
-})
 
-describe('status', () => {
-  it('a bare command installs the direct integration with concise next steps', async () => {
-    const out = await run([])
-    expect(out.code, out.stderr).toBe(0)
-    expect(out.stdout).toContain('AgentChat for Claude Code')
-    expect(out.stdout).toContain('✓ Integration installed')
-    expect(out.stdout).toContain('✓ Background delivery enabled')
-    expect(out.stdout).toContain('1. Open a new Claude Code session')
-    expect(out.stdout).toContain('2. Ask Claude Code: "Set up your AgentChat account."')
-    expect(out.stdout).not.toContain('bundle →')
-    expect(out.stdout).not.toContain('settings.json ←')
-    expect(out.stdout).not.toContain('SKILL.md ←')
-
-    const guidance = fs.readFileSync(path.join(sandbox, '.claude', 'CLAUDE.md'), 'utf-8')
-    const emailQuestion = guidance.indexOf('Ask only: "I need an email')
-    const handleQuestion = guidance.indexOf('Now we need to choose an AgentChat username for me')
-    const registration = guidance.indexOf('register --email <email> --handle <handle>')
-    const codeQuestion = guidance.indexOf('Only after registration confirms the code was sent')
-    expect(guidance).toContain('Ask only one question per turn')
-    expect(guidance).toContain('Use 3–30 characters: lowercase letters, numbers, and hyphens')
-    expect(guidance).toContain('Start with a letter; no double or trailing hyphens')
-    expect(emailQuestion).toBeGreaterThanOrEqual(0)
-    expect(handleQuestion).toBeGreaterThan(emailQuestion)
-    expect(registration).toBeGreaterThan(handleQuestion)
-    expect(codeQuestion).toBeGreaterThan(registration)
-    expect(guidance).not.toContain(
-      'I need an email for verification and recovery and the @handle you want me to use',
-    )
-    expect(guidance).toContain(
-      'Give me the AgentChat API key for this account. If you no longer have it, I can help you recover the account.',
-    )
-    expect(guidance).toContain('What email did you use for this AgentChat account?')
-    expect(guidance).toContain('AgentChat sent a 6-digit recovery code to <email>')
-    expect(guidance).toContain('The API key is stored at <credentials-path>')
-    expect(guidance).toContain('The new API key is stored at <credentials-path>')
-    expect(guidance).toContain('The old key no longer works')
-
-    const manual = fs.readFileSync(path.join(sandbox, '.claude', 'agentchat', 'SKILL.md'), 'utf-8')
-    expect(manual).toContain('local human directly asks to see or copy')
-    expect(manual).toContain('Never dump the whole credentials file or environment')
-  })
-
-  it('a bare command reports the connected account without setup instructions', async () => {
+  it('refreshes an identity line from an older release', { timeout: 30_000 }, async () => {
     giveClaudeAnIdentity()
-
-    const out = await run([])
-
-    expect(out.code, out.stderr).toBe(0)
-    expect(out.stdout).toContain('AgentChat for Claude Code')
-    expect(out.stdout).toContain('✓ AgentChat account connected as @claude-agent')
-    expect(out.stdout).toContain('Next: Open a new Claude Code session.')
-    expect(out.stdout).not.toContain('Set up your AgentChat account')
+    await run([])
+    fs.writeFileSync(claudeMd(), '<!-- agentchat:start -->\nYou are **@claude-agent** on AgentChat.\n<!-- agentchat:end -->\n')
+    const seen = await run(['doctor'])
+    expect(seen.stdout).toContain('carries an older identity text')
+    await run(['doctor', '--fix'])
+    expect(fs.readFileSync(claudeMd(), 'utf-8')).toContain('I am @claude-agent on AgentChat')
   })
 
-  it('honours CLAUDE_CONFIG_DIR for identity and always-on state', async () => {
-    const relocated = path.join(sandbox, 'relocated-claude')
-    const out = await run(['daemon', 'install'], { CLAUDE_CONFIG_DIR: relocated })
-
-    expect(out.code).toBe(0)
-    expect(
-      fs.existsSync(path.join(relocated, 'agentchat', 'bin', 'agentchat-daemon.mjs')),
-    ).toBe(true)
-    expect(fs.existsSync(path.join(sandbox, '.claude', 'agentchat', 'always-on.wanted'))).toBe(
-      false,
-    )
-  })
-
-  it('does not undo an explicit always-on disable during an upgrade', async () => {
-    expect((await run([])).code).toBe(0)
-    expect((await run(['daemon', 'disable'])).code).toBe(0)
-
-    const upgraded = await run([])
-
-    expect(upgraded.code).toBe(0)
-    expect(upgraded.stdout).toContain('○ Background delivery is off (your choice)')
-    expect(upgraded.stdout).not.toContain('✓ Background delivery enabled')
-    expect(
-      fs.existsSync(path.join(sandbox, '.claude', 'agentchat', 'always-on.optout')),
-    ).toBe(true)
-  })
-})
-
-describe('direct Claude Code wiring', () => {
-  it('uses Claude’s real default user state and removes its exact old misplaced duplicate', async () => {
-    const stable = path.join(sandbox, '.claude', 'agentchat', 'bin', 'agentchat.mjs')
-    fs.writeFileSync(
-      fakeClaude.mcpState,
-      JSON.stringify({
-        preserved: 'yes',
-        mcpServers: {
-          other: { type: 'stdio', command: 'other-server', args: [], env: {} },
-          agentchat: {
-            type: 'stdio',
-            command: 'node',
-            args: [stable, 'mcp-proxy'],
-            env: {},
-          },
-        },
-      }),
-    )
-
-    const out = await run([], { CLAUDE_CONFIG_DIR: '' })
-
-    expect(out.code, out.stdout + out.stderr).toBe(0)
-    expect(out.stdout).toContain('✓ Integration installed')
-    const defaultState = JSON.parse(
-      fs.readFileSync(fakeClaude.defaultMcpState, 'utf-8'),
-    ) as {
-      mcpServers: Record<string, { command: string; args: string[] }>
-    }
-    expect(defaultState.mcpServers.agentchat).toMatchObject({
-      command: 'node',
-      args: [stable, 'mcp-proxy'],
-    })
-
-    const formerlyMisplaced = JSON.parse(
-      fs.readFileSync(fakeClaude.mcpState, 'utf-8'),
-    ) as {
-      preserved: string
-      mcpServers: Record<string, { command: string }>
-    }
-    expect(formerlyMisplaced.preserved).toBe('yes')
-    expect(formerlyMisplaced.mcpServers.other.command).toBe('other-server')
-    expect(formerlyMisplaced.mcpServers.agentchat).toBeUndefined()
-
-    const removed = await run(['uninstall'], { CLAUDE_CONFIG_DIR: '' })
-    expect(removed.code, removed.stdout + removed.stderr).toBe(0)
-    const nestedAfterUninstall = JSON.parse(
-      fs.readFileSync(fakeClaude.mcpState, 'utf-8'),
-    ) as {
-      preserved: string
-      mcpServers: Record<string, { command: string }>
-    }
-    expect(nestedAfterUninstall.preserved).toBe('yes')
-    expect(nestedAfterUninstall.mcpServers.other.command).toBe('other-server')
-    expect(nestedAfterUninstall.mcpServers.agentchat).toBeUndefined()
-  })
-
-  it('never removes a foreign nested MCP entry while repairing the default location', async () => {
-    fs.writeFileSync(
-      fakeClaude.mcpState,
-      JSON.stringify({
-        mcpServers: {
-          agentchat: { type: 'stdio', command: 'someone-else', args: [], env: {} },
-        },
-      }),
-    )
-
-    const out = await run([], { CLAUDE_CONFIG_DIR: '' })
-
-    expect(out.code, out.stdout + out.stderr).toBe(0)
-    const nested = JSON.parse(fs.readFileSync(fakeClaude.mcpState, 'utf-8')) as {
-      mcpServers: Record<string, { command: string }>
-    }
-    expect(nested.mcpServers.agentchat.command).toBe('someone-else')
-    expect(fs.existsSync(fakeClaude.defaultMcpState)).toBe(true)
-  })
-
-  it('refuses a Claude build that predates structured MCP startup errors', async () => {
-    fakeClaude = installFakeClaude(sandbox, '2.1.218')
-
-    const out = await run([])
-
-    expect(out.code).toBe(1)
-    expect(out.stdout).toContain('requires Claude Code >= 2.1.219')
-    expect(fs.existsSync(path.join(sandbox, '.claude', 'settings.json'))).toBe(false)
-    expect(
-      fs.existsSync(path.join(sandbox, '.claude', 'agentchat', 'bin', 'agentchat.mjs')),
-    ).toBe(false)
-  })
-
-  it('owns user-scoped MCP and four hooks through the stable bundle', async () => {
-    fs.writeFileSync(
-      path.join(sandbox, '.claude', 'settings.json'),
-      JSON.stringify({
-        theme: 'dark',
-        hooks: {
-          Stop: [
-            {
-              hooks: [{ type: 'command', command: '/usr/local/bin/user-hook' }],
-            },
-          ],
-        },
-      }),
-    )
-
-    const first = await run([])
-    expect(first.code, first.stderr).toBe(0)
-
-    const stable = path.join(sandbox, '.claude', 'agentchat', 'bin', 'agentchat.mjs')
-    const settings = JSON.parse(
-      fs.readFileSync(path.join(sandbox, '.claude', 'settings.json'), 'utf-8'),
-    ) as {
-      theme: string
-      hooks: Record<
-        string,
-        Array<{
-          matcher?: string
-          hooks: Array<{ type?: string; command: string; args?: string[] }>
-        }>
-      >
-    }
-    expect(settings.theme).toBe('dark')
-    expect(Object.keys(settings.hooks).sort()).toEqual(
-      ['SessionEnd', 'SessionStart', 'Stop', 'UserPromptSubmit'].sort(),
-    )
-    expect(settings.hooks.Stop?.some((group) =>
-      group.hooks.some((hook) => hook.command === '/usr/local/bin/user-hook'),
-    )).toBe(true)
-    for (const event of Object.values(settings.hooks)) {
-      expect(event.some((group) =>
-        group.hooks.some((hook) =>
-          hook.command === 'node' &&
-          hook.args?.[0] === stable &&
-          hook.args?.[1] === 'hook',
-        ),
-      )).toBe(true)
-    }
-    expect(settings.hooks.SessionStart?.find((group) =>
-      group.hooks.some((hook) => hook.args?.[1] === 'hook'),
-    )?.matcher).toBe('startup|resume|clear|fork')
-
-    const mcpDoc = JSON.parse(fs.readFileSync(fakeClaude.mcpState, 'utf-8')) as {
-      mcpServers: {
-        agentchat: { type: string; command: string; args: string[]; env: Record<string, string> }
-      }
-    }
-    expect(mcpDoc.mcpServers.agentchat).toEqual({
-      type: 'stdio',
-      command: 'node',
-      args: [stable, 'mcp-proxy'],
-      env: {},
-    })
-
-    // Users can add a command beside ours in the same matcher group. Upgrade
-    // and uninstall must remove only our leaf, never their neighbor.
-    const ownedStopGroup = settings.hooks.Stop?.find((group) =>
-      group.hooks.some((hook) => hook.args?.[0] === stable),
-    )
-    expect(ownedStopGroup).toBeDefined()
-    ownedStopGroup?.hooks.push({
-      type: 'command',
-      command: '/usr/local/bin/co-located-user-hook',
-    })
-    fs.writeFileSync(
-      path.join(sandbox, '.claude', 'settings.json'),
-      JSON.stringify(settings, null, 2) + '\n',
-    )
-
-    const second = await run([])
-    expect(second.code, second.stderr).toBe(0)
-    const rerun = fs.readFileSync(path.join(sandbox, '.claude', 'settings.json'), 'utf-8')
-    expect((rerun.match(/agentchat\.mjs/g) ?? []).length).toBe(4)
-
-    const removed = await run(['uninstall'])
-    expect(removed.code, removed.stderr).toBe(0)
-    const preserved = JSON.parse(
-      fs.readFileSync(path.join(sandbox, '.claude', 'settings.json'), 'utf-8'),
-    ) as {
-      theme: string
-      hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>
-    }
-    expect(preserved).toEqual({
-      theme: 'dark',
-      hooks: {
-        Stop: [
-          {
-            hooks: [{ type: 'command', command: '/usr/local/bin/user-hook' }],
-          },
-          {
-            hooks: [
-              {
-                type: 'command',
-                command: '/usr/local/bin/co-located-user-hook',
-              },
-            ],
-          },
-        ],
-      },
-    })
-  })
-
-  it('replaces the legacy user plugin only after direct wiring succeeds', async () => {
-    fs.writeFileSync(fakeClaude.pluginState, 'installed')
-    const out = await run([])
-    expect(out.code, out.stderr).toBe(0)
-    expect(out.stdout).toContain('✓ Integration installed')
-    expect(out.stdout).not.toContain('legacy marketplace plugin removed')
-    expect(fs.existsSync(fakeClaude.pluginState)).toBe(false)
-  })
-
-  it('refuses to overwrite a foreign MCP server with the same name', async () => {
-    fs.writeFileSync(
-      fakeClaude.mcpState,
-      JSON.stringify({
-        mcpServers: {
-          agentchat: { type: 'stdio', command: 'foreign-agentchat', args: [], env: {} },
-        },
-      }),
-    )
-    fs.writeFileSync(fakeClaude.pluginState, 'installed')
-
-    const out = await run([])
-
-    expect(out.code).toBe(1)
-    expect(out.stdout).toContain('left it untouched')
-    expect(JSON.parse(fs.readFileSync(fakeClaude.mcpState, 'utf-8'))).toMatchObject({
-      mcpServers: { agentchat: { command: 'foreign-agentchat' } },
-    })
-    expect(fs.existsSync(fakeClaude.pluginState)).toBe(true)
-    expect(fs.existsSync(path.join(sandbox, '.claude', 'settings.json'))).toBe(false)
-    expect(
-      fs.existsSync(path.join(sandbox, '.claude', 'agentchat', 'bin', 'agentchat.mjs')),
-    ).toBe(false)
-  })
-
-  it('diagnoses a per-project MCP disable and keeps the legacy path during migration', async () => {
-    const project = path.join(sandbox, 'project-with-disabled-mcp')
-    fs.mkdirSync(project, { recursive: true })
-    fs.writeFileSync(
-      fakeClaude.mcpState,
-      JSON.stringify({
-        projects: {
-          [project]: {
-            disabledMcpServers: ['agentchat'],
-          },
-        },
-      }),
-    )
-    fs.writeFileSync(fakeClaude.pluginState, 'installed')
-
-    const out = await run([], { CLAUDE_PROJECT_DIR: project })
-
-    expect(out.code).toBe(1)
-    expect(out.stdout).toContain('AgentChat MCP is disabled')
-    expect(out.stdout).toContain('legacy plugin was left in place')
-    expect(fs.existsSync(fakeClaude.pluginState)).toBe(true)
-    expect(
-      fs.existsSync(path.join(sandbox, '.claude', 'agentchat', 'bin', 'agentchat.mjs')),
-    ).toBe(true)
-
-    const doctor = await run(['doctor'], { CLAUDE_PROJECT_DIR: project })
-    expect(doctor.stdout).toContain('FAIL project-mcp')
-    expect(doctor.stdout).toContain('AgentChat MCP is disabled')
+  it('re-registers the hosted MCP entry when the key changed', { timeout: 30_000 }, async () => {
+    giveClaudeAnIdentity()
+    await run([])
+    const rotated = 'ac_live_' + 'r'.repeat(40)
+    fs.writeFileSync(creds(), JSON.stringify({ api_key: rotated, handle: 'claude-agent', api_base: 'http://127.0.0.1:9' }))
+    const seen = await run(['doctor'])
+    expect(seen.stdout).toContain('carries a different key')
+    const fixed = await run(['doctor', '--fix'])
+    expect(fixed.stdout).toContain('PASS hosted-mcp:')
+    expect(mcpEntry()).toMatchObject({ headers: { Authorization: `Bearer ${rotated}` } })
   })
 })
 
 describe('every hint is a runnable command', () => {
-  for (const argv of [[], ['--help'], ['status'], ['doctor'], ['logout']]) {
-    it(`\`${argv.join(' ') || '(bare)'}\` renders no un-interpolated placeholder`, async () => {
+  for (const argv of [[], ['--help'], ['status'], ['doctor'], ['logout'], ['daemon', 'status']]) {
+    it(`\`${argv.join(' ') || '(bare)'}\` renders no un-interpolated placeholder`, { timeout: 30_000 }, async () => {
       const out = await run(argv)
       expect(out.stdout + out.stderr).not.toContain('${')
     })
@@ -549,9 +364,7 @@ describe('every hint is a runnable command', () => {
 })
 
 describe('the publishable bundle runs after its NPX cache is gone', () => {
-  it('has no external imports left to resolve', async () => {
-    // The installer copies this file into a durable home. A single external
-    // import would become a hard crash as soon as the NPX cache is cleaned.
+  it('has no external imports left to resolve', () => {
     const bundle = fs.readFileSync(BIN, 'utf-8')
     expect(bundle).not.toMatch(/^import .* from ["'](agentchatme|@agentchatme\/|zod)/m)
   })
@@ -561,12 +374,16 @@ describe('the publishable bundle runs after its NPX cache is gone', () => {
     try {
       const copy = path.join(isolated, 'agentchat')
       fs.copyFileSync(BIN, copy)
-      const { stdout } = await exec(process.execPath, [copy, '--version'], {
-        env: { ...process.env, HOME: isolated, AGENTCHAT_API_KEY: '' },
-      })
+      const { stdout } = await exec(process.execPath, [copy, '--version'], { env: { ...process.env, HOME: isolated, AGENTCHAT_API_KEY: '' } })
       expect(stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/)
     } finally {
       fs.rmSync(isolated, { recursive: true, force: true })
     }
+  })
+
+  it('reads no message content anywhere: the bundle carries no body parser', () => {
+    const bundle = fs.readFileSync(path.join(__dirname, '..', 'dist', 'daemon-main.js'), 'utf-8')
+    expect(bundle).not.toMatch(/messages\/sync/)
+    expect(bundle).not.toMatch(/type:\s*['"]ack['"]/)
   })
 })

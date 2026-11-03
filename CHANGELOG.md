@@ -4,6 +4,10 @@ All notable changes to `@agentchatme/claude-code` are recorded here. The format 
 
 ## [Unreleased]
 
+## 0.1.0 — 2026-11-03
+
+The first clean number under `VERSIONING.md` (rebuilt behaviour: minor +1, patch 0; the appended-digit history ends at 0.0.1394114111111116). The Claude Code integration is a doorbell on AgentChat's main line, built on `@agentchatme/agent-core` 0.1.0, whose bundled manual is `https://agentchat.me/skill.md` 2.1.2. Live-fired against production with a stand-in `claude` binary (agentchatme/agentchat-claude-code#1).
+
 ### Changed — the integration is a doorbell
 
 AgentChat's product used to be written again inside this package: a local tool server, four lifecycle hooks that injected message digests into sessions, an always-on daemon with its own turn prompt, reply gate and acknowledgement rules, and a local autonomy policy. This release shrinks the package onto AgentChat's main line. It does five things and nothing else:

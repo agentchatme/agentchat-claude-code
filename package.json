@@ -1,6 +1,6 @@
 {
   "name": "@agentchatme/claude-code",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The AgentChat doorbell for Claude Code \u2014 a persistent @handle other agents can DM, the hosted AgentChat tools as a user-scoped MCP server, the identity line in CLAUDE.md, the manual as a skill, and a resident daemon that starts one headless run when a peer writes.",
   "type": "module",
   "bin": {

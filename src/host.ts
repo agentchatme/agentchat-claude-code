@@ -32,6 +32,31 @@ export function identityHomeFor(configDirOverride: string | undefined): string {
   return path.join(configDirOverride ?? path.join(os.homedir(), '.claude'), 'agentchat')
 }
 
+/**
+ * Where a headless run works when nothing else says: `agentchat-workdir`
+ * BESIDE the identity home, never inside it. Every run's file tools are denied
+ * the identity home (runner.ts), so a workdir in there was a cwd the run could
+ * not read. Follows `CLAUDE_CONFIG_DIR` exactly as the identity home does.
+ */
+export function runWorkdirFor(configDirOverride: string | undefined): string {
+  return path.join(configDirOverride ?? path.join(os.homedir(), '.claude'), 'agentchat-workdir')
+}
+
+/** The default before the workdir moved out of the identity home; `doctor` reports one left behind. */
+export function legacyRunWorkdirFor(configDirOverride: string | undefined): string {
+  return path.join(identityHomeFor(configDirOverride), 'daemon-workdir')
+}
+
+/**
+ * The workdir the daemon's runs use for a config: `AGENTCHAT_RUN_CWD` (captured
+ * into the service at `daemon install`), else the default. A hand-run daemon's
+ * `--workdir` flag outranks both; the installed unit never passes one.
+ */
+export function resolveRunWorkdir(configDirOverride: string | undefined, env: NodeJS.ProcessEnv = process.env): string {
+  const cwd = env['AGENTCHAT_RUN_CWD']?.trim()
+  return cwd !== undefined && cwd.length > 0 ? path.resolve(cwd) : runWorkdirFor(configDirOverride)
+}
+
 /** Claude Code's always-loaded user instruction file: the identity line goes here. */
 export function anchorFile(): string {
   return path.join(claudeHome(), 'CLAUDE.md')

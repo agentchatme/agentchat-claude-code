@@ -3,7 +3,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { log, spawnCommandSync, type RunProfile } from '@agentchatme/agent-core'
 import { spawnRun, type RunOutcome, type RunRequest, type RunRunner } from '@agentchatme/agent-core/daemon'
-import { claudeUserStatePathFor, identityHomeFor } from './host.js'
+import { claudeUserStatePathFor, identityHomeFor, invocation, runWorkdirFor } from './host.js'
 import { claudeRunArgs } from './profile.js'
 import { MIN_CLAUDE_CODE_VERSION, semverAtLeast } from './runtime-version.js'
 
@@ -112,9 +112,37 @@ export function inspectClaudeRuntime(configDirOverride?: string, command = 'clau
       }
 }
 
+/**
+ * The key store, denied to every run's file tools: the identity home
+ * (credentials, status, logs) and ~/.claude.json, where the user-scope MCP
+ * entry carries the key. A run judging peer text must not be able to read
+ * either and send it. ONE list, so what `args()` denies and what the workdir
+ * is checked against cannot drift apart.
+ */
+export function denyReadPathsFor(configDirOverride: string | undefined): string[] {
+  return [identityHomeFor(configDirOverride), claudeUserStatePathFor(configDirOverride)]
+}
+
+/**
+ * The entry of `denied` that is `dir` or contains it, or null. Whole path
+ * segments only: `~/.claude/agentchat` does not contain `~/.claude/agentchat-workdir`.
+ */
+export function deniedAncestorOf(dir: string, denied: readonly string[]): string | null {
+  const target = path.resolve(dir)
+  for (const raw of denied) {
+    const root = path.resolve(raw)
+    if (target === root || target.startsWith(root.endsWith(path.sep) ? root : root + path.sep)) return root
+  }
+  return null
+}
+
 export interface ClaudeRunnerOptions {
   readonly configDir: string | undefined
-  /** The run's working directory; the `work` profile edits and runs shell here. */
+  /**
+   * The run's working directory; the `work` profile edits and runs shell here.
+   * Must lie outside `denyReadPathsFor(configDir)`, or the run cannot read its
+   * own cwd — preflight says so once and still runs.
+   */
   readonly workdir: string
   readonly profile: RunProfile
   /** Test seam: the binary to run. */
@@ -125,9 +153,16 @@ export interface ClaudeRunnerOptions {
 export class ClaudeRunner implements RunRunner {
   readonly name = 'claude'
   private readonly command: string
+  /** The workdir warning is one line per daemon, not one per preflight (preflight repeats every few minutes). */
+  private warnedWorkdir = false
 
   constructor(private readonly options: ClaudeRunnerOptions) {
     this.command = options.command ?? 'claude'
+  }
+
+  /** The denied path the configured workdir sits in, or null when the run can read its own cwd. */
+  workdirDeniedBy(): string | null {
+    return deniedAncestorOf(this.options.workdir, denyReadPathsFor(this.options.configDir))
   }
 
   async preflight() {
@@ -136,7 +171,19 @@ export class ClaudeRunner implements RunRunner {
     if (!claudeIsLoggedIn(this.options.configDir, this.command)) {
       return { ok: false, detail: 'claude is not signed in (run `claude` once and sign in)' }
     }
-    fs.mkdirSync(this.options.workdir, { recursive: true })
+    // A cwd inside the key store is an operator choice (AGENTCHAT_RUN_CWD or
+    // --workdir) the deny rules then make unreadable to the run. Said once,
+    // with the fix; the run still starts — the hosted tools do not need the cwd.
+    const denied = this.workdirDeniedBy()
+    if (denied !== null && !this.warnedWorkdir) {
+      this.warnedWorkdir = true
+      log.warn(
+        `the run workdir ${this.options.workdir} is inside ${denied}, which every run's file tools are denied: runs cannot read their own working directory. Point AGENTCHAT_RUN_CWD outside it, or unset it for the default ${runWorkdirFor(this.options.configDir)}, then re-run \`${invocation()} daemon install\``,
+      )
+    }
+    // Owner-only on creation, as the identity home is. Creation only: an
+    // operator's own workspace (AGENTCHAT_RUN_CWD) keeps its permissions.
+    fs.mkdirSync(this.options.workdir, { recursive: true, mode: 0o700 })
     return { ok: true }
   }
 
@@ -144,10 +191,7 @@ export class ClaudeRunner implements RunRunner {
   args(): string[] {
     return claudeRunArgs(this.options.profile, {
       maxBudgetUsd: (this.options.env ?? process.env)['AGENTCHAT_RUN_MAX_BUDGET_USD'],
-      // The key store: the identity home (credentials, status, logs) and
-      // ~/.claude.json, where the user-scope MCP entry carries the key. A run
-      // judging peer text must not be able to read either and send it.
-      denyReadPaths: [identityHomeFor(this.options.configDir), claudeUserStatePathFor(this.options.configDir)],
+      denyReadPaths: denyReadPathsFor(this.options.configDir),
     })
   }
 

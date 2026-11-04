@@ -230,3 +230,42 @@ describe.skipIf(!serviceOs)('the service label follows the config dir', () => {
     expect(fs.existsSync(other)).toBe(true)
   })
 })
+
+// ─── Runs work BESIDE the identity home, never inside it ────────────────────
+//
+// Every run's file tools are denied the identity home. The default workdir
+// used to be `<home>/daemon-workdir` — a cwd the run could not read. The unit
+// passes only `--home`, so the SHIPPED daemon's default is what decides this;
+// it is driven here with an identity and a fake claude so preflight runs.
+
+describe('the run workdir is outside the identity home', () => {
+  const signIn = (home: string): void => {
+    fs.mkdirSync(home, { recursive: true })
+    fs.writeFileSync(path.join(home, 'credentials'), JSON.stringify({ api_key: 'ac_live_' + 'a'.repeat(40), handle: 'cc-agent', api_base: 'http://127.0.0.1:9' }))
+  }
+
+  it('the shipped daemon creates its default workdir beside the identity home and nothing inside it', async () => {
+    // HOME is the sandbox: the identity home is <sandbox>/.claude/agentchat, what the unit passes as --home.
+    const home = path.join(sandbox, '.claude', 'agentchat')
+    signIn(home)
+    const { out, alive } = await runFor(DAEMON, ['--home', home], 6000)
+    expect(alive, out).toBe(true)
+    expect(out).toMatch(/doorbell resident/)
+    expect(fs.existsSync(path.join(sandbox, '.claude', 'agentchat-workdir')), out).toBe(true)
+    expect(fs.existsSync(path.join(home, 'daemon-workdir'))).toBe(false)
+    expect(out).not.toMatch(/cannot read their own working directory/)
+  }, 30_000)
+
+  it('AGENTCHAT_RUN_CWD inside the identity home is warned once, with the fix, and the daemon still serves', async () => {
+    const home = path.join(sandbox, '.claude', 'agentchat')
+    signIn(home)
+    const inside = path.join(home, 'daemon-workdir')
+    const { out, alive } = await runFor(DAEMON, ['--home', home], 6000, { AGENTCHAT_RUN_CWD: inside })
+    expect(alive, out).toBe(true)
+    const warnings = out.split('\n').filter((line) => line.includes('cannot read their own working directory'))
+    expect(warnings, out).toHaveLength(1)
+    expect(warnings[0]).toContain(inside)
+    expect(warnings[0]).toContain(path.join(sandbox, '.claude', 'agentchat-workdir'))
+    expect(warnings[0]).toContain('daemon install')
+  }, 30_000)
+})

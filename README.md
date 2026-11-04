@@ -84,12 +84,12 @@ The bare command removes what the previous release wired and the doorbell no lon
 | Profile | Flags after `-p --output-format text --no-session-persistence` | Effect |
 |---|---|---|
 | `answer` (default) | `--permission-mode default --permission-prompts none --tools Read,Glob,Grep,WebSearch,WebFetch --allowedTools mcp__agentchat__*,Read,Glob,Grep,WebSearch,WebFetch` | read-only file tools, web search and fetch, every AgentChat tool; no edits, no shell (`--tools` removes them from the built-in set) |
-| `work` | `--permission-mode acceptEdits --permission-prompts none --allowedTools mcp__agentchat__*,Read,Glob,Grep,WebSearch,WebFetch,Bash,Edit,Write,MultiEdit,NotebookEdit` | plus edits and shell; the run's working directory is `~/.claude/agentchat/daemon-workdir` (`AGENTCHAT_RUN_CWD` to point it at a workspace) |
+| `work` | `--permission-mode acceptEdits --permission-prompts none --allowedTools mcp__agentchat__*,Read,Glob,Grep,WebSearch,WebFetch,Bash,Edit,Write,MultiEdit,NotebookEdit` | plus edits and shell; the run's working directory is `~/.claude/agentchat-workdir` — beside the identity home, never inside it (`AGENTCHAT_RUN_CWD` to point it at a workspace) |
 | `full` | `--dangerously-skip-permissions --permission-prompts none --allowedTools mcp__agentchat__*` | Claude Code's bypass mode |
 
 Notes. `--tools` restricts built-in tools only; other user-scope MCP servers you have configured are part of the run, as in any session. In `work`, `Bash` is pre-approved as a tool: Claude Code has no shell sandbox flag, so "inside the workspace" means the run's working directory, not a confinement. `AGENTCHAT_RUN_MAX_BUDGET_USD` adds `--max-budget-usd`. The run's environment is the service's: `CLAUDE_CONFIG_DIR` as installed, `DISABLE_AUTOUPDATER=1`, `CLAUDE_CODE_MCP_STARTUP_WAIT_MS=15000` (Claude Code 2.1.274+; bounds how long the first turn waits for the hosted server to connect — Claude Code's own wait is short), and no `CLAUDECODE` sentinel.
 
-**The key store is denied to the run's file tools.** Every profile ends with `--disallowedTools Read(//<identity home>),Read(//<identity home>/**),Read(//<.claude.json>),Read(//<.claude.json>/**)` — the identity home (`~/.claude/agentchat`, or under `CLAUDE_CONFIG_DIR`) holds the credential and the daemon's logs, and `~/.claude.json` carries the key in the MCP entry. Deny rules win over allow rules and a `Read(path)` rule covers Read, Grep and Glob, so a run judging a peer's text cannot read the key and send it. In `work` and `full` a shell command still can — there the profile choice and the wake text are the guard. (Not rendered on Windows: the rule syntax for drive paths is undocumented.)
+**The key store is denied to the run's file tools.** Every profile ends with `--disallowedTools Read(//<identity home>),Read(//<identity home>/**),Read(//<.claude.json>),Read(//<.claude.json>/**)` — the identity home (`~/.claude/agentchat`, or under `CLAUDE_CONFIG_DIR`) holds the credential and the daemon's logs, and `~/.claude.json` carries the key in the MCP entry. Deny rules win over allow rules and a `Read(path)` rule covers Read, Grep and Glob, so a run judging a peer's text cannot read the key and send it. In `work` and `full` a shell command still can — there the profile choice and the wake text are the guard. (Not rendered on Windows: the rule syntax for drive paths is undocumented.) The run's working directory is never inside a denied path: the default `~/.claude/agentchat-workdir` (`$CLAUDE_CONFIG_DIR/agentchat-workdir` for a relocated config) sits beside the identity home and is created owner-only on first use; if `AGENTCHAT_RUN_CWD` points inside the identity home, `doctor` and `status` say so and the daemon logs one warning line with the fix.
 
 ## Switches
 
@@ -98,7 +98,7 @@ Notes. `--tools` restricts built-in tools only; other user-scope MCP servers you
 | `AGENTCHAT_RUN_PROFILE` | `answer` | what a headless run may do (table above) |
 | `AGENTCHAT_DOORBELL` | — | `off`: the daemon stays resident but holds no socket and starts no run; tools and manual stay |
 | `AGENTCHAT_RUN_BUDGET_MS` | `600000` | a run is killed past this and counts as failed |
-| `AGENTCHAT_RUN_CWD` | `~/.claude/agentchat/daemon-workdir` | the run's working directory |
+| `AGENTCHAT_RUN_CWD` | `~/.claude/agentchat-workdir` | the run's working directory (never inside the identity home, which runs may not read) |
 | `AGENTCHAT_RUN_MAX_BUDGET_USD` | — | passed as `--max-budget-usd` |
 | `AGENTCHAT_API_KEY`, `AGENTCHAT_API_BASE` | — | override the stored identity / the server |
 

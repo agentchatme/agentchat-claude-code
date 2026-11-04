@@ -2,7 +2,7 @@ import { parseArgs } from 'node:util'
 import * as path from 'node:path'
 import { buildDoorbellPrompts, manualPointer, mcpToolNamer, resolveRunProfile } from '@agentchatme/agent-core'
 import { runDoorbell } from '@agentchatme/agent-core/daemon'
-import { claudeConfigOverride, identityHome, MCP_SERVER_NAME, skillPath } from './host.js'
+import { claudeConfigOverride, identityHome, MCP_SERVER_NAME, resolveRunWorkdir, skillPath } from './host.js'
 import { ClaudeRunner } from './runner.js'
 
 // ─── The doorbell daemon binary ─────────────────────────────────────────────
@@ -39,20 +39,18 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   // `--home` is what the installed unit passes. Defaulting to this
   // integration's own home keeps a hand-run daemon honest.
   const home = values.home !== undefined ? path.resolve(values.home) : identityHome()
-  const runCwd = process.env['AGENTCHAT_RUN_CWD']?.trim()
-  const workdir =
-    values.workdir !== undefined
-      ? path.resolve(values.workdir)
-      : runCwd !== undefined && runCwd.length > 0
-        ? path.resolve(runCwd)
-        : path.join(home, 'daemon-workdir')
+  const configDir = claudeConfigOverride()
+  // The unit passes no `--workdir`: runs work in AGENTCHAT_RUN_CWD (captured at
+  // install) or, by default, BESIDE the identity home — never inside it, since
+  // every run's file tools are denied the identity home (runner.ts).
+  const workdir = values.workdir !== undefined ? path.resolve(values.workdir) : resolveRunWorkdir(configDir)
   const profile = resolveRunProfile()
 
   return await runDoorbell({
     home,
     workdir,
     profile,
-    runner: new ClaudeRunner({ configDir: claudeConfigOverride(), workdir, profile }),
+    runner: new ClaudeRunner({ configDir, workdir, profile }),
     prompts: buildDoorbellPrompts({
       toolName: mcpToolNamer(MCP_SERVER_NAME),
       manualPointer: manualPointer(`at ${skillPath()}`),

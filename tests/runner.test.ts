@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { buildDoorbellPrompts, manualPointer, mcpToolNamer, wakeInstruction } from '@agentchatme/agent-core'
-import { ClaudeRunner, buildClaudeEnv } from '../src/runner.js'
+import { ClaudeRunner, buildClaudeEnv, deniedAncestorOf, denyReadPathsFor } from '../src/runner.js'
 import { AGENTCHAT_TOOL_ALLOW, claudeRunArgs, readDenyRules } from '../src/profile.js'
-import { claudeUserStatePathFor, identityHomeFor } from '../src/host.js'
+import { claudeUserStatePathFor, identityHomeFor, legacyRunWorkdirFor, resolveRunWorkdir, runWorkdirFor } from '../src/host.js'
 import { installFakeClaude, readRuns, type FakeClaude } from './helpers/fake-claude.js'
 
 // ─── One headless Claude Code run: the exact flags, the prompt on stdin ─────
@@ -245,5 +245,109 @@ describe('ClaudeRunner', () => {
     const runner = new ClaudeRunner({ configDir: undefined, workdir, profile: 'answer', command: path.join(sandbox, 'no-such-claude'), env: env() })
     fs.mkdirSync(workdir, { recursive: true })
     expect((await runner.start({ kind: 'knock', prompt: 'P', runId: 'r', budgetMs: 1_000 })).state).toBe('not_started')
+  })
+})
+
+// ─── The run's cwd is never inside a path the run is denied ─────────────────
+//
+// The default workdir used to be `<identity home>/daemon-workdir`: inside the
+// one directory every run's file tools are denied, so a run under the default
+// configuration could not read its own working directory. The invariant below
+// is checked against the run's OWN argv, not against a constant.
+
+describe('the run’s working directory is never inside a denied path', () => {
+  /** The paths a run's argv denies, read back from its `Read(//p)` / `Read(//p/**)` rules. */
+  const deniedByArgv = (argv: string[]): string[] => {
+    const i = argv.indexOf('--disallowedTools')
+    if (i === -1) return []
+    return (argv[i + 1] ?? '')
+      .split(',')
+      .map((rule) => rule.match(/^Read\(\/(\/.*?)(?:\/\*\*)?\)$/)?.[1])
+      .filter((p): p is string => p !== undefined)
+  }
+
+  it('the default workdir sits BESIDE the identity home, follows the config dir, and is not the old in-home default', () => {
+    for (const configDir of [undefined, path.join(sandbox, 'relocated')]) {
+      const workdir = runWorkdirFor(configDir)
+      expect(path.dirname(workdir)).toBe(path.dirname(identityHomeFor(configDir)))
+      expect(deniedAncestorOf(workdir, denyReadPathsFor(configDir))).toBeNull()
+      expect(workdir).not.toBe(legacyRunWorkdirFor(configDir))
+      // The bug, as it was: the old default is inside the identity home.
+      expect(deniedAncestorOf(legacyRunWorkdirFor(configDir), denyReadPathsFor(configDir))).toBe(identityHomeFor(configDir))
+    }
+    expect(runWorkdirFor(path.join(sandbox, 'cfg'))).toBe(path.join(sandbox, 'cfg', 'agentchat-workdir'))
+    // AGENTCHAT_RUN_CWD outranks the default; blank is unset.
+    expect(resolveRunWorkdir(undefined, {})).toBe(runWorkdirFor(undefined))
+    expect(resolveRunWorkdir(undefined, { AGENTCHAT_RUN_CWD: '  ' })).toBe(runWorkdirFor(undefined))
+    expect(resolveRunWorkdir(undefined, { AGENTCHAT_RUN_CWD: path.join(sandbox, 'ws') })).toBe(path.join(sandbox, 'ws'))
+  })
+
+  it('containment is by whole path segment: a sibling sharing the prefix is outside; a trailing separator changes nothing', () => {
+    const home = path.join(sandbox, '.claude', 'agentchat')
+    expect(deniedAncestorOf(path.join(sandbox, '.claude', 'agentchat-workdir'), [home])).toBeNull()
+    expect(deniedAncestorOf(path.join(sandbox, '.claude'), [home])).toBeNull()
+    expect(deniedAncestorOf(home, [home])).toBe(home)
+    expect(deniedAncestorOf(path.join(home, 'daemon-workdir'), [home])).toBe(home)
+    expect(deniedAncestorOf(path.join(home, 'daemon-workdir') + path.sep, [home + path.sep])).toBe(home)
+    expect(deniedAncestorOf(path.join(sandbox, '.claude.json'), denyReadPathsFor(sandbox))).toBe(path.join(sandbox, '.claude.json'))
+  })
+
+  it('INVARIANT: the cwd a run is spawned in is covered by none of the Read deny rules on its own argv', async () => {
+    const root = fs.realpathSync(sandbox) // the child reports its cwd resolved
+    const configDir = path.join(root, 'cfg')
+    const workdir = runWorkdirFor(configDir) // the daemon's default for this config
+    const runner = new ClaudeRunner({ configDir, workdir, profile: 'work', env: env() })
+    expect(runner.workdirDeniedBy()).toBeNull()
+    expect(await runner.preflight()).toEqual({ ok: true })
+    await runner.start({ kind: 'knock', prompt: 'P', runId: 'r-inv', budgetMs: 10_000 })
+    const run = readRuns(fake)[0]!
+    const denied = deniedByArgv(run.argv)
+    if (process.platform !== 'win32') {
+      // The parser reads back exactly what the runner denies, and the key store IS covered.
+      expect([...new Set(denied)]).toEqual(denyReadPathsFor(configDir)) // one path, two rules (dir and dir/**)
+      expect(deniedAncestorOf(path.join(identityHomeFor(configDir), 'credentials'), denied)).toBe(identityHomeFor(configDir))
+      expect(deniedAncestorOf(path.join(configDir, '.claude.json'), denied)).toBe(path.join(configDir, '.claude.json'))
+    }
+    expect(deniedAncestorOf(run.cwd, denied)).toBeNull()
+    expect(deniedAncestorOf(run.cwd, denyReadPathsFor(configDir))).toBeNull()
+  })
+
+  it('the old default fails that invariant; a configured workdir inside the key store is said once, with the fix, and still runs', async () => {
+    const root = fs.realpathSync(sandbox)
+    const configDir = path.join(root, 'cfg')
+    const workdir = legacyRunWorkdirFor(configDir)
+    const runner = new ClaudeRunner({ configDir, workdir, profile: 'answer', env: env() })
+    expect(runner.workdirDeniedBy()).toBe(identityHomeFor(configDir))
+
+    const lines: string[] = []
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(((chunk: unknown) => {
+      lines.push(String(chunk))
+      return true
+    }) as typeof process.stderr.write)
+    const level = process.env['AGENTCHAT_LOG_LEVEL']
+    process.env['AGENTCHAT_LOG_LEVEL'] = 'warn'
+    try {
+      expect(await runner.preflight()).toEqual({ ok: true })
+      expect(await runner.preflight()).toEqual({ ok: true }) // preflight repeats; the warning does not
+    } finally {
+      write.mockRestore()
+      if (level === undefined) delete process.env['AGENTCHAT_LOG_LEVEL']
+      else process.env['AGENTCHAT_LOG_LEVEL'] = level
+    }
+    const warnings = lines.filter((line) => line.includes('cannot read their own working directory'))
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain(workdir)
+    expect(warnings[0]).toContain(runWorkdirFor(configDir))
+    expect(warnings[0]).toContain('daemon install')
+
+    await runner.start({ kind: 'knock', prompt: 'P', runId: 'r-legacy', budgetMs: 10_000 })
+    const run = readRuns(fake)[0]!
+    if (process.platform !== 'win32') expect(deniedAncestorOf(run.cwd, deniedByArgv(run.argv))).toBe(identityHomeFor(configDir))
+  })
+
+  it('preflight creates the workdir owner-only, as the identity home is created', async () => {
+    const runner = new ClaudeRunner({ configDir: undefined, workdir, profile: 'answer', env: env() })
+    expect(await runner.preflight()).toEqual({ ok: true })
+    if (process.platform !== 'win32') expect(fs.statSync(workdir).mode & 0o777).toBe(0o700)
   })
 })

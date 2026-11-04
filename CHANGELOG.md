@@ -4,6 +4,10 @@ All notable changes to `@agentchatme/claude-code` are recorded here. The format 
 
 ## [Unreleased]
 
+### Fixed
+
+- **The default run workdir is outside the identity home.** It was `~/.claude/agentchat/daemon-workdir` — inside the one directory every run's file tools are denied (`--disallowedTools Read(//<identity home>/**)`), so a run under the default configuration could not read its own working directory, and a `work` run could not edit what it had written there. The default is now `~/.claude/agentchat-workdir` (`$CLAUDE_CONFIG_DIR/agentchat-workdir` for a relocated config): beside the identity home, created owner-only on first use. The deny rules are unchanged. The installed service passes only `--home`, so no reinstall is needed: re-run `npx -y @agentchatme/claude-code` as for any upgrade (on Linux, also `systemctl --user restart agentchatd-claude-code` — the label `daemon status` prints — since `enable --now` leaves an already-running unit on the old bundle). `doctor` and `status` now show the run workdir (`run-workdir`), warn when `AGENTCHAT_RUN_CWD` points inside a denied path, and report a former `daemon-workdir` left behind (`doctor --fix` removes an empty one; a non-empty one is yours to move). When a configured workdir sits inside a denied path the daemon logs one warning line with the fix and still runs.
+
 ## 0.1.0 — 2026-11-03
 
 The first clean number under `VERSIONING.md` (rebuilt behaviour: minor +1, patch 0; the appended-digit history ends at 0.0.1394114111111116). The Claude Code integration is a doorbell on AgentChat's main line, built on `@agentchatme/agent-core` 0.1.0, whose bundled manual is `https://agentchat.me/skill.md` 2.1.2. Live-fired against production with a stand-in `claude` binary (agentchatme/agentchat-claude-code#1).

@@ -1,3 +1,4 @@
+import * as fs from 'node:fs'
 import * as path from 'node:path'
 import {
   alwaysOnOptedOut,
@@ -16,9 +17,9 @@ import {
   type DoctorOpts,
   type HostProfile,
 } from '@agentchatme/agent-core'
-import { identityHome, anchorFile, claudeConfigOverride, invocation, LABEL } from './host.js'
+import { identityHome, anchorFile, claudeConfigOverride, invocation, LABEL, legacyRunWorkdirFor, resolveRunWorkdir, runWorkdirFor } from './host.js'
 import { checkPlacement, placeAll, skillIsCurrent, unplaceIdentity, type PlacementIdentity } from './placement.js'
-import { claudeIsLoggedIn, inspectClaudeRuntime } from './runner.js'
+import { claudeIsLoggedIn, deniedAncestorOf, denyReadPathsFor, inspectClaudeRuntime } from './runner.js'
 import { doorbellServiceCurrent, ensureDoorbellService } from './service.js'
 import { VERSION } from './version.js'
 
@@ -57,7 +58,7 @@ const profile: HostProfile = {
       apiBase: identity?.apiBase ?? process.env['AGENTCHAT_API_BASE']?.trim() ?? 'https://api.agentchat.me',
     }).map((s) => `  ${s.name}: ${s.detail}`),
   logoutHints: () => [`To remove the integration too, run \`${invocation()} uninstall\`.`],
-  extraDoctorChecks: (opts): DoctorCheck[] => [...runtimeChecks(), ...placementChecks(opts.fix === true), serviceCheck(opts.fix === true), doorbellCheck()],
+  extraDoctorChecks: (opts): DoctorCheck[] => [...runtimeChecks(), ...placementChecks(opts.fix === true), serviceCheck(opts.fix === true), workdirCheck(opts.fix === true), doorbellCheck()],
 }
 
 function concise(value: string): string {
@@ -116,6 +117,51 @@ function serviceCheck(fix: boolean): DoctorCheck {
   return { name: 'service', verdict: state === 'down' ? 'FAIL' : 'PASS', detail: `${state}; service definition and daemon bundle match ${VERSION}` }
 }
 
+/**
+ * Where runs work, and whether they can read it. The daemon passes the deny
+ * rules for the identity home and ~/.claude.json on every run, so a workdir
+ * inside either is a cwd the run cannot read (the pre-fix default was one).
+ * The same env the service captured decides the path here, as it does for the
+ * service check.
+ */
+export function workdirCheck(fix: boolean): DoctorCheck {
+  const configDir = claudeConfigOverride()
+  const workdir = resolveRunWorkdir(configDir)
+  const denied = deniedAncestorOf(workdir, denyReadPathsFor(configDir))
+  if (denied !== null) {
+    return {
+      name: 'run-workdir',
+      verdict: 'WARN',
+      detail: `${workdir} is inside ${denied}, which runs may not read — point AGENTCHAT_RUN_CWD outside it (or unset it for ${runWorkdirFor(configDir)}), then \`${invocation()} daemon install\``,
+    }
+  }
+  const legacy = legacyRunWorkdirFor(configDir)
+  if (!fs.existsSync(legacy)) return { name: 'run-workdir', verdict: 'PASS', detail: workdir }
+  // Left behind by the old default. Empty: clutter, removed on --fix. Not
+  // empty: a `work` run wrote there, and what to keep is the user's call.
+  let empty = false
+  try {
+    empty = fs.readdirSync(legacy).length === 0
+  } catch {
+    /* unreadable: treat as not empty */
+  }
+  if (empty && fix) {
+    try {
+      fs.rmdirSync(legacy)
+      return { name: 'run-workdir', verdict: 'PASS', detail: `${workdir}; removed the empty former default ${legacy}` }
+    } catch {
+      /* fall through to the warning */
+    }
+  }
+  return {
+    name: 'run-workdir',
+    verdict: 'WARN',
+    detail: empty
+      ? `${workdir}; the former default ${legacy} is left behind inside the identity home — \`${invocation()} doctor --fix\` removes it`
+      : `${workdir}; the former default ${legacy} is inside the identity home, where runs cannot read it — move anything you want to keep, then delete it`,
+  }
+}
+
 function doorbellCheck(): DoctorCheck {
   const home = identityHome()
   if (readCredentials(home) === null) return { name: 'doorbell', verdict: 'PASS', detail: 'no identity — the daemon idles by design' }
@@ -160,6 +206,8 @@ export async function runStatus(opts: { json?: boolean }): Promise<number> {
   const checks = checkPlacement(identity)
   console.log('Placement:')
   for (const c of checks) console.log(`  ${c.ok ? '✓' : '✗'} ${c.name}: ${c.detail}`)
+  const workdir = workdirCheck(false)
+  console.log(`  ${workdir.verdict === 'PASS' ? '✓' : '✗'} run workdir: ${workdir.detail}`)
   if (identity) {
     const reach = await hostedMcpReachCheck()
     console.log(`  ${reach.verdict === 'PASS' ? '✓' : '✗'} hosted MCP: ${reach.detail}`)

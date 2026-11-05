@@ -205,9 +205,12 @@ export class ClaudeRunner implements RunRunner {
       env: buildClaudeEnv(this.options.configDir, this.options.env ?? process.env),
       stdin: request.prompt,
       budgetMs: request.budgetMs,
-      // The doorbell stopping (shutdown, identity change, refused key)
+      // The integration stopping (shutdown, identity change, refused key)
       // SIGTERMs this run's process group instead of orphaning it.
       ...(request.signal ? { signal: request.signal } : {}),
+      // The engine records a group invite as offered the moment the process
+      // has spawned, so a run cut short still counts as the one offer.
+      ...(request.onStarted ? { onStarted: request.onStarted } : {}),
     })
   }
 }

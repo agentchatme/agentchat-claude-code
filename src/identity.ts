@@ -19,6 +19,7 @@ import {
   type DoctorContext,
   type DoctorOpts,
   type HostProfile,
+  type StatusContext,
 } from '@agentchatme/agent-core'
 import { CLIENT, identityHome, anchorFile, claudeConfigOverride, invocation, LABEL, legacyRunWorkdirFor, resolveRunWorkdir, runWorkdirFor } from './host.js'
 import { checkPlacement, placeAll, skillIsCurrent, unplaceIdentity, type PlacementIdentity } from './placement.js'
@@ -72,6 +73,19 @@ const profile: HostProfile = {
     }).map((s) => `  ${s.name}: ${s.detail}`),
   logoutHints: () => [`To remove the integration too, run \`${invocation()} uninstall\`.`],
   extraDoctorChecks: (ctx: DoctorContext): DoctorCheck[] => [...runtimeChecks(), ...placementChecks(ctx.fix === true, ctx.identityLine), serviceCheck(ctx.fix === true), workdirCheck(ctx.fix === true), integrationCheck()],
+  // The shared status already fetched the served identity line once; the
+  // placement checks reuse it rather than fetching `/v1/texts` again.
+  extraStatus: async ({ identityLine }: StatusContext): Promise<string[]> => {
+    const identity = currentPlacementIdentity(identityLine)
+    const lines = ['Placement:', ...checkPlacement(identity).map((c) => `  ${c.ok ? '✓' : '✗'} ${c.name}: ${c.detail}`)]
+    const workdir = workdirCheck(false)
+    lines.push(`  ${workdir.verdict === 'PASS' ? '✓' : '✗'} run workdir: ${workdir.detail}`)
+    if (identity) {
+      const reach = await hostedMcpReachCheck()
+      lines.push(`  ${reach.verdict === 'PASS' ? '✓' : '✗'} hosted MCP: ${reach.detail}`)
+    }
+    return lines
+  },
 }
 
 function concise(value: string): string {
@@ -210,24 +224,8 @@ export function runNotNow(): number {
   return 0
 }
 
-export const { runRegister, runLogin, runRecover, runLogout } = commands
-
-/** The shared status, then the placement checks and the hosted-MCP probe the brief asks status to show. */
-export async function runStatus(opts: { json?: boolean }): Promise<number> {
-  const code = await commands.runStatus(opts)
-  if (opts.json) return code
-  const identity = await currentPlacementIdentityWithLine()
-  const checks = checkPlacement(identity)
-  console.log('Placement:')
-  for (const c of checks) console.log(`  ${c.ok ? '✓' : '✗'} ${c.name}: ${c.detail}`)
-  const workdir = workdirCheck(false)
-  console.log(`  ${workdir.verdict === 'PASS' ? '✓' : '✗'} run workdir: ${workdir.detail}`)
-  if (identity) {
-    const reach = await hostedMcpReachCheck()
-    console.log(`  ${reach.verdict === 'PASS' ? '✓' : '✗'} hosted MCP: ${reach.detail}`)
-  }
-  return code
-}
+/** `status` prints the shared lines, then this host's placement checks and the hosted-MCP probe (`extraStatus`, one texts fetch for both). */
+export const { runRegister, runLogin, runRecover, runLogout, runStatus } = commands
 
 export async function runDoctor(opts: DoctorOpts = {}): Promise<number> {
   const base = await commands.runDoctor(opts)

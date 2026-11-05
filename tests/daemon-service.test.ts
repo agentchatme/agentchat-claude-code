@@ -126,7 +126,7 @@ describe('daemon install points the service at the daemon, not the CLI', () => {
   it('registers the service with NO identity — install and sign-in are separate', async () => {
     const { out } = await run(CLI, ['daemon', 'install'])
     expect(out).not.toMatch(/register first/i)
-    expect(out).toMatch(/Doorbell daemon is ON/i)
+    expect(out).toMatch(/Integration daemon is ON/i)
   })
 
   it('finds the daemon when invoked through a shim rather than by its real path', async () => {
@@ -150,7 +150,7 @@ describe('daemon install points the service at the daemon, not the CLI', () => {
     expect(stable.includes('plugins/cache')).toBe(false)
   })
 
-  it('daemon status reports the service and the doorbell status file', async () => {
+  it('daemon status reports the service and the integration status file', async () => {
     await run(CLI, ['daemon', 'install'])
     const { out } = await run(CLI, ['daemon', 'status'])
     expect(out).toMatch(/daemon: (idle|starting|off|connected|NOT running)/)
@@ -214,7 +214,7 @@ describe.skipIf(!serviceOs)('the service label follows the config dir', () => {
     const { code, out } = await run(CLI, ['daemon', 'uninstall'])
     expect(code).toBe(1)
     expect(out).toMatch(/refusing to remove .* serves \/Users\/someone-else\/\.claude\/agentchat/)
-    expect(out).not.toMatch(/Doorbell daemon is OFF/)
+    expect(out).not.toMatch(/Integration daemon is OFF/)
     expect(fs.existsSync(foreign)).toBe(true)
   })
 

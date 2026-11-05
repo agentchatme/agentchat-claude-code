@@ -21,10 +21,10 @@ import { ensureDoorbellService, removeDoorbellService, stableDaemonPath } from '
 import { claudeConfigOverride } from './host.js'
 import { VERSION } from './version.js'
 
-const USAGE = `agentchat-claude-code ${VERSION} — the AgentChat doorbell for Claude Code
+const USAGE = `agentchat-claude-code ${VERSION} — the AgentChat integration for Claude Code
 
 Usage:
-  ${invocation()}                                  install: place the manual, the hosted tools, the identity line; register the doorbell service
+  ${invocation()}                                  install: place the manual, the hosted tools, the identity line; register the integration service
   ${invocation()} register --email <e> --handle <h>
   ${invocation()} register --code <6-digit-code>
   ${invocation()} register --not-now                stop offering to set this up
@@ -142,7 +142,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
 /**
  * The bare command. Places the four texts (the hosted MCP entry needs a key, so
  * without an identity the instruction file gets the setup offer instead) and
- * registers the resident doorbell service. Idempotent; an upgrade re-runs it.
+ * registers the resident integration service. Idempotent; an upgrade re-runs it.
  */
 async function runInstall(): Promise<number> {
   const runtime = inspectClaudeRuntime(claudeConfigOverride())
@@ -170,15 +170,15 @@ async function runInstall(): Promise<number> {
   const profile = resolveRunProfile()
   console.log(
     [
-      `AgentChat doorbell for ${LABEL} ${VERSION}`,
+      `AgentChat integration for ${LABEL} ${VERSION}`,
       '',
       ...formatPlacement(steps),
       ...(failed
         ? [`  ✗ service: not registered until the failed step above is resolved — re-run \`${invocation()}\``]
         : service === 'enabled'
-          ? [`  ✓ service: doorbell daemon registered (${serviceLabel()}); profile ${profile}${integrationDisabled() ? `; ${integrationDisabledBy()}=off — holding no socket` : ''}`]
+          ? [`  ✓ service: integration daemon registered (${serviceLabel()}); profile ${profile}${integrationDisabled() ? `; ${integrationDisabledBy()}=off — holding no socket` : ''}`]
           : service === 'off-by-choice'
-            ? ['  ○ service: doorbell daemon off (your choice; `daemon install` turns it on)']
+            ? ['  ○ service: integration daemon off (your choice; `daemon install` turns it on)']
             : [`  ✗ service: could not be registered (${serviceDetail}) — \`${invocation()} daemon install\` retries it`]),
       '',
       ...(identity
@@ -198,7 +198,7 @@ function runUninstall(): number {
     clearAlwaysOnWanted(home)
   } catch (err) {
     serviceRemoved = false
-    warnings.push(`could not fully remove the doorbell service: ${String(err)}`)
+    warnings.push(`could not fully remove the integration service: ${String(err)}`)
   }
   // Remembered, so no later install or upgrade quietly switches it back on.
   markAlwaysOnOptOut(home)
@@ -227,7 +227,7 @@ function runUninstall(): number {
       `${LABEL} integration removed.`,
       ...formatPlacement(steps),
       serviceRemoved
-        ? `  ✓ service: doorbell daemon removed`
+        ? `  ✓ service: integration daemon removed`
         : '  ✗ service: the durable daemon bundle was preserved because the service could not be verified as stopped',
       '',
       `Your AgentChat identity file was preserved (${home}). Run \`${invocation()}\` to install again, or \`${invocation()} logout\` to delete the local credentials.`,
@@ -245,11 +245,11 @@ function runDaemonCmd(sub: string | undefined): number {
       clearAlwaysOnOptOut(home)
       const r = ensureDoorbellService({ force: true })
       if (!r.ok) {
-        console.error(`Could not turn on the doorbell daemon: ${r.detail}`)
+        console.error(`Could not turn on the integration daemon: ${r.detail}`)
         return 1
       }
       console.log(
-        `Doorbell daemon is ON for ${LABEL} (${serviceLabel()}): a peer's message starts one headless Claude Code run with profile ${resolveRunProfile()} while this machine is up.${integrationDisabled() ? ` ${integrationDisabledBy()}=off was captured: it holds no socket until re-installed without it.` : ''}`,
+        `Integration daemon is ON for ${LABEL} (${serviceLabel()}): a peer's message starts one headless Claude Code run with profile ${resolveRunProfile()} while this machine is up.${integrationDisabled() ? ` ${integrationDisabledBy()}=off was captured: it holds no socket until re-installed without it.` : ''}`,
       )
       return 0
     }
@@ -258,18 +258,18 @@ function runDaemonCmd(sub: string | undefined): number {
       try {
         removeDoorbellService()
       } catch (err) {
-        console.error(`Could not turn off the doorbell daemon: ${String(err instanceof Error ? err.message : err)}`)
+        console.error(`Could not turn off the integration daemon: ${String(err instanceof Error ? err.message : err)}`)
         return 1
       }
       clearAlwaysOnWanted(home)
       markAlwaysOnOptOut(home)
-      console.log(`Doorbell daemon is OFF for ${LABEL} — messages stay stored on the server; the hosted tools and the manual still work in every session.`)
+      console.log(`Integration daemon is OFF for ${LABEL} — messages stay stored on the server; the hosted tools and the manual still work in every session.`)
       return 0
     }
     case 'status': {
       const state = alwaysOnState(home)
       const line = {
-        off: 'daemon: off — nothing rings; the agent still has its tools in every session',
+        off: 'daemon: off — nothing wakes the agent; it still has its tools in every session',
         idle: 'daemon: idle — running, waiting for a sign-in',
         starting: 'daemon: starting — the service is coming online',
         connected: 'daemon: connected ✓ — holding the socket',

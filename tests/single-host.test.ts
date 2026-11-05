@@ -185,7 +185,7 @@ describe('install places the four texts', () => {
     expect((await run(['daemon', 'disable'])).code).toBe(0)
     const upgraded = await run([])
     expect(upgraded.code, upgraded.stdout).toBe(0)
-    expect(upgraded.stdout).toContain('○ service: doorbell daemon off (your choice')
+    expect(upgraded.stdout).toContain('○ service: integration daemon off (your choice')
     expect(fs.existsSync(path.join(home(), 'always-on.optout'))).toBe(true)
   })
 })

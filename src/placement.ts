@@ -517,7 +517,7 @@ export function checkPlacement(identity: PlacementIdentity | null): PlacementChe
   checks.push({
     name: 'legacy',
     ok: leftovers.length === 0,
-    detail: leftovers.length === 0 ? 'no pre-doorbell wiring left' : `pre-doorbell wiring still present: ${leftovers.join(', ')}`,
+    detail: leftovers.length === 0 ? 'no pre-0.1.0 wiring left' : `pre-0.1.0 wiring still present: ${leftovers.join(', ')}`,
   })
   return checks
 }

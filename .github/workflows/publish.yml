@@ -65,7 +65,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
 
-      - name: the published tarball is self-contained and the doorbell installs from it
+      - name: the published tarball is self-contained and the integration installs from it
         id: pack
         run: bash scripts/release-smoke.sh
 

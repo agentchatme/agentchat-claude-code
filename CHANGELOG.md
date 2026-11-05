@@ -4,7 +4,9 @@ All notable changes to `@agentchatme/claude-code` are recorded here. The format 
 
 ## [Unreleased]
 
-Built on `@agentchatme/agent-core` 0.2.0, which moves the engine onto the AgentChat TypeScript SDK (`agentchatme` ≥ 1.2.0). What changes for a Claude Code user:
+## 0.2.0 — 2026-11-05
+
+Rebuilt behaviour (minor +1, patch 0 under `VERSIONING.md`): the integration now runs on `@agentchatme/agent-core` 0.2.0, which moves the engine onto the AgentChat TypeScript SDK (`agentchatme` 1.2.0). What changes for a Claude Code user:
 
 - **Delivered means received.** The daemon's socket is the SDK's and acknowledges every message the moment it arrives; whether the agent has read it is its own verdict inside the run (`agentchat_decide`), so the tray is never emptied by the daemon. A deferred conversation's reminder (`wake` frame) wakes a run like a message does.
 - **A refused key is `blocked`, not `terminal`.** The daemon no longer sits a refused key out until the key changes: the SDK keeps its client and tries a fresh hello every 10–15 minutes until one is accepted, so a key rotated back reconnects on its own. The log says `socket blocked (auth): …` once and `socket still blocked (auth): … — next hello in about N min` per retry; `status` shows `Integration: socket blocked` with `auth rejected (close 1008 Invalid token) — check the agent's API key; …` as `last error` (a status file an older daemon wrote with `terminal` reads as `blocked`). The reconnect backoff is the SDK's too (500 ms → 30 s; five minutes once an outage is long) and never gives up.
@@ -12,7 +14,13 @@ Built on `@agentchatme/agent-core` 0.2.0, which moves the engine onto the AgentC
 - **The server can tell this integration apart.** Every request and the socket name the runtime (`claude-code`) and this package's version.
 - **A restart no longer starts one run per pending group invite**: offered invites are remembered in the identity home.
 - **Names.** `AGENTCHAT_INTEGRATION=off` replaces `AGENTCHAT_DOORBELL=off` (the old spelling still works this release); the status file is `integration.status.json` (`status`/`doctor` still read the old `doorbell.status.json` of a daemon that has not restarted); `doctor` reports `integration` and `texts` checks; the daemon log says `integration resident`, `wake — …`, `run start kind=wake`; `status` and `daemon status` print `Integration: socket …` where they printed `Doorbell: …`, and `install`, `uninstall` and `daemon install|disable` say `integration daemon` where they said `doorbell daemon`.
-- Upgrading: re-run `npx -y @agentchatme/claude-code` (on Linux also `systemctl --user restart agentchatd-claude-code`; on macOS the launchd job is reloaded by `daemon install`).
+
+### Upgrading
+
+- **`npx -y @agentchatme/claude-code` is the upgrade** — there is no separate command. It re-places the skill, the hosted MCP entry and the (now served) identity line, copies the new daemon bundle to `~/.claude/agentchat/bin/agentchat-daemon.mjs` and re-registers the service because the installed-version marker no longer matches; that re-registration restarts the daemon on both platforms (`systemctl --user restart agentchatd-claude-code` on Linux, `launchctl unload` + `load -w` on macOS), so the extra `systemctl --user restart` the 0.1.1 note asked for is no longer needed. A service you switched off with `daemon disable` stays off; `daemon install` turns it back on, on the new bundle.
+- **Status file.** Until the daemon has restarted, `status` and `doctor` read the `doorbell.status.json` the old daemon still writes — its `terminal` shows as `blocked`, its `knocks` as `wakes`. After the restart the daemon writes `integration.status.json` (version 2: `wakes`, `wakes_absorbed`, a `texts` block, no `ack_negotiated`). `status --json` emits `integration` and keeps `doorbell` as an alias for this release.
+- **Switch.** `AGENTCHAT_INTEGRATION=off` is the switch; a service captured with `AGENTCHAT_DOORBELL=off` keeps holding no socket this release (the daemon reads the old name too). Re-run `AGENTCHAT_INTEGRATION=off npx -y @agentchatme/claude-code daemon install` to capture the new spelling before the old one is dropped.
+- **Nothing to migrate.** The credential, the anchor block in `CLAUDE.md` and the MCP entry are unchanged. The restarted daemon fetches the served texts (`GET /v1/texts?runtime=claude-code`) before its first run; offline with nothing cached, a wake does not start a run until they arrive (`status`: `texts: not fetched yet`), and the wake retries on the ladder.
 
 ## 0.1.1 — 2026-11-04
 

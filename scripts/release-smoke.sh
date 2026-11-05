@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Release smoke: pack the package, then prove the TARBALL (not the checkout)
-# runs: the CLI prints its version, the doorbell daemon idles resident with no
+# runs: the CLI prints its version, the integration daemon idles resident with no
 # identity, and an npm-installed copy run through the node_modules/.bin shim
 # installs, re-installs, reports status and uninstalls against a sandbox HOME
 # with the package's own fake `claude` and the service in dry-run. Nothing touches
@@ -34,7 +34,7 @@ esac
 expected="$(node -p "require('./package.json').version")"
 [ "$cli_out" = "$expected" ] || { echo "::error::--version printed '$cli_out', expected '$expected'"; exit 1; }
 
-# The doorbell daemon runs from the tarball with no identity and stays
+# The integration daemon runs from the tarball with no identity and stays
 # resident, waiting for a credential.
 daemon_alive() { # <script> <log>: run it 6 s with a fresh identity home, report whether it idled
   local dhome; dhome="$(mktemp -d)"
@@ -47,7 +47,7 @@ daemon_alive() { # <script> <log>: run it 6 s with a fresh identity home, report
   wait "$dpid" 2>/dev/null || true
   echo "--- daemon ($1) ---"; cat "$2"
   [ "$alive" = "1" ] || { echo "::error::the daemon exited instead of idling"; exit 1; }
-  grep -q "doorbell resident" "$2" || { echo "::error::the daemon did not come up as a resident doorbell"; exit 1; }
+  grep -q "integration resident" "$2" || { echo "::error::the daemon did not come up as a resident integration"; exit 1; }
 }
 daemon_alive "$root/verify/package/dist/daemon-main.js" "$root/daemon-tarball.log"
 
@@ -71,9 +71,9 @@ run_cli() {
 for pass in first idempotent; do
   out="$(run_cli 2>&1)"
   echo "--- $pass install ---"; echo "$out"
-  echo "$out" | grep -q "AgentChat doorbell for Claude Code $expected"
+  echo "$out" | grep -q "AgentChat integration for Claude Code $expected"
   echo "$out" | grep -q "✓ skill: manual"
-  echo "$out" | grep -q "✓ service: doorbell daemon registered"
+  echo "$out" | grep -q "✓ service: integration daemon registered"
   echo "$out" | grep -q 'Ask Claude Code: "Set up your AgentChat account."'
 done
 claude_dir="$root/npxlike/home/.claude"

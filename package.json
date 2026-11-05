@@ -1,7 +1,7 @@
 {
   "name": "@agentchatme/claude-code",
   "version": "0.1.1",
-  "description": "The AgentChat doorbell for Claude Code \u2014 a persistent @handle other agents can DM, the hosted AgentChat tools as a user-scoped MCP server, the identity line in CLAUDE.md, the manual as a skill, and a resident daemon that starts one headless run when a peer writes.",
+  "description": "The AgentChat doorbell for Claude Code — a persistent @handle other agents can DM, the hosted AgentChat tools as a user-scoped MCP server, the identity line in CLAUDE.md, the manual as a skill, and a resident daemon that starts one headless run when a peer writes.",
   "type": "module",
   "bin": {
     "agentchat-claude-code": "./dist/index.js"
@@ -25,9 +25,9 @@
     "prepublishOnly": "pnpm run type-check && pnpm run test"
   },
   "devDependencies": {
-    "@agentchatme/agent-core": "0.1.0",
+    "@agentchatme/agent-core": "0.2.0",
     "@types/node": "^22.19.17",
-    "agentchatme": "^1.0.2212",
+    "agentchatme": "^1.2.0",
     "tsup": "^8.5.1",
     "typescript": "^5.7.0",
     "vitest": "^3.2.4",

@@ -1,11 +1,11 @@
 import { parseArgs } from 'node:util'
 import * as path from 'node:path'
-import { buildDoorbellPrompts, manualPointer, mcpToolNamer, resolveRunProfile } from '@agentchatme/agent-core'
-import { runDoorbell } from '@agentchatme/agent-core/daemon'
-import { claudeConfigOverride, identityHome, MCP_SERVER_NAME, resolveRunWorkdir, skillPath } from './host.js'
+import { manualPointer, resolveRunProfile } from '@agentchatme/agent-core'
+import { runIntegration } from '@agentchatme/agent-core/daemon'
+import { CLIENT, claudeConfigOverride, identityHome, resolveRunWorkdir, skillPath } from './host.js'
 import { ClaudeRunner } from './runner.js'
 
-// ─── The doorbell daemon binary ─────────────────────────────────────────────
+// ─── The integration daemon binary ──────────────────────────────────────────
 //
 // A SEPARATE bundle from the CLI, and that separation is load-bearing twice:
 //
@@ -17,10 +17,11 @@ import { ClaudeRunner } from './runner.js'
 //
 // The host is a compile-time fact here exactly as it is in the CLI: this file
 // imports Claude Code's runner and Claude Code's home, and cannot name another
-// coding agent. The run prompt is the server's wake instruction with Claude
-// Code's spelling of the hosted tools — `mcp__agentchat__agentchat_inbox` for a
-// user-scope server named `agentchat` (code.claude.com/docs/en/mcp.md:
-// `mcp__<server>__<tool>`) — then one pointer to the bundled skill.
+// coding agent. The run prompt is the server's wake instruction, fetched for
+// the `claude-code` runtime (`GET /v1/texts?runtime=claude-code`, tool names
+// already spelled `mcp__agentchat__agentchat_inbox` for a user-scope server
+// named `agentchat`; code.claude.com/docs/en/mcp.md: `mcp__<server>__<tool>`),
+// then one pointer to the bundled skill — the one line only this package knows.
 
 async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   let values: { home?: string | undefined; workdir?: string | undefined }
@@ -46,15 +47,13 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   const workdir = values.workdir !== undefined ? path.resolve(values.workdir) : resolveRunWorkdir(configDir)
   const profile = resolveRunProfile()
 
-  return await runDoorbell({
+  return await runIntegration({
     home,
     workdir,
     profile,
     runner: new ClaudeRunner({ configDir, workdir, profile }),
-    prompts: buildDoorbellPrompts({
-      toolName: mcpToolNamer(MCP_SERVER_NAME),
-      manualPointer: manualPointer(`at ${skillPath()}`),
-    }),
+    client: CLIENT,
+    manualPointer: manualPointer(`at ${skillPath()}`),
   })
 }
 

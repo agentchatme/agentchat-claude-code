@@ -47,7 +47,7 @@ daemon_alive() { # <script> <log>: run it 6 s with a fresh identity home, report
   wait "$dpid" 2>/dev/null || true
   echo "--- daemon ($1) ---"; cat "$2"
   [ "$alive" = "1" ] || { echo "::error::the daemon exited instead of idling"; exit 1; }
-  grep -q "doorbell resident" "$2" || { echo "::error::the daemon did not come up as a resident doorbell"; exit 1; }
+  grep -q "integration resident" "$2" || { echo "::error::the daemon did not come up as a resident doorbell"; exit 1; }
 }
 daemon_alive "$root/verify/package/dist/daemon-main.js" "$root/daemon-tarball.log"
 

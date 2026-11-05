@@ -1,6 +1,7 @@
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { MANUAL_FILENAME, MANUAL_SKILL_NAME, serviceLabelFor } from '@agentchatme/agent-core'
+import { MANUAL_FILENAME, MANUAL_SKILL_NAME, serviceLabelFor, type IntegrationClient } from '@agentchatme/agent-core'
+import { VERSION } from './version.js'
 
 // ─── The only file in this repo that knows a host exists ────────────────────
 //
@@ -95,6 +96,14 @@ export function skillPath(): string {
 
 export const LABEL = 'Claude Code'
 
+/**
+ * How this integration names itself to the server: the runtime as the texts
+ * endpoint spells it (`GET /v1/texts?runtime=claude-code`) and this package's
+ * version, sent as the client identity on every request and on the socket.
+ * Nothing branches on it.
+ */
+export const CLIENT: IntegrationClient = { runtime: 'claude-code', version: VERSION }
+
 /** The service label of the default config (`~/.claude`) — the label every install before per-home labels used. */
 export const SERVICE_BASE_LABEL = 'agentchatd-claude-code'
 
@@ -141,7 +150,7 @@ export function serviceEnv(): Record<string, string> {
   const env: Record<string, string> = {}
   const configDir = claudeConfigOverride()
   if (configDir !== undefined) env['CLAUDE_CONFIG_DIR'] = configDir
-  for (const key of ['AGENTCHAT_RUN_PROFILE', 'AGENTCHAT_DOORBELL', 'AGENTCHAT_RUN_BUDGET_MS', 'AGENTCHAT_RUN_CWD', 'AGENTCHAT_RUN_MAX_BUDGET_USD', 'AGENTCHAT_API_BASE']) {
+  for (const key of ['AGENTCHAT_RUN_PROFILE', 'AGENTCHAT_INTEGRATION', 'AGENTCHAT_DOORBELL', 'AGENTCHAT_RUN_BUDGET_MS', 'AGENTCHAT_RUN_CWD', 'AGENTCHAT_RUN_MAX_BUDGET_USD', 'AGENTCHAT_API_BASE']) {
     const value = process.env[key]?.trim()
     if (value !== undefined && value.length > 0) env[key] = value
   }

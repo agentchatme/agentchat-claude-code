@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { buildDoorbellPrompts, manualPointer, mcpToolNamer, wakeInstruction } from '@agentchatme/agent-core'
+import { manualPointer } from '@agentchatme/agent-core'
 import { ClaudeRunner, buildClaudeEnv, deniedAncestorOf, denyReadPathsFor } from '../src/runner.js'
 import { AGENTCHAT_TOOL_ALLOW, claudeRunArgs, readDenyRules } from '../src/profile.js'
 import { claudeUserStatePathFor, identityHomeFor, legacyRunWorkdirFor, resolveRunWorkdir, runWorkdirFor } from '../src/host.js'
@@ -136,7 +136,9 @@ describe('the child environment', () => {
 })
 
 describe('ClaudeRunner', () => {
-  const prompts = buildDoorbellPrompts({ toolName: mcpToolNamer('agentchat'), manualPointer: manualPointer('at ~/.claude/skills/agentchat/SKILL.md') })
+  // The served wake instruction (GET /v1/texts?runtime=claude-code) plus the pointer line, as the daemon builds it.
+  const SERVED_WAKE = 'SERVED WAKE INSTRUCTION for claude-code: call mcp__agentchat__agentchat_inbox first.'
+  const prompts = { wake: `${SERVED_WAKE}\n\n${manualPointer('at ~/.claude/skills/agentchat/SKILL.md')}`, invite: 'SERVED INVITE PROMPT' }
 
   it('preflight passes with a current, signed-in claude', async () => {
     const runner = new ClaudeRunner({ configDir: undefined, workdir, profile: 'answer', env: env() })
@@ -160,10 +162,10 @@ describe('ClaudeRunner', () => {
     expect(await runner.preflight()).toMatchObject({ ok: false, detail: expect.stringMatching(/>= 2\.1\.274/) })
   })
 
-  it('a knock run: the server’s wake text on stdin, the profile flags, the workdir, the scrubbed env — output discarded', async () => {
+  it('a wake run: the server’s wake text on stdin, the profile flags, the workdir, the scrubbed env — output discarded', async () => {
     const runner = new ClaudeRunner({ configDir: undefined, workdir, profile: 'answer', env: env({ CLAUDECODE: '1' }) })
     fs.mkdirSync(workdir, { recursive: true })
-    const outcome = await runner.start({ kind: 'knock', prompt: prompts.knock, runId: 'r1', budgetMs: 10_000 })
+    const outcome = await runner.start({ kind: 'wake', prompt: prompts.wake, runId: 'r1', budgetMs: 10_000 })
     expect(outcome).toMatchObject({ state: 'ok', exitCode: 0 })
     expect(JSON.stringify(outcome)).not.toContain('Peer text')
 
@@ -177,8 +179,8 @@ describe('ClaudeRunner', () => {
       expect(run.argv.at(-1)).toContain(`Read(/${identityHomeFor(undefined)}/**)`)
       expect(run.argv.at(-1)).toContain(`Read(/${claudeUserStatePathFor(undefined)})`)
     }
-    expect(run.stdin).toBe(prompts.knock)
-    expect(run.stdin.startsWith(wakeInstruction(mcpToolNamer('agentchat')))).toBe(true)
+    expect(run.stdin).toBe(prompts.wake)
+    expect(run.stdin.startsWith(SERVED_WAKE)).toBe(true)
     expect(run.stdin).toContain('mcp__agentchat__agentchat_inbox')
     expect(run.stdin).not.toMatch(/gate step/i)
     expect(fs.realpathSync(run.cwd)).toBe(fs.realpathSync(workdir))
@@ -201,7 +203,7 @@ describe('ClaudeRunner', () => {
     fs.mkdirSync(relocated, { recursive: true })
     const runner = new ClaudeRunner({ configDir: relocated, workdir, profile: 'answer', env: env() })
     fs.mkdirSync(workdir, { recursive: true })
-    await runner.start({ kind: 'knock', prompt: 'P', runId: 'r3', budgetMs: 10_000 })
+    await runner.start({ kind: 'wake', prompt: 'P', runId: 'r3', budgetMs: 10_000 })
     const run = readRuns(fake)[0]!
     if (process.platform !== 'win32') {
       expect(run.argv.at(-1)).toContain(`Read(/${path.join(relocated, 'agentchat')}/**)`)
@@ -213,7 +215,7 @@ describe('ClaudeRunner', () => {
     const runner = new ClaudeRunner({ configDir: undefined, workdir, profile: 'answer', env: env({ FAKE_CLAUDE_RUN: 'hang' }) })
     fs.mkdirSync(workdir, { recursive: true })
     const controller = new AbortController()
-    const pending = runner.start({ kind: 'knock', prompt: 'P', runId: 'r4', budgetMs: 60_000, signal: controller.signal })
+    const pending = runner.start({ kind: 'wake', prompt: 'P', runId: 'r4', budgetMs: 60_000, signal: controller.signal })
     await new Promise((r) => setTimeout(r, 400))
     controller.abort()
     const outcome = await pending
@@ -223,7 +225,7 @@ describe('ClaudeRunner', () => {
 
   it('classifies: a failure after output is failed, a silent non-zero exit is not_started, a hang is timed_out', async () => {
     fs.mkdirSync(workdir, { recursive: true })
-    const request = { kind: 'knock' as const, prompt: 'P', runId: 'r', budgetMs: 15_000 }
+    const request = { kind: 'wake' as const, prompt: 'P', runId: 'r', budgetMs: 15_000 }
 
     const failed = await new ClaudeRunner({ configDir: undefined, workdir, profile: 'answer', env: env({ FAKE_CLAUDE_RUN: 'fail' }) }).start(request)
     expect(failed).toMatchObject({ state: 'failed', exitCode: 1 })
@@ -244,7 +246,7 @@ describe('ClaudeRunner', () => {
   it('a missing claude binary is not_started, never a throw', async () => {
     const runner = new ClaudeRunner({ configDir: undefined, workdir, profile: 'answer', command: path.join(sandbox, 'no-such-claude'), env: env() })
     fs.mkdirSync(workdir, { recursive: true })
-    expect((await runner.start({ kind: 'knock', prompt: 'P', runId: 'r', budgetMs: 1_000 })).state).toBe('not_started')
+    expect((await runner.start({ kind: 'wake', prompt: 'P', runId: 'r', budgetMs: 1_000 })).state).toBe('not_started')
   })
 })
 
@@ -299,7 +301,7 @@ describe('the run’s working directory is never inside a denied path', () => {
     const runner = new ClaudeRunner({ configDir, workdir, profile: 'work', env: env() })
     expect(runner.workdirDeniedBy()).toBeNull()
     expect(await runner.preflight()).toEqual({ ok: true })
-    await runner.start({ kind: 'knock', prompt: 'P', runId: 'r-inv', budgetMs: 10_000 })
+    await runner.start({ kind: 'wake', prompt: 'P', runId: 'r-inv', budgetMs: 10_000 })
     const run = readRuns(fake)[0]!
     const denied = deniedByArgv(run.argv)
     if (process.platform !== 'win32') {
@@ -340,7 +342,7 @@ describe('the run’s working directory is never inside a denied path', () => {
     expect(warnings[0]).toContain(runWorkdirFor(configDir))
     expect(warnings[0]).toContain('daemon install')
 
-    await runner.start({ kind: 'knock', prompt: 'P', runId: 'r-legacy', budgetMs: 10_000 })
+    await runner.start({ kind: 'wake', prompt: 'P', runId: 'r-legacy', budgetMs: 10_000 })
     const run = readRuns(fake)[0]!
     if (process.platform !== 'win32') expect(deniedAncestorOf(run.cwd, deniedByArgv(run.argv))).toBe(identityHomeFor(configDir))
   })

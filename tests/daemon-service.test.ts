@@ -76,8 +76,8 @@ describe('the daemon bundle ships with the NPX package', () => {
   it('is a different artifact from the CLI — the CLI must never carry the socket layer', () => {
     const cli = fs.readFileSync(CLI, 'utf-8')
     const daemon = fs.readFileSync(DAEMON, 'utf-8')
-    expect(daemon).toContain('doorbell socket hello.ok')
-    expect(cli).not.toContain('doorbell socket hello.ok')
+    expect(daemon).toContain('integration resident')
+    expect(cli).not.toContain('integration resident')
   })
 })
 
@@ -87,10 +87,10 @@ describe('the daemon is RESIDENT — it idles rather than exiting', () => {
     fs.mkdirSync(home, { recursive: true })
     const { out, alive } = await runFor(DAEMON, ['--home', home], 1500)
     expect(alive, `the daemon exited instead of idling:\n${out}`).toBe(true)
-    expect(out).toMatch(/doorbell resident/i)
+    expect(out).toMatch(/integration resident/i)
     expect(out).not.toMatch(/Unknown option|Usage:/i)
     expect(out).not.toMatch(/Dynamic require/i)
-    expect(fs.existsSync(path.join(home, 'doorbell.status.json'))).toBe(true)
+    expect(fs.existsSync(path.join(home, 'integration.status.json'))).toBe(true)
   }, 20_000)
 
   it('carries its whole runtime — no bare-clone module resolution', async () => {
@@ -117,7 +117,7 @@ describe('the daemon is RESIDENT — it idles rather than exiting', () => {
     const { out, alive } = await runFor(DAEMON, ['--home', home], 1500, { AGENTCHAT_DOORBELL: 'off' })
     expect(alive).toBe(true)
     expect(out).toContain('AGENTCHAT_DOORBELL=off')
-    const status = JSON.parse(fs.readFileSync(path.join(home, 'doorbell.status.json'), 'utf-8')) as { socket: string }
+    const status = JSON.parse(fs.readFileSync(path.join(home, 'integration.status.json'), 'utf-8')) as { socket: string }
     expect(status.socket).toBe('off')
   }, 20_000)
 })
@@ -154,7 +154,7 @@ describe('daemon install points the service at the daemon, not the CLI', () => {
     await run(CLI, ['daemon', 'install'])
     const { out } = await run(CLI, ['daemon', 'status'])
     expect(out).toMatch(/daemon: (idle|starting|off|connected|NOT running)/)
-    expect(out).toContain('Doorbell:')
+    expect(out).toContain('Integration:')
   })
 
   it('the retired hook subcommands are gone — receiving needs no hooks', async () => {
@@ -250,7 +250,7 @@ describe('the run workdir is outside the identity home', () => {
     signIn(home)
     const { out, alive } = await runFor(DAEMON, ['--home', home], 6000)
     expect(alive, out).toBe(true)
-    expect(out).toMatch(/doorbell resident/)
+    expect(out).toMatch(/integration resident/)
     expect(fs.existsSync(path.join(sandbox, '.claude', 'agentchat-workdir')), out).toBe(true)
     expect(fs.existsSync(path.join(home, 'daemon-workdir'))).toBe(false)
     expect(out).not.toMatch(/cannot read their own working directory/)

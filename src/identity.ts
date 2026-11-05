@@ -4,20 +4,23 @@ import {
   alwaysOnOptedOut,
   alwaysOnState,
   createIdentityCommands,
-  doorbellStatusAge,
+  fetchIdentityLine,
+  integrationDisabledBy,
+  integrationStatusAge,
   probeHostedMcp,
   readCredentials,
-  readDoorbellStatus,
+  readIntegrationStatus,
   recordOfferDeclined,
   renderAnchorBlock,
   renderDeclinedBlock,
   resolveIdentity,
   writeAnchor,
   type DoctorCheck,
+  type DoctorContext,
   type DoctorOpts,
   type HostProfile,
 } from '@agentchatme/agent-core'
-import { identityHome, anchorFile, claudeConfigOverride, invocation, LABEL, legacyRunWorkdirFor, resolveRunWorkdir, runWorkdirFor } from './host.js'
+import { CLIENT, identityHome, anchorFile, claudeConfigOverride, invocation, LABEL, legacyRunWorkdirFor, resolveRunWorkdir, runWorkdirFor } from './host.js'
 import { checkPlacement, placeAll, skillIsCurrent, unplaceIdentity, type PlacementIdentity } from './placement.js'
 import { claudeIsLoggedIn, deniedAncestorOf, denyReadPathsFor, inspectClaudeRuntime } from './runner.js'
 import { doorbellServiceCurrent, ensureDoorbellService } from './service.js'
@@ -31,23 +34,33 @@ import { VERSION } from './version.js'
 // changes, the hosted MCP entry is re-registered with the new key, the manual is
 // refreshed and the identity line rewritten.
 
-export function currentPlacementIdentity(): PlacementIdentity | null {
+export function currentPlacementIdentity(identityLine: string | null = null): PlacementIdentity | null {
   const identity = resolveIdentity(identityHome())
   if (identity === null || identity.handle === null) return null
-  return { handle: identity.handle, apiKey: identity.apiKey, apiBase: identity.apiBase }
+  return { handle: identity.handle, apiKey: identity.apiKey, apiBase: identity.apiBase, identityLine }
+}
+
+/** The identity plus its served identity line (fetched now, else the identity-home cache, else null). */
+export async function currentPlacementIdentityWithLine(): Promise<PlacementIdentity | null> {
+  const identity = currentPlacementIdentity()
+  if (identity === null) return null
+  const identityLine = await fetchIdentityLine({ home: identityHome(), apiKey: identity.apiKey, apiBase: identity.apiBase, client: CLIENT })
+  return { ...identity, identityLine }
 }
 
 const profile: HostProfile = {
   label: LABEL,
   id: 'claude-code',
+  client: CLIENT,
   home: identityHome,
   anchorFile,
   invocation,
   renderAnchor: renderAnchorBlock,
   isWired: skillIsCurrent,
-  place: (handle, apiKey) => {
+  // agent-core fetches the served identity line (cache fallback) before calling this.
+  place: (handle, apiKey, identityLine) => {
     const identity = resolveIdentity(identityHome())
-    const steps = placeAll({ handle, apiKey, apiBase: identity?.apiBase ?? 'https://api.agentchat.me' })
+    const steps = placeAll({ handle, apiKey, apiBase: identity?.apiBase ?? 'https://api.agentchat.me', identityLine })
     return steps.map((s) => `  ${s.status === 'failed' ? 'FAILED' : s.name}: ${s.detail}`)
   },
   // agent-core resolves the identity BEFORE it clears the credential and hands
@@ -58,7 +71,7 @@ const profile: HostProfile = {
       apiBase: identity?.apiBase ?? process.env['AGENTCHAT_API_BASE']?.trim() ?? 'https://api.agentchat.me',
     }).map((s) => `  ${s.name}: ${s.detail}`),
   logoutHints: () => [`To remove the integration too, run \`${invocation()} uninstall\`.`],
-  extraDoctorChecks: (opts): DoctorCheck[] => [...runtimeChecks(), ...placementChecks(opts.fix === true), serviceCheck(opts.fix === true), workdirCheck(opts.fix === true), doorbellCheck()],
+  extraDoctorChecks: (ctx: DoctorContext): DoctorCheck[] => [...runtimeChecks(), ...placementChecks(ctx.fix === true, ctx.identityLine), serviceCheck(ctx.fix === true), workdirCheck(ctx.fix === true), integrationCheck()],
 }
 
 function concise(value: string): string {
@@ -84,8 +97,8 @@ function runtimeChecks(): DoctorCheck[] {
   ]
 }
 
-function placementChecks(fix: boolean): DoctorCheck[] {
-  const identity = currentPlacementIdentity()
+function placementChecks(fix: boolean, identityLine: string | null): DoctorCheck[] {
+  const identity = currentPlacementIdentity(identityLine)
   if (fix) placeAll(identity)
   const checks: DoctorCheck[] = checkPlacement(identity)
     .filter((c) => c.name !== 'identity') // the shared doctor already reports the identity line
@@ -97,7 +110,7 @@ function placementChecks(fix: boolean): DoctorCheck[] {
 export async function hostedMcpReachCheck(): Promise<DoctorCheck> {
   const identity = currentPlacementIdentity()
   if (identity === null) return { name: 'hosted-mcp-reach', verdict: 'WARN', detail: 'no identity — nothing to probe with' }
-  const probe = await probeHostedMcp({ apiKey: identity.apiKey, apiBase: identity.apiBase, clientName: '@agentchatme/claude-code doctor', clientVersion: VERSION })
+  const probe = await probeHostedMcp({ apiKey: identity.apiKey, apiBase: identity.apiBase, client: CLIENT, clientName: '@agentchatme/claude-code doctor', clientVersion: VERSION })
   return probe.ok
     ? { name: 'hosted-mcp-reach', verdict: 'PASS', detail: `initialize ok${probe.serverName ? ` (${probe.serverName}${probe.serverVersion ? ` ${probe.serverVersion}` : ''})` : ''}` }
     : { name: 'hosted-mcp-reach', verdict: 'FAIL', detail: probe.error ?? `HTTP ${probe.status ?? '?'}` }
@@ -162,22 +175,23 @@ export function workdirCheck(fix: boolean): DoctorCheck {
   }
 }
 
-function doorbellCheck(): DoctorCheck {
+function integrationCheck(): DoctorCheck {
   const home = identityHome()
-  if (readCredentials(home) === null) return { name: 'doorbell', verdict: 'PASS', detail: 'no identity — the daemon idles by design' }
-  const status = readDoorbellStatus(home)
-  if (status === null) return { name: 'doorbell', verdict: 'WARN', detail: 'no status written yet — the daemon has not run, or is still starting' }
-  const age = doorbellStatusAge(status) ?? Number.POSITIVE_INFINITY
-  if (age > 3 * 60_000) return { name: 'doorbell', verdict: 'FAIL', detail: `status last written ${Math.round(age / 60_000)} min ago — the daemon is not running` }
-  if (status.socket === 'off') return { name: 'doorbell', verdict: 'PASS', detail: 'AGENTCHAT_DOORBELL=off — resident, holding no socket' }
+  if (readCredentials(home) === null) return { name: 'integration', verdict: 'PASS', detail: 'no identity — the daemon idles by design' }
+  const status = readIntegrationStatus(home)
+  if (status === null) return { name: 'integration', verdict: 'WARN', detail: 'no status written yet — the daemon has not run, or is still starting' }
+  const age = integrationStatusAge(status) ?? Number.POSITIVE_INFINITY
+  if (age > 3 * 60_000) return { name: 'integration', verdict: 'FAIL', detail: `status last written ${Math.round(age / 60_000)} min ago — the daemon is not running` }
+  if (status.socket === 'off') return { name: 'integration', verdict: 'PASS', detail: `${integrationDisabledBy() ?? 'AGENTCHAT_INTEGRATION'}=off — resident, holding no socket` }
   if (status.socket === 'ready') {
+    const texts = status.texts?.source ?? 'none'
     return {
-      name: 'doorbell',
-      verdict: status.ack_negotiated === false ? 'WARN' : 'PASS',
-      detail: `socket ready, ack ${status.ack_negotiated === null ? 'pending' : status.ack_negotiated ? 'negotiated' : 'NOT echoed'}, ${status.knocks} knock(s), ${status.runs_started} run(s) (${status.runs_ok} ok), profile ${status.profile}`,
+      name: 'integration',
+      verdict: texts === 'none' ? 'WARN' : 'PASS',
+      detail: `socket ready (acks on receipt), ${status.wakes} wake(s), ${status.runs_started} run(s) (${status.runs_ok} ok), texts ${texts === 'server' ? 'served' : texts === 'cache' ? 'from cache' : 'NOT fetched yet'}, profile ${status.profile}`,
     }
   }
-  return { name: 'doorbell', verdict: 'WARN', detail: `socket ${status.socket}${status.last_error ? ` — ${status.last_error}` : ''}` }
+  return { name: 'integration', verdict: 'WARN', detail: `socket ${status.socket}${status.last_error ? ` — ${status.last_error}` : ''}` }
 }
 
 const commands = createIdentityCommands(profile)
@@ -202,7 +216,7 @@ export const { runRegister, runLogin, runRecover, runLogout } = commands
 export async function runStatus(opts: { json?: boolean }): Promise<number> {
   const code = await commands.runStatus(opts)
   if (opts.json) return code
-  const identity = currentPlacementIdentity()
+  const identity = await currentPlacementIdentityWithLine()
   const checks = checkPlacement(identity)
   console.log('Placement:')
   for (const c of checks) console.log(`  ${c.ok ? '✓' : '✗'} ${c.name}: ${c.detail}`)

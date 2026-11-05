@@ -5,7 +5,7 @@ import * as crypto from 'node:crypto'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { MANUAL, IDENTITY_LINE_TEMPLATE } from '@agentchatme/agent-core'
+import { MANUAL } from '@agentchatme/agent-core'
 import { installFakeClaude, type FakeClaude } from './helpers/fake-claude.js'
 
 const exec = promisify(execFile)
@@ -79,9 +79,33 @@ const skill = (): string => path.join(sandbox, '.claude', 'skills', 'agentchat',
 const userState = (): Record<string, unknown> => JSON.parse(fs.readFileSync(fakeClaude.relocatedUserState, 'utf-8')) as Record<string, unknown>
 const mcpEntry = (): Record<string, unknown> | undefined => (userState()['mcpServers'] as Record<string, Record<string, unknown>> | undefined)?.['agentchat']
 
+const SERVED_LINE = (handle: string): string => `I am @${handle} on AgentChat (api.agentchat.me). Served identity line for claude-code, cached by the test.`
+
+/** The texts the daemon would have cached in the identity home (the sandbox api_base is unroutable, so the CLI falls back to this). */
+function seedTextsCache(identityHome: string, handle: string): void {
+  fs.mkdirSync(identityHome, { recursive: true })
+  fs.writeFileSync(
+    path.join(identityHome, 'texts.json'),
+    JSON.stringify({
+      version: 1,
+      fetched_at: new Date().toISOString(),
+      runtime: 'claude-code',
+      texts: {
+        version: '1',
+        manual: { url: 'https://agentchat.me/skill.md', version: '2.1.2' },
+        wake_instruction: 'SERVED WAKE INSTRUCTION',
+        invite_prompt: 'SERVED INVITE PROMPT',
+        identity_line: SERVED_LINE(handle),
+        identity_line_template: SERVED_LINE('<handle>'),
+      },
+    }),
+  )
+}
+
 function giveClaudeAnIdentity(): void {
   fs.mkdirSync(home(), { recursive: true })
   fs.writeFileSync(creds(), JSON.stringify({ api_key: KEY, handle: 'claude-agent', api_base: 'http://127.0.0.1:9' }))
+  seedTextsCache(home(), 'claude-agent')
 }
 
 describe('install places the four texts', () => {
@@ -113,7 +137,7 @@ describe('install places the four texts', () => {
     if (process.platform !== 'win32') expect(fs.statSync(fakeClaude.relocatedUserState).mode & 0o777).toBe(0o600)
 
     const md = fs.readFileSync(claudeMd(), 'utf-8')
-    expect(md).toContain(IDENTITY_LINE_TEMPLATE.split('<handle>').join('claude-agent'))
+    expect(md).toContain(SERVED_LINE('claude-agent'))
     expect(md).not.toContain('no account yet')
     expect(fs.readFileSync(skill(), 'utf-8')).toBe(MANUAL)
     expect(out.stdout).toContain('Connected as @claude-agent')
@@ -128,6 +152,7 @@ describe('install places the four texts', () => {
     const relocated = path.join(sandbox, 'relocated-claude')
     fs.mkdirSync(path.join(relocated, 'agentchat'), { recursive: true })
     fs.writeFileSync(path.join(relocated, 'agentchat', 'credentials'), JSON.stringify({ api_key: KEY, handle: 'moved-agent', api_base: 'http://127.0.0.1:9' }))
+    seedTextsCache(path.join(relocated, 'agentchat'), 'moved-agent')
     const out = await run([], { CLAUDE_CONFIG_DIR: relocated })
     expect(out.code, out.stdout + out.stderr).toBe(0)
     expect(fs.existsSync(path.join(relocated, 'skills', 'agentchat', 'SKILL.md'))).toBe(true)
@@ -381,9 +406,14 @@ describe('the publishable bundle runs after its NPX cache is gone', () => {
     }
   })
 
-  it('reads no message content anywhere: the bundle carries no body parser', () => {
+  it('the socket in the bundle is the SDK’s, acking on receipt — not the old never-ack socket, and no turn adapter reading output', () => {
+    // Delivered = this machine received it (the SDK acks at parse time); read
+    // is the agent's verdict inside its run. That the daemon reads no body and
+    // pulls no backlog itself is proved against a server double in
+    // agent-core's tests (every HTTP path and client frame is recorded there).
     const bundle = fs.readFileSync(path.join(__dirname, '..', 'dist', 'daemon-main.js'), 'utf-8')
-    expect(bundle).not.toMatch(/messages\/sync/)
-    expect(bundle).not.toMatch(/type:\s*['"]ack['"]/)
+    expect(bundle).toMatch(/ackOnReceipt:\s*(!0|true)/)
+    expect(bundle).not.toMatch(/DoorbellSocket|x-agentchat-capabilities/)
+    expect(bundle).not.toMatch(/AGENTCHAT_TURN_OUTCOME|stream-json/)
   })
 })

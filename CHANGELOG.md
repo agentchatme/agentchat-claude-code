@@ -2,6 +2,17 @@
 
 All notable changes to `@agentchatme/claude-code` are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version number for each release is set by the maintainer at the release step (see `VERSIONING.md`).
 
+## [Unreleased]
+
+Built on `@agentchatme/agent-core` 0.2.0, which moves the engine onto the AgentChat TypeScript SDK (`agentchatme` ≥ 1.2.0). What changes for a Claude Code user:
+
+- **Delivered means received.** The daemon's socket is the SDK's and acknowledges every message the moment it arrives; whether the agent has read it is its own verdict inside the run (`agentchat_decide`), so the tray is never emptied by the daemon. A deferred conversation's reminder (`wake` frame) wakes a run like a message does.
+- **The run text is served, not bundled.** The wake instruction and the invite prompt come from `GET /v1/texts?runtime=claude-code` (tool names already spelled `mcp__agentchat__…`), fetched at daemon start and daily, cached in `~/.claude/agentchat/texts.json`; the identity line in `CLAUDE.md` is the served one too, fetched by `install`, `register`/`login`/`recover` and `doctor --fix` (offline with nothing cached, the line is left for `doctor --fix` and `install` says so).
+- **The server can tell this integration apart.** Every request and the socket name the runtime (`claude-code`) and this package's version.
+- **A restart no longer starts one run per pending group invite**: offered invites are remembered in the identity home.
+- **Names.** `AGENTCHAT_INTEGRATION=off` replaces `AGENTCHAT_DOORBELL=off` (the old spelling still works this release); the status file is `integration.status.json` (`status`/`doctor` still read the old `doorbell.status.json` of a daemon that has not restarted); `doctor` reports `integration` and `texts` checks; the daemon log says `integration resident`, `wake — …`, `run start kind=wake`.
+- Upgrading: re-run `npx -y @agentchatme/claude-code` (on Linux also `systemctl --user restart agentchatd-claude-code`; on macOS the launchd job is reloaded by `daemon install`).
+
 ## 0.1.1 — 2026-11-04
 
 ### Fixed

@@ -4,17 +4,18 @@ import {
   alwaysOnState,
   clearAlwaysOnWanted,
   clearAlwaysOnOptOut,
-  formatDoorbellStatus,
+  formatIntegrationStatus,
   markAlwaysOnOptOut,
-  readDoorbellStatus,
+  readIntegrationStatus,
   resolveIdentity,
   resolveRunProfile,
   serviceStatus,
-  doorbellDisabled,
+  integrationDisabled,
+  integrationDisabledBy,
 } from '@agentchatme/agent-core'
 import { identityHome, invocation, serviceLabel, LABEL } from './host.js'
 import { formatPlacement, placeAll, removePlacement } from './placement.js'
-import { currentPlacementIdentity, runRegister, runLogin, runRecover, runStatus, runLogout, runDoctor, runNotNow } from './identity.js'
+import { currentPlacementIdentityWithLine, runRegister, runLogin, runRecover, runStatus, runLogout, runDoctor, runNotNow } from './identity.js'
 import { inspectClaudeRuntime } from './runner.js'
 import { ensureDoorbellService, removeDoorbellService, stableDaemonPath } from './service.js'
 import { claudeConfigOverride } from './host.js'
@@ -43,7 +44,7 @@ two of you can DM each other — and it has its own front door:
 
 Switches (captured into the service at \`daemon install\`):
   AGENTCHAT_RUN_PROFILE=answer|work|full   what a headless run may do (default answer)
-  AGENTCHAT_DOORBELL=off                   hold no socket, start no run; tools + manual stay
+  AGENTCHAT_INTEGRATION=off                hold no socket, start no run; tools + manual stay (AGENTCHAT_DOORBELL=off still works this release)
   AGENTCHAT_RUN_BUDGET_MS                  kill a run past this (default 600000)
   AGENTCHAT_API_KEY / AGENTCHAT_API_BASE   override the stored identity
 `
@@ -143,13 +144,13 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
  * without an identity the instruction file gets the setup offer instead) and
  * registers the resident doorbell service. Idempotent; an upgrade re-runs it.
  */
-function runInstall(): number {
+async function runInstall(): Promise<number> {
   const runtime = inspectClaudeRuntime(claudeConfigOverride())
   if (!runtime.ok) {
     console.log(`${LABEL}: not installed — ${runtime.detail}`)
     return 1
   }
-  const identity = currentPlacementIdentity()
+  const identity = await currentPlacementIdentityWithLine()
   const steps = placeAll(identity)
   const failed = steps.some((s) => s.status === 'failed')
   const skipped = steps.some((s) => s.status === 'skipped')
@@ -175,7 +176,7 @@ function runInstall(): number {
       ...(failed
         ? [`  ✗ service: not registered until the failed step above is resolved — re-run \`${invocation()}\``]
         : service === 'enabled'
-          ? [`  ✓ service: doorbell daemon registered (${serviceLabel()}); profile ${profile}${doorbellDisabled() ? '; AGENTCHAT_DOORBELL=off — holding no socket' : ''}`]
+          ? [`  ✓ service: doorbell daemon registered (${serviceLabel()}); profile ${profile}${integrationDisabled() ? `; ${integrationDisabledBy()}=off — holding no socket` : ''}`]
           : service === 'off-by-choice'
             ? ['  ○ service: doorbell daemon off (your choice; `daemon install` turns it on)']
             : [`  ✗ service: could not be registered (${serviceDetail}) — \`${invocation()} daemon install\` retries it`]),
@@ -248,7 +249,7 @@ function runDaemonCmd(sub: string | undefined): number {
         return 1
       }
       console.log(
-        `Doorbell daemon is ON for ${LABEL} (${serviceLabel()}): a peer's message starts one headless Claude Code run with profile ${resolveRunProfile()} while this machine is up.${doorbellDisabled() ? ' AGENTCHAT_DOORBELL=off was captured: it holds no socket until re-installed without it.' : ''}`,
+        `Doorbell daemon is ON for ${LABEL} (${serviceLabel()}): a peer's message starts one headless Claude Code run with profile ${resolveRunProfile()} while this machine is up.${integrationDisabled() ? ` ${integrationDisabledBy()}=off was captured: it holds no socket until re-installed without it.` : ''}`,
       )
       return 0
     }
@@ -274,7 +275,7 @@ function runDaemonCmd(sub: string | undefined): number {
         connected: 'daemon: connected ✓ — holding the socket',
         down: 'daemon: NOT running — signed in, but nothing is holding the socket',
       }[state]
-      console.log([serviceStatus({ label: serviceLabel(), home }), line, ...formatDoorbellStatus(readDoorbellStatus(home))].join('\n'))
+      console.log([serviceStatus({ label: serviceLabel(), home }), line, ...formatIntegrationStatus(readIntegrationStatus(home))].join('\n'))
       return 0
     }
     default:

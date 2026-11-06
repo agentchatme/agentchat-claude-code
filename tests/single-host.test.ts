@@ -200,12 +200,15 @@ describe('the manual is the served one', () => {
   let server: http.Server
   let base = ''
   let answer: { status: number; body: string } = { status: 404, body: 'not found' }
+  let hits = 0
   const manualText = (version: string): string => `---\nname: agentchat\nversion: ${version}\ndescription: The served manual.\n---\n\n# Served ${version}\n`
   /** The cache the daemon would have written, announcing the manual this test serves. */
   const announce = (version: string): void => seedTextsCache(home(), 'claude-agent', { url: `${base}/skill.md`, version })
 
   beforeEach(async () => {
+    hits = 0
     server = http.createServer((req, res) => {
+      hits += 1
       res.statusCode = req.url === '/skill.md' ? answer.status : 404
       res.setHeader('content-type', 'text/markdown; charset=utf-8')
       res.end(answer.body)
@@ -282,6 +285,24 @@ describe('the manual is the served one', () => {
     } finally {
       fs.chmodSync(path.dirname(skill()), 0o755)
     }
+  })
+
+  it('an identity on a plain-HTTP API base off loopback: nothing is downloaded, install warns (exit 0) and status says why', { timeout: 60_000 }, async () => {
+    const insecure = 'http://api.example.invalid' // .invalid never resolves: no request leaves the machine
+    fs.mkdirSync(home(), { recursive: true })
+    fs.writeFileSync(creds(), JSON.stringify({ api_key: KEY, handle: 'claude-agent', api_base: insecure }))
+    seedTextsCache(home(), 'claude-agent', { url: `${base}/skill.md`, version: '9.9.9' })
+    fs.mkdirSync(path.dirname(skill()), { recursive: true })
+    fs.writeFileSync(skill(), manualText('2.1.2'))
+    answer = { status: 200, body: manualText('9.9.9') }
+
+    const why = 'the served texts came from http://api.example.invalid, which is not HTTPS, so the manual is not downloaded'
+    const out = await run([], { AGENTCHAT_API_BASE: '' })
+    expect(out.code, out.stdout + out.stderr).toBe(0)
+    expect(out.stdout).toContain(`– manual: stale (have 2.1.2, served 9.9.9) — ${skill()}; kept as it is: ${why}`)
+    expect(fs.readFileSync(skill(), 'utf-8')).toBe(manualText('2.1.2'))
+    expect(hits).toBe(0)
+    expect((await run(['status'], { AGENTCHAT_API_BASE: '' })).stdout).toContain(`– manual: stale (have 2.1.2, served 9.9.9; not downloaded: ${why}) — ${skill()}`)
   })
 
   it('without an identity nothing is announced: an existing skill is left exactly as it is', { timeout: 30_000 }, async () => {

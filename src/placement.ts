@@ -257,10 +257,12 @@ function manualStep(result: ManualSyncResult, removedLegacy: boolean): Placement
 
 /**
  * The manual the served texts announce (`manual`, null when none are in
- * hand), as the agentchat skill. Never throws.
+ * hand), as the agentchat skill. `apiBase` is the API base the texts came
+ * from: it decides where a download may go (none from a plain-HTTP base off
+ * loopback). Never throws.
  */
-export async function placeSkill(manual: ServedManual | null): Promise<PlacementStep> {
-  const result = await syncManual({ path: skillPath(), served: manual })
+export async function placeSkill(manual: ServedManual | null, apiBase: string | null): Promise<PlacementStep> {
+  const result = await syncManual({ path: skillPath(), served: manual, apiBase })
   // The previous release kept the manual at <home>/SKILL.md, outside any
   // skills directory. The skill supersedes it.
   const legacy = path.join(identityHome(), LEGACY_MANUAL)
@@ -446,7 +448,7 @@ export async function placeAll(identity: PlacementIdentity | null, manual: Serve
   const steps: PlacementStep[] = []
   const legacy = removeLegacyWiring()
   if (legacy) steps.push(legacy)
-  steps.push(await placeSkill(manual))
+  steps.push(await placeSkill(manual, identity?.apiBase ?? null))
   if (identity) {
     steps.push(placeHostedMcp(identity))
     steps.push(placeIdentityLine(identity.handle, identity.identityLine))
@@ -516,7 +518,7 @@ export function checkPlacement(identity: PlacementIdentity | null, manual: Serve
             : `${anchorFile()} carries an older identity text`,
     })
   }
-  const skill = checkManual(skillPath(), manual?.version ?? null)
+  const skill = checkManual({ path: skillPath(), served: manual, apiBase: identity?.apiBase ?? null })
   // `unchecked` (nothing announced: no account yet, or offline with nothing
   // cached) is a WARN with no repair to suggest; `stale` and `missing` are
   // what `doctor --fix` repairs.

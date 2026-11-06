@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { execFile } from 'node:child_process'
+import * as http from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { promisify } from 'node:util'
 import * as crypto from 'node:crypto'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { MANUAL } from '@agentchatme/agent-core'
+import { MANUAL, manualVersion } from '@agentchatme/agent-core'
 import { installFakeClaude, type FakeClaude } from './helpers/fake-claude.js'
 
 const exec = promisify(execFile)
@@ -79,10 +81,14 @@ const skill = (): string => path.join(sandbox, '.claude', 'skills', 'agentchat',
 const userState = (): Record<string, unknown> => JSON.parse(fs.readFileSync(fakeClaude.relocatedUserState, 'utf-8')) as Record<string, unknown>
 const mcpEntry = (): Record<string, unknown> | undefined => (userState()['mcpServers'] as Record<string, Record<string, unknown>> | undefined)?.['agentchat']
 
+/** The bundled copy's version: a cache announcing it places the bundle with no download (no test reaches the network). */
+const BUNDLED = manualVersion(MANUAL)!
+const BUNDLED_ANNOUNCED = { url: 'https://agentchat.me/skill.md', version: BUNDLED }
+
 const SERVED_LINE = (handle: string): string => `I am @${handle} on AgentChat (api.agentchat.me). Served identity line for claude-code, cached by the test.`
 
 /** The texts the daemon would have cached in the identity home (the sandbox api_base is unroutable, so the CLI falls back to this). */
-function seedTextsCache(identityHome: string, handle: string): void {
+function seedTextsCache(identityHome: string, handle: string, manual: { url: string; version: string } = BUNDLED_ANNOUNCED): void {
   fs.mkdirSync(identityHome, { recursive: true })
   fs.writeFileSync(
     path.join(identityHome, 'texts.json'),
@@ -92,7 +98,7 @@ function seedTextsCache(identityHome: string, handle: string): void {
       runtime: 'claude-code',
       texts: {
         version: '1',
-        manual: { url: 'https://agentchat.me/skill.md', version: '2.1.2' },
+        manual,
         wake_instruction: 'SERVED WAKE INSTRUCTION',
         invite_prompt: 'SERVED INVITE PROMPT',
         identity_line: SERVED_LINE(handle),
@@ -120,7 +126,7 @@ describe('install places the four texts', () => {
     expect(fs.existsSync(path.join(home(), 'always-on.wanted'))).toBe(true)
     expect(fs.existsSync(path.join(home(), 'bin', 'agentchat-daemon.mjs'))).toBe(true)
     expect(out.stdout).toContain('Ask Claude Code: "Set up your AgentChat account."')
-    expect(out.stdout).toContain('✓ skill:')
+    expect(out.stdout).toContain(`✓ manual: bundled copy ${BUNDLED} → ${skill()} (no served version in hand to check it against)`)
     expect(out.stdout).toContain('✓ service:')
   })
 
@@ -187,6 +193,86 @@ describe('install places the four texts', () => {
     expect(upgraded.code, upgraded.stdout).toBe(0)
     expect(upgraded.stdout).toContain('○ service: integration daemon off (your choice')
     expect(fs.existsSync(path.join(home(), 'always-on.optout'))).toBe(true)
+  })
+})
+
+describe('the manual is the served one', () => {
+  let server: http.Server
+  let base = ''
+  let answer: { status: number; body: string } = { status: 404, body: 'not found' }
+  const manualText = (version: string): string => `---\nname: agentchat\nversion: ${version}\ndescription: The served manual.\n---\n\n# Served ${version}\n`
+  /** The cache the daemon would have written, announcing the manual this test serves. */
+  const announce = (version: string): void => seedTextsCache(home(), 'claude-agent', { url: `${base}/skill.md`, version })
+
+  beforeEach(async () => {
+    server = http.createServer((req, res) => {
+      res.statusCode = req.url === '/skill.md' ? answer.status : 404
+      res.setHeader('content-type', 'text/markdown; charset=utf-8')
+      res.end(answer.body)
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  })
+  afterEach(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+  })
+
+  it('install downloads the announced version over a skill at another one; install, status and doctor then say current', { timeout: 30_000 }, async () => {
+    giveClaudeAnIdentity()
+    fs.mkdirSync(path.dirname(skill()), { recursive: true })
+    fs.writeFileSync(skill(), manualText('2.1.2')) // what 0.2.0 placed
+    answer = { status: 200, body: manualText('9.9.9') }
+    announce('9.9.9')
+
+    const out = await run([])
+    expect(out.code, out.stdout + out.stderr).toBe(0)
+    expect(fs.readFileSync(skill(), 'utf-8')).toBe(manualText('9.9.9'))
+    expect(out.stdout).toContain(`✓ manual: 9.9.9 downloaded from ${base}/skill.md → ${skill()} (was 2.1.2)`)
+    expect(out.stdout).not.toContain('verbatim')
+
+    expect((await run([])).stdout).toContain(`✓ manual: current (9.9.9) — ${skill()}`)
+    // The sandbox API is unreachable, so status checks against the cached announcement.
+    expect((await run(['status'])).stdout).toContain(`✓ manual: current (9.9.9) — ${skill()}`)
+    expect((await run(['doctor'])).stdout).toContain(`PASS manual: current (9.9.9) — ${skill()}`)
+  })
+
+  it('a download that fails keeps the skill byte for byte and says stale; doctor --fix brings it current once the server answers', { timeout: 30_000 }, async () => {
+    giveClaudeAnIdentity()
+    expect((await run([])).code).toBe(0) // the bundled copy, announced as current
+    expect(fs.readFileSync(skill(), 'utf-8')).toBe(MANUAL)
+
+    announce('9.9.9')
+    answer = { status: 503, body: 'deploying' }
+    const out = await run([])
+    expect(out.code).toBe(1)
+    expect(out.stdout).toContain(`– manual: stale (have ${BUNDLED}, served 9.9.9) — ${skill()}; kept as it is: HTTP 503`)
+    expect(fs.readFileSync(skill(), 'utf-8')).toBe(MANUAL)
+    expect((await run(['status'])).stdout).toContain(`– manual: stale (have ${BUNDLED}, served 9.9.9) — ${skill()}`)
+    expect((await run(['doctor'])).stdout).toContain(`WARN manual: stale (have ${BUNDLED}, served 9.9.9) — ${skill()} — run \`npx -y @agentchatme/claude-code doctor --fix\``)
+
+    answer = { status: 200, body: manualText('9.9.9') }
+    const fixed = await run(['doctor', '--fix'])
+    expect(fixed.stdout).toContain(`PASS manual: current (9.9.9) — ${skill()}`)
+    expect(fs.readFileSync(skill(), 'utf-8')).toBe(manualText('9.9.9'))
+  })
+
+  it('a body that is not the announced version is not placed', { timeout: 30_000 }, async () => {
+    giveClaudeAnIdentity()
+    answer = { status: 200, body: manualText('9.9.8') }
+    announce('9.9.9')
+    const out = await run([])
+    expect(out.stdout).toContain('the body is version 9.9.8, the server announced 9.9.9')
+    // No skill existed, so the bundled copy is there — never the unverified body.
+    expect(fs.readFileSync(skill(), 'utf-8')).toBe(MANUAL)
+  })
+
+  it('without an identity nothing is announced: an existing skill is left exactly as it is', { timeout: 30_000 }, async () => {
+    fs.mkdirSync(path.dirname(skill()), { recursive: true })
+    fs.writeFileSync(skill(), manualText('2.1.2'))
+    const out = await run([])
+    expect(out.code, out.stdout + out.stderr).toBe(0)
+    expect(out.stdout).toContain(`✓ manual: unchecked (have 2.1.2; no served version in hand) — ${skill()}`)
+    expect(fs.readFileSync(skill(), 'utf-8')).toBe(manualText('2.1.2'))
   })
 })
 
@@ -334,7 +420,8 @@ describe('doctor', () => {
     await run([])
     const out = await run(['doctor'])
     expect(out.stdout).toContain('FAIL credentials')
-    expect(out.stdout).toContain('PASS skill')
+    // No identity, so no served texts: the manual is there, its currency unchecked.
+    expect(out.stdout).toContain(`WARN manual: unchecked (have ${BUNDLED}; no served version in hand) — ${skill()}`)
     expect(out.stdout).toContain('WARN hosted-mcp')
   })
 

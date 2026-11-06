@@ -244,7 +244,8 @@ describe('the manual is the served one', () => {
     announce('9.9.9')
     answer = { status: 503, body: 'deploying' }
     const out = await run([])
-    expect(out.code).toBe(1)
+    // A failed download is a warning, never a failed install: the old file still serves.
+    expect(out.code, out.stdout + out.stderr).toBe(0)
     expect(out.stdout).toContain(`– manual: stale (have ${BUNDLED}, served 9.9.9) — ${skill()}; kept as it is: HTTP 503`)
     expect(fs.readFileSync(skill(), 'utf-8')).toBe(MANUAL)
     expect((await run(['status'])).stdout).toContain(`– manual: stale (have ${BUNDLED}, served 9.9.9) — ${skill()}`)
@@ -261,9 +262,26 @@ describe('the manual is the served one', () => {
     answer = { status: 200, body: manualText('9.9.8') }
     announce('9.9.9')
     const out = await run([])
+    expect(out.code, out.stdout + out.stderr).toBe(0) // the bundled copy serves; a warning, not a failure
+    expect(out.stdout).toContain('– manual: bundled copy')
     expect(out.stdout).toContain('the body is version 9.9.8, the server announced 9.9.9')
     // No skill existed, so the bundled copy is there — never the unverified body.
     expect(fs.readFileSync(skill(), 'utf-8')).toBe(MANUAL)
+  })
+
+  it('no manual at all (nothing could be written) is the one manual condition that fails the install, and doctor', { timeout: 30_000 }, async () => {
+    if (process.platform === 'win32' || process.getuid?.() === 0) return // directory modes are not enforced there
+    giveClaudeAnIdentity()
+    fs.mkdirSync(path.dirname(skill()), { recursive: true })
+    fs.chmodSync(path.dirname(skill()), 0o555)
+    try {
+      const out = await run([])
+      expect(out.code).toBe(1)
+      expect(out.stdout).toContain(`✗ manual: could not write ${skill()}`)
+      expect((await run(['doctor'])).stdout).toContain(`FAIL manual: missing — ${skill()}`)
+    } finally {
+      fs.chmodSync(path.dirname(skill()), 0o755)
+    }
   })
 
   it('without an identity nothing is announced: an existing skill is left exactly as it is', { timeout: 30_000 }, async () => {

@@ -60,7 +60,12 @@ import {
 // under the identity home, and the old on-disk manual at `<home>/SKILL.md`.
 // Receiving no longer needs hooks.
 
-export type PlacementStatus = 'ok' | 'changed' | 'skipped' | 'failed'
+/**
+ * `warned`: done as far as it can be and nothing broken, but not current — a
+ * manual left at its version (or the bundled copy) because the announced one
+ * could not be downloaded. Printed as a warning; never fails an install.
+ */
+export type PlacementStatus = 'ok' | 'changed' | 'warned' | 'skipped' | 'failed'
 
 export interface PlacementStep {
   readonly name: 'identity' | 'manual' | 'mcp' | 'legacy'
@@ -238,10 +243,15 @@ export function skillPresent(): boolean {
   return fs.existsSync(skillPath())
 }
 
-/** The installer's line for a sync: a manual not at the announced version is a step not done (`–`). */
+/**
+ * The installer's line for a sync. A manual not at the announced version is a
+ * warning (`–`), never a failed install: the integration works with the file
+ * it has (the old one, or the bundled copy), and `status` / `doctor` keep
+ * saying it is stale until a later sync succeeds. Only no manual at all fails.
+ */
 function manualStep(result: ManualSyncResult, removedLegacy: boolean): PlacementStep {
   const status: PlacementStatus =
-    result.state === 'failed' ? 'failed' : result.upToDate === false ? 'skipped' : result.written || removedLegacy ? 'changed' : 'ok'
+    result.state === 'failed' ? 'failed' : result.upToDate === false ? 'warned' : result.written || removedLegacy ? 'changed' : 'ok'
   return { name: 'manual', status, detail: `${describeManualSync(result)}${removedLegacy ? ' (old on-disk manual removed)' : ''}` }
 }
 
@@ -539,7 +549,7 @@ export function checkPlacement(identity: PlacementIdentity | null, manual: Serve
 
 /** ✓ done / current, – not done but nothing broken (a stale manual, an unchecked one), ✗ failed / missing. */
 export function placementMark(step: PlacementStep | PlacementCheck): string {
-  if ('status' in step) return step.status === 'failed' ? '✗' : step.status === 'skipped' ? '–' : '✓'
+  if ('status' in step) return step.status === 'failed' ? '✗' : step.status === 'skipped' || step.status === 'warned' ? '–' : '✓'
   if (step.verdict !== undefined) return step.verdict === 'PASS' ? '✓' : step.verdict === 'WARN' ? '–' : '✗'
   return step.ok ? '✓' : '✗'
 }

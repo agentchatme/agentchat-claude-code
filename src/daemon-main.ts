@@ -21,7 +21,9 @@ import { ClaudeRunner } from './runner.js'
 // the `claude-code` runtime (`GET /v1/texts?runtime=claude-code`, tool names
 // already spelled `mcp__agentchat__agentchat_inbox` for a user-scope server
 // named `agentchat`; code.claude.com/docs/en/mcp.md: `mcp__<server>__<tool>`),
-// then one pointer to the bundled skill — the one line only this package knows.
+// then one pointer to the skill — the one line only this package knows. The
+// skill file follows the manual the same texts announce (`manualPath`): the
+// daemon downloads a new version when one is announced, on the texts' cadence.
 
 async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   let values: { home?: string | undefined; workdir?: string | undefined }
@@ -54,6 +56,7 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
     runner: new ClaudeRunner({ configDir, workdir, profile }),
     client: CLIENT,
     manualPointer: manualPointer(`at ${skillPath()}`),
+    manualPath: skillPath(),
   })
 }
 

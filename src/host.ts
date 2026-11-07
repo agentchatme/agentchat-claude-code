@@ -89,7 +89,7 @@ export function skillDir(): string {
   return path.join(skillsDir(), MANUAL_SKILL_NAME)
 }
 
-/** The bundled manual, as the `agentchat` skill. */
+/** The manual, as the `agentchat` skill (the served one; it follows `GET /v1/texts`' `manual`). */
 export function skillPath(): string {
   return path.join(skillDir(), MANUAL_FILENAME)
 }

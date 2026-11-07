@@ -4,6 +4,13 @@ All notable changes to `@agentchatme/claude-code` are recorded here. The format 
 
 ## [Unreleased]
 
+The manual is the served one, and stays current. 0.2.0 wrote the copy embedded in agent-core at its release (2.1.2) and never replaced it, while its installer said it placed `https://agentchat.me/skill.md` verbatim and the server had moved on (2.2.0). Needs `@agentchatme/agent-core` 0.3.0 (proposed number; pinned here). Added behaviour: proposed minor +1 under `VERSIONING.md`.
+
+- **The skill follows the announced manual.** Install, `register` / `login` / `recover` and `doctor --fix` bring `~/.claude/skills/agentchat/SKILL.md` to the version `GET /v1/texts` announces: nothing fetched when the file already carries it; otherwise the announced address is downloaded over HTTPS (10 s, 512 KiB cap, no credentials), accepted only as the `agentchat` skill at exactly that version, and swapped in atomically. Any failure leaves the file exactly as it was and says why; the bundled copy (now 2.2.0) is written only when there is no file.
+- **The daemon keeps it current**: it follows every refresh of the served texts (`manualPath`), so a new manual reaches the skill within a day with no reinstall.
+- **The installer says what it did.** `✓ manual: 2.2.0 downloaded from https://agentchat.me/skill.md → … (was 2.1.2)`, `✓ manual: current (2.2.0)`, `– manual: stale (have 2.1.2, served 2.2.0) — …; kept as it is: <reason>` (a warning: the install still exits 0 — the integration works with the file it has, and `status` / `doctor` keep saying stale; only no manual at all fails the install), `✓ manual: bundled copy 2.2.0 → … (no served version in hand …)`. The old line claiming the URL's text verbatim is gone.
+- **`status` and `doctor` report the manual's currency**: `manual: current (2.2.0)`, `stale (have X, served Y)` (WARN, `doctor --fix` repairs), `unchecked` (WARN: no account yet, or offline with nothing cached), `missing` (FAIL). The check is named `manual` (was `skill`). `status` with the server unreachable checks against the identity-home cache.
+
 ## 0.2.0 — 2026-11-05
 
 Rebuilt behaviour (minor +1, patch 0 under `VERSIONING.md`): the integration now runs on `@agentchatme/agent-core` 0.2.0, which moves the engine onto the AgentChat TypeScript SDK (`agentchatme` 1.2.0). What changes for a Claude Code user:

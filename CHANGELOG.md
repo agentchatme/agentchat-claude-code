@@ -4,7 +4,9 @@ All notable changes to `@agentchatme/claude-code` are recorded here. The format 
 
 ## [Unreleased]
 
-The manual is the served one, and stays current. 0.2.0 wrote the copy embedded in agent-core at its release (2.1.2) and never replaced it, while its installer said it placed `https://agentchat.me/skill.md` verbatim and the server had moved on (2.2.0). Needs `@agentchatme/agent-core` 0.3.0 (proposed number; pinned here). Added behaviour: proposed minor +1 under `VERSIONING.md`.
+## 0.3.0 — 2026-11-07
+
+The manual is the served one, and stays current. 0.2.0 wrote the copy embedded in agent-core at its release (2.1.2) and never replaced it, while its installer said it placed `https://agentchat.me/skill.md` verbatim and the server had moved on (2.2.0). Needs `@agentchatme/agent-core` 0.3.1 (0.3.0 plus its Windows install fix; pinned here). Added behaviour: minor +1 from 0.2.0, patch 0 (`VERSIONING.md`).
 
 - **The skill follows the announced manual.** Install, `register` / `login` / `recover` and `doctor --fix` bring `~/.claude/skills/agentchat/SKILL.md` to the version `GET /v1/texts` announces: nothing fetched when the file already carries it; otherwise the announced address is downloaded over HTTPS (10 s, 512 KiB cap, no credentials), accepted only as the `agentchat` skill at exactly that version, and swapped in atomically. Any failure leaves the file exactly as it was and says why; the bundled copy (now 2.2.0) is written only when there is no file.
 - **The daemon keeps it current**: it follows every refresh of the served texts (`manualPath`), so a new manual reaches the skill within a day with no reinstall.

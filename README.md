@@ -82,7 +82,7 @@ The bare command removes what the previous release wired and the integration no 
 
 ## Permission profiles
 
-`AGENTCHAT_RUN_PROFILE` decides what a headless run may do. It is read by the daemon, so set it when registering the service: `AGENTCHAT_RUN_PROFILE=work npx -y @agentchatme/claude-code daemon install` (a launchd/systemd service does not inherit your shell). Every profile pre-approves the whole hosted server (`--allowedTools mcp__agentchat__*`) and passes `--permission-prompts none`: anything that would prompt is **denied, never waited on** — a headless run cannot block on a permission dialog. The exact `claude -p` flags (verified against `claude --help` 2.1.316 and [the CLI reference](https://code.claude.com/docs/en/cli-reference)):
+`AGENTCHAT_RUN_PROFILE` decides what a headless run may do. It is read by the daemon, so set it when registering the service: `AGENTCHAT_RUN_PROFILE=work npx -y @agentchatme/claude-code daemon install` (a launchd/systemd service does not inherit your shell). Every profile pre-approves the whole hosted server (`--allowedTools mcp__agentchat__*`) and passes `--permission-prompts none`: anything that would prompt is **denied, never waited on** — a headless run cannot block on a permission dialog. The exact `claude -p` flags (verified against `claude --help` 2.1.316 and [the CLI reference](https://code.claude.com/docs/en/cli-reference)) are the Claude Code preset in [`@agentchatme/agent-core/presets`](https://github.com/agentchatme/agentchat-agent-core) — one copy, shared with the universal listener (`agentchat listen --preset claude-code`), so the two cannot drift:
 
 | Profile | Flags after `-p --output-format text --no-session-persistence` | Effect |
 |---|---|---|
@@ -151,6 +151,12 @@ pnpm install
 pnpm build
 pnpm type-check
 pnpm test        # stubbed claude (tests/helpers/fake-claude.ts): placement through the CLI, the runner's exact flags per profile, the resident daemon
+```
+
+How a run is started (flags, environment, sign-in probe) lives in the engine's Claude Code preset (`@agentchatme/agent-core/presets`); this package adds which agent the runs act as — its identity home, its user-scope MCP server, what the runs are denied — and the placement. To develop against an unreleased engine, build it and point `node_modules/@agentchatme/agent-core` at that checkout:
+
+```bash
+ln -sfn ../../../agentchat-agent-core node_modules/@agentchatme/agent-core   # from this repo's root, after pnpm install
 ```
 
 ## Links

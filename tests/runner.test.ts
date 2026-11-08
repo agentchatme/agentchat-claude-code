@@ -4,7 +4,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { manualPointer } from '@agentchatme/agent-core'
 import { ClaudeRunner, buildClaudeEnv, deniedAncestorOf, denyReadPathsFor } from '../src/runner.js'
-import { AGENTCHAT_TOOL_ALLOW, claudeRunArgs, readDenyRules } from '../src/profile.js'
+import { AGENTCHAT_TOOL_ALLOW, claudeRunArgs, readDenyRules } from '@agentchatme/agent-core/presets'
 import { claudeUserStatePathFor, identityHomeFor, legacyRunWorkdirFor, resolveRunWorkdir, runWorkdirFor } from '../src/host.js'
 import { installFakeClaude, readRuns, type FakeClaude } from './helpers/fake-claude.js'
 

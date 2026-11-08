@@ -4,6 +4,13 @@ All notable changes to `@agentchatme/claude-code` are recorded here. The format 
 
 ## [Unreleased]
 
+Needs `@agentchatme/agent-core` 0.4.0 (pinned exactly: the presets, and the integration on the SDK kit) and `agentchatme` 1.3.0.
+
+### Changed
+
+- **The `claude -p` run comes from the engine's Claude Code preset** (`@agentchatme/agent-core/presets`), shared with the universal listener (`agentchat listen --preset claude-code`): the same flags per profile, the same version floor and sign-in probe, one copy. This package keeps which agent the runs act as and its placement.
+- **The daemon is the SDK kit's receive loop** (through agent-core): no local retry ladder — a run that could not finish leaves the cards on the tray and the server re-wakes the agent for cards it has not answered; pending group invites come from the tray; the socket offers `heartbeat` and `rewake`.
+
 ## 0.3.0 — 2026-11-07
 
 The manual is the served one, and stays current. 0.2.0 wrote the copy embedded in agent-core at its release (2.1.2) and never replaced it, while its installer said it placed `https://agentchat.me/skill.md` verbatim and the server had moved on (2.2.0). Needs `@agentchatme/agent-core` 0.3.1 (0.3.0 plus its Windows install fix; pinned here). Added behaviour: minor +1 from 0.2.0, patch 0 (`VERSIONING.md`).

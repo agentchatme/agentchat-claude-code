@@ -1,6 +1,7 @@
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { MANUAL_FILENAME, MANUAL_SKILL_NAME, serviceLabelFor, type IntegrationClient } from '@agentchatme/agent-core'
+import { CLAUDE_MCP_SERVER_NAME, claudeUserStatePathFor as presetUserStatePathFor } from '@agentchatme/agent-core/presets'
 import { VERSION } from './version.js'
 
 // ─── The only file in this repo that knows a host exists ────────────────────
@@ -73,7 +74,7 @@ export function claudeUserStatePath(): string {
 }
 
 export function claudeUserStatePathFor(configDirOverride: string | undefined): string {
-  return configDirOverride !== undefined ? path.join(configDirOverride, '.claude.json') : path.join(os.homedir(), '.claude.json')
+  return presetUserStatePathFor(configDirOverride)
 }
 
 export function settingsPath(): string {
@@ -124,11 +125,11 @@ export function supersededServiceLabels(): string[] {
 }
 
 /**
- * The user-scope MCP server name. Changing it changes every tool name the
- * model sees (`mcp__agentchat__agentchat_inbox`) — keep in lockstep with the
- * prompts the daemon builds.
+ * The user-scope MCP server name: the preset's, so the server the installer
+ * registers is the one the runs' allow rule (`mcp__agentchat__*`) and the
+ * served texts' tool names (`mcp__agentchat__agentchat_inbox`) assume.
  */
-export const MCP_SERVER_NAME = 'agentchat'
+export const MCP_SERVER_NAME = CLAUDE_MCP_SERVER_NAME
 
 /** Exactly what a user types to reach this integration. */
 export function invocation(): string {

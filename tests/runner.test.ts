@@ -4,7 +4,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { manualPointer } from '@agentchatme/agent-core'
 import { ClaudeRunner, buildClaudeEnv, deniedAncestorOf, denyReadPathsFor } from '../src/runner.js'
-import { AGENTCHAT_TOOL_ALLOW, claudeRunArgs, readDenyRules } from '../src/profile.js'
+import { AGENTCHAT_TOOL_ALLOW, claudeRunArgs, readDenyRules } from '@agentchatme/agent-core/presets'
 import { claudeUserStatePathFor, identityHomeFor, legacyRunWorkdirFor, resolveRunWorkdir, runWorkdirFor } from '../src/host.js'
 import { installFakeClaude, readRuns, type FakeClaude } from './helpers/fake-claude.js'
 
@@ -351,5 +351,19 @@ describe('the run’s working directory is never inside a denied path', () => {
     const runner = new ClaudeRunner({ configDir: undefined, workdir, profile: 'answer', env: env() })
     expect(await runner.preflight()).toEqual({ ok: true })
     if (process.platform !== 'win32') expect(fs.statSync(workdir).mode & 0o777).toBe(0o700)
+  })
+})
+
+describe('the integration\'s runs keep the user-scope hosted server', () => {
+  // `agentchat listen --preset claude-code` hands its runs their own tool config
+  // (`--mcp-config … --strict-mcp-config`). This integration's runs must not: they
+  // use the user-scope `agentchat` server the installer registered, beside every
+  // other MCP server the user has, exactly as before the presets moved.
+  it('no profile passes --mcp-config or --strict-mcp-config', () => {
+    for (const profile of ['answer', 'work', 'full'] as const) {
+      const args = new ClaudeRunner({ configDir: undefined, workdir, profile, env: env() }).args()
+      expect(args).not.toContain('--mcp-config')
+      expect(args).not.toContain('--strict-mcp-config')
+    }
   })
 })

@@ -3,6 +3,9 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
+    // No test reaches the network: non-loopback fetch and sockets are
+    // refused, and a test that tried fails (tests/setup/network-guard.ts).
+    setupFiles: ['tests/setup/network-guard.ts'],
     // Set HERE, once, rather than in each test file.
     //
     // HOME sandboxes where a unit FILE is written, but launchctl and systemctl

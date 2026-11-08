@@ -4,7 +4,7 @@ All notable changes to `@agentchatme/claude-code` are recorded here. The format 
 
 ## [Unreleased]
 
-Needs the next `@agentchatme/agent-core` release (the presets, and the integration on the SDK kit); the pin moves with it at the release step.
+Needs `@agentchatme/agent-core` 0.4.0 (pinned exactly: the presets, and the integration on the SDK kit) and `agentchatme` 1.3.0.
 
 ### Changed
 

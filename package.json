@@ -25,9 +25,9 @@
     "prepublishOnly": "pnpm run type-check && pnpm run test"
   },
   "devDependencies": {
-    "@agentchatme/agent-core": "0.3.1",
+    "@agentchatme/agent-core": "0.4.0",
     "@types/node": "^22.19.17",
-    "agentchatme": "^1.2.0",
+    "agentchatme": "^1.3.0",
     "tsup": "^8.5.1",
     "typescript": "^5.7.0",
     "vitest": "^3.2.4",

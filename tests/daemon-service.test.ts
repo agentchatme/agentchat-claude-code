@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { execFile, spawn } from 'node:child_process'
+import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import * as crypto from 'node:crypto'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
@@ -20,11 +20,22 @@ const CLI = path.join(DIST, 'index.js')
 let sandbox: string
 let fakeClaude: FakeClaude
 
+// Every daemon a test started, until it has exited. A daemon that has not
+// exited is still writing into the sandbox: on SIGTERM it finishes its current
+// tick (up to 250 ms), then writes its status file and releases its lock in
+// the home. Removing the sandbox under it fails with ENOTEMPTY — so teardown
+// waits for each one to be GONE before it removes anything.
+const daemons = new Set<Daemon>()
+
 beforeEach(() => {
   sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-daemon-'))
   fakeClaude = installFakeClaude(sandbox)
 })
-afterEach(() => fs.rmSync(sandbox, { recursive: true, force: true }))
+afterEach(async () => {
+  await Promise.all([...daemons].map((daemon) => daemon.stop()))
+  // The retries are only a backstop; every writer has already exited.
+  fs.rmSync(sandbox, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+})
 
 const baseEnv = (): Record<string, string> => ({
   PATH: `${fakeClaude.binDir}${path.delimiter}${process.env['PATH'] ?? ''}`,
@@ -47,25 +58,39 @@ function run(script: string, args: string[], env: Record<string, string> = {}): 
   })
 }
 
-/** Start a script, let it run for `ms`, then kill it. Returns what it said and whether it was STILL ALIVE. */
-function runFor(script: string, args: string[], ms: number, env: Record<string, string> = {}): Promise<{ out: string; alive: boolean }> {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [script, ...args], { env: { ...baseEnv(), ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
-    let out = ''
-    let exited = false
-    child.stdout.on('data', (d) => (out += d))
-    child.stderr.on('data', (d) => (out += d))
-    child.on('exit', () => (exited = true))
-    setTimeout(() => {
-      const alive = !exited
-      try {
-        child.kill('SIGTERM')
-      } catch {
-        /* already gone */
-      }
-      setTimeout(() => resolve({ out, alive }), 150)
-    }, ms)
-  })
+/** How long a stopped daemon gets to exit on SIGTERM before it is SIGKILLed (under vitest's 10 s hook timeout). */
+const STOP_GRACE_MS = 5_000
+
+interface Daemon {
+  /** SIGTERM, SIGKILL after `STOP_GRACE_MS`; resolves once the process has exited and its output is closed. */
+  stop(): Promise<void>
+}
+
+/** Start a script, let it run for `ms`, then stop it and wait until it is gone. Returns what it said and whether it was STILL ALIVE at `ms`. */
+async function runFor(script: string, args: string[], ms: number, env: Record<string, string> = {}): Promise<{ out: string; alive: boolean }> {
+  const child: ChildProcess = spawn(process.execPath, [script, ...args], { env: { ...baseEnv(), ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
+  let out = ''
+  child.stdout?.on('data', (d) => (out += d))
+  child.stderr?.on('data', (d) => (out += d))
+  // 'close' comes after 'exit' and after stdout/stderr have drained: the
+  // process is gone and everything it said has been read.
+  const closed = new Promise<void>((resolve) => child.once('close', () => resolve()))
+  let stopping: Promise<void> | undefined
+  const daemon: Daemon = {
+    stop: () =>
+      (stopping ??= (async () => {
+        child.kill('SIGTERM') // a no-op on a process that already exited
+        const kill = setTimeout(() => child.kill('SIGKILL'), STOP_GRACE_MS)
+        await closed
+        clearTimeout(kill)
+        daemons.delete(daemon)
+      })()),
+  }
+  daemons.add(daemon)
+  await new Promise((resolve) => setTimeout(resolve, ms))
+  const alive = child.exitCode === null && child.signalCode === null
+  await daemon.stop()
+  return { out, alive }
 }
 
 describe('the daemon bundle ships with the NPX package', () => {

@@ -1,13 +1,13 @@
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { MANUAL_FILENAME, MANUAL_SKILL_NAME, serviceLabelFor, type IntegrationClient } from '@agentchatme/agent-core'
+import { INTEGRATION_ENV, INTEGRATION_ENV_LEGACY, MANUAL_FILENAME, MANUAL_SKILL_NAME, serviceLabelFor, type IntegrationClient } from '@agentchatme/agent-core'
 import { CLAUDE_MCP_SERVER_NAME, claudeUserStatePathFor as presetUserStatePathFor } from '@agentchatme/agent-core/presets'
 import { VERSION } from './version.js'
 
 // ─── The only file in this repo that knows a host exists ────────────────────
 //
-// Everything host-specific about the Claude Code doorbell is here. The rest of
-// the package reads these; @agentchatme/agent-core knows none of them.
+// Everything host-specific about the Claude Code integration is here. The rest
+// of the package reads these; @agentchatme/agent-core knows none of them.
 //
 // There is deliberately no `--platform` flag and no host detection. This
 // binary acts on the Claude Code agent because that is what it IS, not because
@@ -109,11 +109,12 @@ export const CLIENT: IntegrationClient = { runtime: 'claude-code', version: VERS
 export const SERVICE_BASE_LABEL = 'agentchatd-claude-code'
 
 /**
- * The doorbell service's label for THIS config. `launchctl` / `systemctl
+ * The listener service's label for THIS config. `launchctl` / `systemctl
  * --user` address the user's domain whatever HOME or CLAUDE_CONFIG_DIR say, so
  * a relocated config dir gets its own label (`agentchatd-claude-code-<8 hex>`)
  * and can never address the default config's service; `~/.claude` keeps the
- * plain label, so existing installs keep working.
+ * plain label, so existing installs keep working. The label is a name on disk
+ * and in the service manager: renaming it would orphan every installed unit.
  */
 export function serviceLabel(): string {
   return serviceLabelFor(SERVICE_BASE_LABEL, identityHome(), identityHomeFor(undefined))
@@ -143,15 +144,33 @@ export function hostCopy(): { invoke: string; label: string } {
 }
 
 /**
+ * The switches captured into the service unit. `INTEGRATION_ENV_LEGACY` is the
+ * switch's previous name, kept as a compatibility reader: the daemon still
+ * reads it until 2027-02-01 (agent contract v1, section 7), so an operator who
+ * still sets it must find it in the unit. It is agent-core's constant, not a
+ * string here, so the day agent-core drops it this build breaks instead of
+ * keeping dead code.
+ */
+const SERVICE_ENV_KEYS: readonly string[] = [
+  'AGENTCHAT_RUN_PROFILE',
+  INTEGRATION_ENV,
+  INTEGRATION_ENV_LEGACY,
+  'AGENTCHAT_RUN_BUDGET_MS',
+  'AGENTCHAT_RUN_CWD',
+  'AGENTCHAT_RUN_MAX_BUDGET_USD',
+  'AGENTCHAT_API_BASE',
+]
+
+/**
  * Env the service must see. A launchd/systemd service does NOT inherit the
- * login shell, so the doorbell's switches are captured at install time:
+ * login shell, so the listener's switches are captured at install time:
  * `AGENTCHAT_RUN_PROFILE=work npx -y @agentchatme/claude-code daemon install`.
  */
 export function serviceEnv(): Record<string, string> {
   const env: Record<string, string> = {}
   const configDir = claudeConfigOverride()
   if (configDir !== undefined) env['CLAUDE_CONFIG_DIR'] = configDir
-  for (const key of ['AGENTCHAT_RUN_PROFILE', 'AGENTCHAT_INTEGRATION', 'AGENTCHAT_DOORBELL', 'AGENTCHAT_RUN_BUDGET_MS', 'AGENTCHAT_RUN_CWD', 'AGENTCHAT_RUN_MAX_BUDGET_USD', 'AGENTCHAT_API_BASE']) {
+  for (const key of SERVICE_ENV_KEYS) {
     const value = process.env[key]?.trim()
     if (value !== undefined && value.length > 0) env[key] = value
   }

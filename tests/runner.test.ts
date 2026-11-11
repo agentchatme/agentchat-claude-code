@@ -211,7 +211,7 @@ describe('ClaudeRunner', () => {
     }
   })
 
-  it('the doorbell stopping aborts the run: the signal reaches spawnRun and the process group is gone', async () => {
+  it('the listener stopping aborts the run: the signal reaches spawnRun and the process group is gone', async () => {
     const runner = new ClaudeRunner({ configDir: undefined, workdir, profile: 'answer', env: env({ FAKE_CLAUDE_RUN: 'hang' }) })
     fs.mkdirSync(workdir, { recursive: true })
     const controller = new AbortController()

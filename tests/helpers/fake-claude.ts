@@ -11,7 +11,7 @@ export interface FakeClaude {
 }
 
 /**
- * A deterministic `claude` for tests. Models exactly the surfaces the doorbell
+ * A deterministic `claude` for tests. Models exactly the surfaces the integration
  * uses — `--version`, `auth status`, `mcp add|remove|get` at user scope, and
  * `-p` headless runs — so nothing here reaches a developer's real Claude Code.
  *
@@ -48,7 +48,7 @@ export function installFakeClaude(root: string, version = '2.1.316'): FakeClaude
       "    else if (rest[i] === '--') { positionals.push(...rest.slice(i + 1)); break }",
       '    else positionals.push(rest[i])',
       '  }',
-      "  if (flags.scope !== 'user') { console.error('fake claude: the doorbell must register at user scope'); process.exit(2) }",
+      "  if (flags.scope !== 'user') { console.error('fake claude: the integration must register at user scope'); process.exit(2) }",
       '  const [name, target] = positionals',
       '  const doc = readState()',
       "  if (doc.mcpServers && doc.mcpServers[name]) { console.error('MCP server \"' + name + '\" already exists in user config'); process.exit(1) }",

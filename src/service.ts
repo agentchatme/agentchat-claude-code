@@ -1,4 +1,4 @@
-// ─── Registering the doorbell service ───────────────────────────────────────
+// ─── Registering the listener service ───────────────────────────────────────
 //
 // Installation and authentication are DIFFERENT lifecycles. Registering the
 // service needs no credentials: the daemon is resident, idles when there is no
@@ -57,10 +57,11 @@ function serviceOpts() {
 }
 
 /**
- * Register the doorbell service. Idempotent, best-effort, credential-free.
- * Never throws — it must not fail whatever called it.
+ * Register the listener service: the resident daemon that holds the socket and
+ * starts a headless run on each wake. Idempotent, best-effort,
+ * credential-free. Never throws — it must not fail whatever called it.
  */
-export function ensureDoorbellService(opts: { force?: boolean } = {}): EnsureResult {
+export function ensureListenerService(opts: { force?: boolean } = {}): EnsureResult {
   const home = identityHome()
   // A deliberate `daemon disable` outranks any implicit re-registration. Only
   // an explicit `daemon install` clears it.
@@ -87,7 +88,7 @@ export function ensureDoorbellService(opts: { force?: boolean } = {}): EnsureRes
 }
 
 /** Is the installed service current (definition, durable bundle, version marker)? */
-export function doorbellServiceCurrent(): boolean {
+export function listenerServiceCurrent(): boolean {
   const home = identityHome()
   const service = serviceOpts()
   return (
@@ -102,7 +103,7 @@ export function doorbellServiceCurrent(): boolean {
  * Remove the service. The only thing that does. Throws — and removes nothing
  * — when the service under this config's label serves another identity home.
  */
-export function removeDoorbellService(): void {
+export function removeListenerService(): void {
   const home = identityHome()
   uninstallService({ label: serviceLabel(), home, supersedes: supersededServiceLabels() })
   clearAlwaysOnInstalledVersion(home)

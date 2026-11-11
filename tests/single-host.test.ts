@@ -633,7 +633,8 @@ describe('the publishable bundle runs after its NPX cache is gone', () => {
     const bundle = fs.readFileSync(path.join(__dirname, '..', 'dist', 'daemon-main.js'), 'utf-8')
     expect(bundle).toMatch(/ackOnReceipt:\s*(!0|true)/)
     // A compatibility check: the old never-ack socket class (by its old name) must be gone.
-    expect(bundle).not.toMatch(/DoorbellSocket|x-agentchat-capabilities/)
+    // The header as a string literal (how code would send it); the bundled manual names it in prose.
+    expect(bundle).not.toMatch(/DoorbellSocket|['"]x-agentchat-capabilities['"]/)
     expect(bundle).not.toMatch(/AGENTCHAT_TURN_OUTCOME|stream-json/)
   })
 })

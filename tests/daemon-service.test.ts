@@ -274,6 +274,28 @@ describe.skipIf(!serviceOs)('daemon install captures the switches into the servi
       expect(definition).toMatch(new RegExp(`${key}(=|</key>\\s*<string>)${value}`))
     }
   })
+
+  // Pinned on purpose, so that changing it is a decision and not an accident:
+  // every install, `daemon install` and `doctor --fix` writes the definition
+  // again from the shell that runs it. A switch captured earlier is not
+  // carried forward — an `off` set at `daemon install` is gone after a plain
+  // install from a shell without it. `daemon disable` is the off that
+  // survives every install and `doctor --fix`.
+  it('a later install from a shell without the switch writes the definition without it; daemon disable is the off that survives', async () => {
+    const label = definitionPath('agentchatd-claude-code')
+    expect((await run(CLI, ['daemon', 'install'], { AGENTCHAT_INTEGRATION: 'off' })).code).toBe(0)
+    expect(fs.readFileSync(label, 'utf-8')).toMatch(/AGENTCHAT_INTEGRATION(=|<\/key>\s*<string>)off/)
+
+    const plain = await run(CLI, [])
+    expect(plain.code, plain.out).toBe(0)
+    expect(fs.readFileSync(label, 'utf-8')).not.toContain('AGENTCHAT_INTEGRATION')
+
+    expect((await run(CLI, ['daemon', 'disable'])).code).toBe(0)
+    expect(fs.existsSync(label)).toBe(false)
+    expect((await run(CLI, [])).code).toBe(0)
+    expect((await run(CLI, ['doctor', '--fix'])).out).toContain('disabled by the user')
+    expect(fs.existsSync(label)).toBe(false)
+  })
 })
 
 // ─── Runs work BESIDE the identity home, never inside it ────────────────────

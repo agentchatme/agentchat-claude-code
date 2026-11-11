@@ -3,6 +3,7 @@ import * as path from 'node:path'
 import {
   atomicWriteFile,
   checkManual,
+  clientHeadersOf,
   describeManualSync,
   hostedMcpUrl,
   log,
@@ -20,6 +21,7 @@ import {
   type ServedManual,
 } from '@agentchatme/agent-core'
 import {
+  CLIENT,
   MCP_SERVER_NAME,
   anchorFile,
   claudeHome,
@@ -60,7 +62,7 @@ import {
 // 4. **The key** — already in the identity home's `credentials` (0600) and, by
 //    the registration above, in the MCP entry.
 //
-// Legacy cleanup on upgrade: the four lifecycle hooks the previous release wrote
+// Legacy cleanup on upgrade: the four lifecycle hooks the hook-based releases wrote
 // into `settings.json`, the stdio `mcp-proxy` MCP entry, the stable CLI bundle
 // under the identity home, and the old on-disk manual at `<home>/SKILL.md`.
 // Receiving no longer needs hooks.
@@ -127,12 +129,37 @@ function runClaude(args: string[], timeout = 20_000): { ok: boolean; detail: str
 
 // ─── The hosted MCP entry ───────────────────────────────────────────────────
 
+/**
+ * Whether the entry names this runtime to the hosted tools: `current` (this
+ * package's name and version), `stale` (the name, another version),
+ * `missing`. The hosted tool server names a client only from
+ * `X-AgentChat-Client` (never from the MCP handshake); without it this agent
+ * is an unknown client, shown the wake-webhook tools — a second way of being
+ * woken the listener makes unnecessary — and the tool names unspelled.
+ */
+export type ClientHeadersState = 'current' | 'stale' | 'missing'
+
 export type McpEntryState =
   | { state: 'missing' }
-  | { state: 'ours'; url: string; currentKey: boolean }
+  | { state: 'ours'; url: string; currentKey: boolean; clientHeaders: ClientHeadersState }
   | { state: 'legacy' }
-  | { state: 'foreign'; detail: string }
+  | { state: 'foreign'; detail: string; clientHeaders: ClientHeadersState }
   | { state: 'unavailable'; detail: string }
+
+/** The client identity the entry sends with every request: agent-core's `clientHeadersOf` (the names the server reads). */
+export function clientHeaders(): Record<string, string> {
+  return clientHeadersOf(CLIENT)
+}
+
+function clientHeadersStateOf(headers: unknown): ClientHeadersState {
+  if (!headers || typeof headers !== 'object' || Array.isArray(headers)) return 'missing'
+  // HTTP header names are case-insensitive: an entry written by hand may spell them either way.
+  const sent = new Map(Object.entries(headers as Record<string, unknown>).map(([name, value]) => [name.toLowerCase(), value]))
+  const expected = Object.entries(clientHeaders())
+  const [nameHeader, versionHeader] = [expected[0]!, expected[1]!]
+  if (sent.get(nameHeader[0].toLowerCase()) !== nameHeader[1]) return 'missing'
+  return sent.get(versionHeader[0].toLowerCase()) === versionHeader[1] ? 'current' : 'stale'
+}
 
 function readUserState(): Record<string, unknown> | null {
   const raw = fs.readFileSync(claudeUserStatePath(), 'utf-8')
@@ -173,7 +200,7 @@ export function inspectHostedMcp(apiKey: string | null, apiBase: string): McpEnt
   if (!servers || typeof servers !== 'object' || Array.isArray(servers)) return { state: 'missing' }
   const entry = (servers as Record<string, unknown>)[MCP_SERVER_NAME]
   if (entry === undefined || entry === null) return { state: 'missing' }
-  if (typeof entry !== 'object' || Array.isArray(entry)) return { state: 'foreign', detail: 'the user-scope server named "agentchat" is not an object' }
+  if (typeof entry !== 'object' || Array.isArray(entry)) return { state: 'foreign', detail: 'the user-scope server named "agentchat" is not an object', clientHeaders: 'missing' }
   const record = entry as Record<string, unknown>
   if (isLegacyStdioEntry(record)) return { state: 'legacy' }
   const type = record['type']
@@ -185,10 +212,11 @@ export function inspectHostedMcp(apiKey: string | null, apiBase: string): McpEnt
       : undefined
   const currentKey = apiKey !== null && typeof auth === 'string' && auth === `Bearer ${apiKey}`
   const isHttp = type === 'http' || type === 'streamable-http'
+  const named = clientHeadersStateOf(headers)
   if (isHttp && typeof url === 'string' && (url === hostedMcpUrl(apiBase) || currentKey)) {
-    return { state: 'ours', url, currentKey }
+    return { state: 'ours', url, currentKey, clientHeaders: named }
   }
-  return { state: 'foreign', detail: `the user-scope server named "agentchat" points at ${typeof url === 'string' ? url : 'a different command'} and is not this integration's` }
+  return { state: 'foreign', detail: `the user-scope server named "agentchat" points at ${typeof url === 'string' ? url : 'a different command'} and is not this integration's`, clientHeaders: named }
 }
 
 function tightenUserStateMode(): void {
@@ -209,7 +237,7 @@ export function placeHostedMcp(identity: PlacementIdentity): PlacementStep {
   if (current.state === 'foreign') {
     return { name: 'mcp', status: 'skipped', detail: `${current.detail} — left untouched; rename or remove it, then re-run` }
   }
-  if (current.state === 'ours' && current.currentKey) {
+  if (current.state === 'ours' && current.currentKey && current.clientHeaders === 'current') {
     tightenUserStateMode()
     return { name: 'mcp', status: 'ok', detail: `hosted tools registered as user MCP "${MCP_SERVER_NAME}" → ${current.url}` }
   }
@@ -218,17 +246,19 @@ export function placeHostedMcp(identity: PlacementIdentity): PlacementStep {
     if (!removed.ok) return { name: 'mcp', status: 'failed', detail: `could not replace the existing "${MCP_SERVER_NAME}" MCP entry: ${removed.detail}` }
   }
   const url = hostedMcpUrl(identity.apiBase)
-  const added = runClaude(['mcp', 'add', '--transport', 'http', '--scope', 'user', MCP_SERVER_NAME, url, '--header', `Authorization: Bearer ${identity.apiKey}`])
+  // `--header` once per header (`-H, --header <header...>`; code.claude.com/docs/en/mcp.md).
+  const headerArgs = Object.entries(clientHeaders()).flatMap(([name, value]) => ['--header', `${name}: ${value}`])
+  const added = runClaude(['mcp', 'add', '--transport', 'http', '--scope', 'user', MCP_SERVER_NAME, url, '--header', `Authorization: Bearer ${identity.apiKey}`, ...headerArgs])
   if (!added.ok) return { name: 'mcp', status: 'failed', detail: `claude mcp add failed: ${added.detail}` }
   const after = inspectHostedMcp(identity.apiKey, identity.apiBase)
-  if (after.state !== 'ours' || !after.currentKey) {
-    return { name: 'mcp', status: 'failed', detail: `claude mcp add reported success but ${claudeUserStatePath()} does not carry the entry with this key` }
+  if (after.state !== 'ours' || !after.currentKey || after.clientHeaders !== 'current') {
+    return { name: 'mcp', status: 'failed', detail: `claude mcp add reported success but ${claudeUserStatePath()} does not carry the entry with this key and the client headers` }
   }
   tightenUserStateMode()
   return {
     name: 'mcp',
     status: 'changed',
-    detail: `hosted tools registered as user MCP "${MCP_SERVER_NAME}" → ${url} (Authorization header with this agent's key${current.state === 'legacy' ? '; the local stdio server was replaced' : ''})`,
+    detail: `hosted tools registered as user MCP "${MCP_SERVER_NAME}" → ${url} (Authorization header with this agent's key, named as Claude Code ${CLIENT.version}${current.state === 'legacy' ? '; the local stdio server was replaced' : current.state === 'ours' && current.clientHeaders !== 'current' ? '; re-registered with the client headers' : ''})`,
   }
 }
 
@@ -277,7 +307,7 @@ function manualStep(result: ManualSyncResult, removedLegacy: boolean): Placement
  */
 export async function placeSkill(manual: ServedManual | null, apiBase: string | null): Promise<PlacementStep> {
   const result = await syncManual({ path: skillPath(), served: manual, apiBase })
-  // The previous release kept the manual at <home>/SKILL.md, outside any
+  // The hook-based releases kept the manual at <home>/SKILL.md, outside any
   // skills directory. The skill supersedes it.
   const legacy = path.join(identityHome(), LEGACY_MANUAL)
   let removedLegacy = false
@@ -413,7 +443,7 @@ export function legacyBundlePresent(): boolean {
   return fs.existsSync(path.join(identityHome(), LEGACY_BUNDLE))
 }
 
-/** Strip the previous release's hooks and stable CLI bundle. Idempotent. */
+/** Strip the hook-based releases' hooks and stable CLI bundle. Idempotent. */
 export function removeLegacyWiring(): PlacementStep | null {
   const notes: string[] = []
   const file = settingsPath()
@@ -494,11 +524,15 @@ export function removePlacement(identity: UnplaceIdentity): PlacementStep[] {
   if (legacy) steps.push(legacy)
   steps.push(removeHostedMcp(identity))
   steps.push(removeSkill())
-  steps.push({
-    name: 'identity',
-    status: removeAnchorAt(anchorFile()) === 'removed' ? 'changed' : 'ok',
-    detail: `${path.basename(anchorFile())} AgentChat block removed`,
-  })
+  try {
+    steps.push({
+      name: 'identity',
+      status: removeAnchorAt(anchorFile()) === 'removed' ? 'changed' : 'ok',
+      detail: `${path.basename(anchorFile())} AgentChat block removed`,
+    })
+  } catch (err) {
+    steps.push({ name: 'identity', status: 'failed', detail: `could not remove the AgentChat block from ${anchorFile()}: ${err instanceof Error ? err.message : String(err)} — remove it by hand` })
+  }
   return steps
 }
 
@@ -511,6 +545,45 @@ export interface PlacementCheck {
 }
 
 /**
+ * The identity line's check. A CLAUDE.md that cannot be read (permissions,
+ * a symlink loop, not UTF-8) fails this check alone: every other check, and
+ * every repair `doctor --fix` makes, still runs.
+ */
+function identityCheck(identity: PlacementIdentity): PlacementCheck {
+  let claimed: string | null
+  let current: boolean | null
+  try {
+    // The served template lets an unmarked block in today's words be read as
+    // this agent's; without texts, the handle line and the older wordings
+    // still are.
+    claimed = readAnchorHandleAt(anchorFile(), identity.identityLineTemplate)
+    // null: the served texts were unavailable, so only the handle can be checked.
+    current = identity.identityLine === null ? null : anchorIsCurrentAt(anchorFile(), identity.identityLine, identity.handle)
+  } catch (err) {
+    return { name: 'identity', ok: false, verdict: 'FAIL', detail: `cannot read ${anchorFile()}: ${err instanceof Error ? err.message : String(err)}` }
+  }
+  // This agent's block in older words (or without the handle line, or next
+  // to a second AgentChat block) still tells the agent who it is: not
+  // current, nothing broken — a WARN (`–`), as the shared doctor reports it.
+  // A wrong handle or no block is a FAIL.
+  const older = current === false && claimed === identity.handle
+  return {
+    name: 'identity',
+    ok: current === true || (current === null && claimed === identity.handle),
+    ...(older ? { verdict: 'WARN' as const } : {}),
+    detail: current === true
+      ? `identity line for @${identity.handle} in ${anchorFile()}`
+      : current === null && claimed === identity.handle
+        ? `identity line for @${identity.handle} in ${anchorFile()} (served texts unavailable — currency not checked)`
+      : claimed === null
+        ? `identity line missing from ${anchorFile()}`
+        : claimed !== identity.handle
+          ? `${anchorFile()} says @${claimed} but this agent is @${identity.handle}`
+          : `${anchorFile()} carries an older identity text (or a second AgentChat block) — install or \`doctor --fix\` rewrites it`,
+  }
+}
+
+/**
  * For `status` and `doctor`: is everything where it should be? `manual` is
  * what the served texts announce (null when none are in hand), so the skill
  * reads `current (2.2.0)` or `stale (have 2.1.2, served 2.2.0)`.
@@ -518,25 +591,7 @@ export interface PlacementCheck {
 export function checkPlacement(identity: PlacementIdentity | null, manual: ServedManual | null): PlacementCheck[] {
   const checks: PlacementCheck[] = []
   if (identity) {
-    // The served template lets an unmarked block in today's words be read as
-    // this agent's; without texts, the handle line and the older wordings
-    // still are.
-    const claimed = readAnchorHandleAt(anchorFile(), identity.identityLineTemplate)
-    // null: the served texts were unavailable, so only the handle can be checked.
-    const current = identity.identityLine === null ? null : anchorIsCurrentAt(anchorFile(), identity.identityLine, identity.handle)
-    checks.push({
-      name: 'identity',
-      ok: current === true || (current === null && claimed === identity.handle),
-      detail: current === true
-        ? `identity line for @${identity.handle} in ${anchorFile()}`
-        : current === null && claimed === identity.handle
-          ? `identity line for @${identity.handle} in ${anchorFile()} (served texts unavailable — currency not checked)`
-        : claimed === null
-          ? `identity line missing from ${anchorFile()}`
-          : claimed !== identity.handle
-            ? `${anchorFile()} says @${claimed} but this agent is @${identity.handle}`
-            : `${anchorFile()} carries an older identity text`,
-    })
+    checks.push(identityCheck(identity))
   }
   const skill = checkManual({ path: skillPath(), served: manual, apiBase: identity?.apiBase ?? null })
   // `unchecked` (nothing announced: no account yet, or offline with nothing
@@ -544,19 +599,27 @@ export function checkPlacement(identity: PlacementIdentity | null, manual: Serve
   // what `doctor --fix` repairs.
   checks.push({ name: 'manual', ok: skill.state === 'current' || skill.state === 'unchecked', verdict: skill.verdict, detail: skill.detail })
   const mcp = inspectHostedMcp(identity?.apiKey ?? null, identity?.apiBase ?? 'https://api.agentchat.me')
+  const headerHint = Object.entries(clientHeaders()).map(([name, value]) => `--header "${name}: ${value}"`).join(' ')
   checks.push({
     name: 'mcp',
-    ok: mcp.state === 'ours' && (identity === null || mcp.currentKey),
+    ok: mcp.state === 'ours' ? (identity === null || mcp.currentKey) && mcp.clientHeaders !== 'missing' : false,
+    // A user-scope "agentchat" that is not this integration's (another URL,
+    // another key) is never touched; the check says, too, when it does not
+    // name this runtime to the hosted tools.
     detail:
       mcp.state === 'ours'
-        ? identity === null || mcp.currentKey
-          ? `hosted tools registered as user MCP "${MCP_SERVER_NAME}" → ${mcp.url}`
-          : `user MCP "${MCP_SERVER_NAME}" carries a different key than this agent's credentials`
+        ? identity !== null && !mcp.currentKey
+          ? `user MCP "${MCP_SERVER_NAME}" carries a different key than this agent's credentials`
+          : mcp.clientHeaders === 'missing'
+            ? `user MCP "${MCP_SERVER_NAME}" → ${mcp.url} does not send ${Object.keys(clientHeaders())[0]}, so the hosted tools take this agent for an unknown client and show it the wake-webhook tools`
+            : `hosted tools registered as user MCP "${MCP_SERVER_NAME}" → ${mcp.url}${mcp.clientHeaders === 'stale' ? ` (named by an earlier release; install or \`doctor --fix\` names it as Claude Code ${CLIENT.version})` : ''}`
         : mcp.state === 'legacy'
           ? `user MCP "${MCP_SERVER_NAME}" is the old local stdio server`
           : mcp.state === 'missing'
             ? `no user MCP "${MCP_SERVER_NAME}" — the agent has no AgentChat tools`
-            : mcp.detail,
+            : mcp.state === 'foreign' && mcp.clientHeaders === 'missing'
+              ? `${mcp.detail}; it does not send ${Object.keys(clientHeaders())[0]}, so the hosted tools show this agent the wake-webhook tools — add ${headerHint} to it`
+              : mcp.detail,
   })
   const leftovers = [legacyHooksPresent() ? 'hooks in settings.json' : null, legacyBundlePresent() ? 'stable CLI bundle' : null].filter(
     (v): v is string => v !== null,

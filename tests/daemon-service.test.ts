@@ -136,7 +136,7 @@ describe('the daemon is RESIDENT — it idles rather than exiting', () => {
   }, 20_000)
 
   // A compatibility check: AGENTCHAT_DOORBELL is the switch's previous name,
-  // still read until 2027-02-01 (agent contract v1, section 7). A service
+  // still read; agent contract v1 (section 7) schedules its removal for 2027-02-01. A service
   // installed before the rename carries it in its unit.
   it('AGENTCHAT_DOORBELL=off (the previous name) still holds no socket, and says it is the previous name', async () => {
     const home = path.join(sandbox, 'off-home')
@@ -145,7 +145,7 @@ describe('the daemon is RESIDENT — it idles rather than exiting', () => {
     const { out, alive } = await runFor(DAEMON, ['--home', home], 1500, { AGENTCHAT_DOORBELL: 'off' })
     expect(alive).toBe(true)
     expect(out).toContain('AGENTCHAT_DOORBELL=off')
-    expect(out).toContain('read until 2027-02-01')
+    expect(out).toContain('schedules its removal for 2027-02-01')
     const status = JSON.parse(fs.readFileSync(path.join(home, 'integration.status.json'), 'utf-8')) as { socket: string }
     expect(status.socket).toBe('off')
   }, 20_000)

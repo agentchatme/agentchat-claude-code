@@ -1,6 +1,6 @@
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { INTEGRATION_ENV, INTEGRATION_ENV_LEGACY, MANUAL_FILENAME, MANUAL_SKILL_NAME, serviceLabelFor, type IntegrationClient } from '@agentchatme/agent-core'
+import { INTEGRATION_ENV, INTEGRATION_ENV_LEGACY, MANUAL_FILENAME, MANUAL_SKILL_NAME, RUN_BUDGET_ENV, RUN_PROFILE_ENV, serviceLabelFor, type IntegrationClient } from '@agentchatme/agent-core'
 import { CLAUDE_MCP_SERVER_NAME, claudeUserStatePathFor as presetUserStatePathFor } from '@agentchatme/agent-core/presets'
 import { VERSION } from './version.js'
 
@@ -152,10 +152,10 @@ export function hostCopy(): { invoke: string; label: string } {
  * keeping dead code.
  */
 const SERVICE_ENV_KEYS: readonly string[] = [
-  'AGENTCHAT_RUN_PROFILE',
+  RUN_PROFILE_ENV,
   INTEGRATION_ENV,
   INTEGRATION_ENV_LEGACY,
-  'AGENTCHAT_RUN_BUDGET_MS',
+  RUN_BUDGET_ENV,
   'AGENTCHAT_RUN_CWD',
   'AGENTCHAT_RUN_MAX_BUDGET_USD',
   'AGENTCHAT_API_BASE',

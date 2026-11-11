@@ -8,6 +8,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { MANUAL, manualVersion } from '@agentchatme/agent-core'
+import { VERSION } from '../src/version.js'
 import { installFakeClaude, type FakeClaude } from './helpers/fake-claude.js'
 
 const exec = promisify(execFile)
@@ -159,7 +160,7 @@ describe('install places the four texts', () => {
     expect(mcpEntry()).toEqual({
       type: 'http',
       url: 'http://127.0.0.1:9/mcp',
-      headers: { Authorization: `Bearer ${KEY}` },
+      headers: { Authorization: `Bearer ${KEY}`, 'X-AgentChat-Client': 'claude-code', 'X-AgentChat-Client-Version': VERSION },
     })
     if (process.platform !== 'win32') expect(fs.statSync(fakeClaude.relocatedUserState).mode & 0o777).toBe(0o600)
 
@@ -239,7 +240,7 @@ describe('a CLAUDE.md written by the previous release', () => {
       fs.writeFileSync(claudeMd(), writtenByPreviousRelease(line))
 
       const status = await run(['status'])
-      expect(status.stdout).toContain(`✗ identity: ${claudeMd()} carries an older identity text`)
+      expect(status.stdout).toContain(`– identity: ${claudeMd()} carries an older identity text`)
       expect(status.stdout).not.toContain('identity line missing')
       const doctor = await run(['doctor'])
       expect(doctor.stdout).toContain(`${claudeMd()} carries an older identity text for @claude-agent`)
@@ -521,11 +522,12 @@ describe('there is no way to address another agent', () => {
     expect(snapshot(codexDir())).toEqual(before)
   })
 
-  it('the help says how long the previous switch name is read', async () => {
-    // AGENTCHAT_DOORBELL is the switch's previous name: a compatibility reader, read until 2027-02-01.
+  it('the help says the previous switch name is still read, when its removal is scheduled, and that switches are captured again on every install', async () => {
+    // AGENTCHAT_DOORBELL is the switch's previous name: a compatibility reader, its removal scheduled for 2027-02-01.
     const out = await run(['--help'])
-    expect(out.stdout).toContain('AGENTCHAT_DOORBELL=off, the previous name, is still read until')
-    expect(out.stdout).toContain('2027-02-01; AGENTCHAT_INTEGRATION wins when both are set')
+    const flat = out.stdout.replace(/\s+/g, ' ')
+    expect(flat).toContain('AGENTCHAT_DOORBELL=off, the previous name, is still read; its removal is scheduled for 2027-02-01; AGENTCHAT_INTEGRATION wins when both are set')
+    expect(flat).toContain('captured into the service from the shell that runs install, `daemon install` or `doctor --fix`')
     expect(out.stdout).not.toContain('this release')
   })
 
@@ -633,5 +635,86 @@ describe('the publishable bundle runs after its NPX cache is gone', () => {
     // A compatibility check: the old never-ack socket class (by its old name) must be gone.
     expect(bundle).not.toMatch(/DoorbellSocket|x-agentchat-capabilities/)
     expect(bundle).not.toMatch(/AGENTCHAT_TURN_OUTCOME|stream-json/)
+  })
+})
+
+// ─── The hosted tools are told this agent is on Claude Code ─────────────────
+//
+// The hosted tool server reads the client's name from `X-AgentChat-Client`
+// (and its version from `X-AgentChat-Client-Version`), never from the MCP
+// handshake. Without them a Claude Code agent counts as an unknown client and
+// is shown the wake-webhook tools — a second way of being woken that the
+// listener makes unnecessary. The registration sends both on every request.
+
+describe('the hosted tools are told this agent is on Claude Code', () => {
+  const CLIENT_HEADERS = { 'X-AgentChat-Client': 'claude-code', 'X-AgentChat-Client-Version': VERSION }
+  const entry = (headers: Record<string, string>, url = 'http://127.0.0.1:9/mcp'): string => JSON.stringify({ mcpServers: { agentchat: { type: 'http', url, headers } } })
+
+  it('the version header is this package’s own version', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8')) as { version: string }
+    expect(VERSION).toBe(pkg.version)
+  })
+
+  it('an entry an earlier release registered (the key, no client headers) is re-registered with them by install', { timeout: 30_000 }, async () => {
+    giveClaudeAnIdentity()
+    expect((await run([])).code).toBe(0)
+    fs.writeFileSync(fakeClaude.relocatedUserState, entry({ Authorization: `Bearer ${KEY}` }))
+    const status = (await run(['status'])).stdout
+    expect(status).toContain('✗ mcp: user MCP "agentchat" → http://127.0.0.1:9/mcp does not send X-AgentChat-Client')
+    const install = await run([])
+    expect(install.code, install.stdout).toBe(0)
+    expect(install.stdout).toContain('re-registered with the client headers')
+    expect(mcpEntry()).toEqual({ type: 'http', url: 'http://127.0.0.1:9/mcp', headers: { Authorization: `Bearer ${KEY}`, ...CLIENT_HEADERS } })
+    expect((await run(['status'])).stdout).toContain('✓ mcp: hosted tools registered as user MCP "agentchat" → http://127.0.0.1:9/mcp')
+  })
+
+  it('an entry named by another release’s version still works and is brought to this version by doctor --fix', { timeout: 30_000 }, async () => {
+    giveClaudeAnIdentity()
+    expect((await run([])).code).toBe(0)
+    fs.writeFileSync(fakeClaude.relocatedUserState, entry({ Authorization: `Bearer ${KEY}`, 'x-agentchat-client': 'claude-code', 'x-agentchat-client-version': '0.4.0' }))
+    expect((await run(['status'])).stdout).toContain(`✓ mcp: hosted tools registered as user MCP "agentchat" → http://127.0.0.1:9/mcp (named by an earlier release; install or \`doctor --fix\` names it as Claude Code ${VERSION})`)
+    await run(['doctor', '--fix'])
+    expect(mcpEntry()).toEqual({ type: 'http', url: 'http://127.0.0.1:9/mcp', headers: { Authorization: `Bearer ${KEY}`, ...CLIENT_HEADERS } })
+  })
+
+  it('an entry that is not this integration’s is left alone, and status says it does not name the runtime', { timeout: 30_000 }, async () => {
+    giveClaudeAnIdentity()
+    const foreign = entry({ Authorization: 'Bearer someone-elses' }, 'http://someone-else.example/mcp')
+    fs.writeFileSync(fakeClaude.relocatedUserState, foreign)
+    await run([])
+    await run(['doctor', '--fix'])
+    expect(fs.readFileSync(fakeClaude.relocatedUserState, 'utf-8')).toBe(foreign)
+    const status = (await run(['status'])).stdout
+    expect(status).toContain('does not send X-AgentChat-Client, so the hosted tools show this agent the wake-webhook tools')
+    expect(status).toContain(`--header "X-AgentChat-Client: claude-code" --header "X-AgentChat-Client-Version: ${VERSION}"`)
+  })
+})
+
+describe('a CLAUDE.md that cannot be read', () => {
+  const NOT_UTF8 = Buffer.concat([Buffer.from('# R'), Buffer.from([0xe9]), Buffer.from('sum\n')])
+
+  it('is never rewritten, and stops neither status, doctor --fix nor uninstall', { timeout: 60_000 }, async () => {
+    giveClaudeAnIdentity()
+    expect((await run([])).code).toBe(0)
+    fs.writeFileSync(claudeMd(), NOT_UTF8)
+
+    const status = (await run(['status'])).stdout
+    expect(status).toMatch(/✗ identity: cannot read .*not UTF-8/)
+    expect(status).toContain('mcp:')
+    expect(status).toContain('manual:')
+
+    // The service repair still runs: the durable daemon copy comes back.
+    const daemon = path.join(sandbox, '.claude', 'agentchat', 'bin', 'agentchat-daemon.mjs')
+    expect(fs.existsSync(daemon)).toBe(true)
+    fs.rmSync(daemon)
+    const doctor = (await run(['doctor', '--fix'])).stdout
+    expect(doctor).toMatch(/FAIL identity-line: cannot read .*not UTF-8/)
+    expect(doctor).toContain('hosted-mcp')
+    expect(fs.existsSync(daemon)).toBe(true)
+
+    const uninstall = await run(['uninstall'])
+    expect(uninstall.stdout + uninstall.stderr).not.toMatch(/\n\s+at \S+ \(/)
+    expect(uninstall.stdout).toMatch(/✗ identity: could not remove the AgentChat block from .*not UTF-8/)
+    expect(fs.readFileSync(claudeMd()).equals(NOT_UTF8)).toBe(true)
   })
 })

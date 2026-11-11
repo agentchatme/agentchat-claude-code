@@ -55,8 +55,9 @@ jobs:
           echo "daemon is resident and idling ✓"
 
       # The release workflow's tarball smoke, on every PR, so it cannot go
-      # stale between releases. It did once: it still expected the
-      # pre-doorbell integration and failed the 0.1.0 publish after the tag.
+      # stale between releases. It did once: it still expected the hook-based
+      # integration from before the listener and failed the 0.1.0 publish
+      # after the tag.
       - name: the packed tarball installs and runs (release smoke)
         if: runner.os == 'Linux'
         run: bash scripts/release-smoke.sh

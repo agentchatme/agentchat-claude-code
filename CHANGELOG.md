@@ -2,6 +2,28 @@
 
 All notable changes to `@agentchatme/claude-code` are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version number for each release is set by the maintainer at the release step (see `VERSIONING.md`).
 
+## 0.4.1 — 2026-11-11
+
+Fixed and adjusted existing behaviour: patch +1 from 0.4.0 (`VERSIONING.md`; the number is set at the release step). Needs `@agentchatme/agent-core` 0.4.1 (pinned exactly: the shared identity block and the atomic instruction-file write) and `agentchatme` 1.3.0.
+
+### Fixed
+
+- **The hosted tools know this agent is on Claude Code.** The user-scope MCP registration now sends `X-AgentChat-Client: claude-code` and `X-AgentChat-Client-Version: <this version>` with every request (`claude mcp add … --header`). The hosted tool server names a client only from these headers, so until now a Claude Code agent counted as an unknown client: it was shown the wake-webhook tools and told to register a wake trigger, although the listener already wakes it. It now sees only the tools it needs, with the tool names spelled the way Claude Code exposes them. An entry an earlier release registered is registered again on the next install or `doctor --fix`; one that is not this integration's is left alone, and `status` / `doctor` say when it does not send the header.
+- **The identity block in `CLAUDE.md` is the shared AgentChat block**, the shape every AgentChat integration writes (the SDK kit's `integration.anchor`, through agent-core): the fences, a handle line (`<!-- agentchat:handle <handle> -->`) and the served identity line. 0.4.0 wrote the served line alone between the fences and read the handle back with a copy of the served wording, so a line the server rewords would have read as `identity line missing`. `status` and `doctor` now read a block by its handle line, by the words of the served `identity_line_template`, and by the wordings earlier releases wrote. A block an earlier release wrote reads as `carries an older identity text`, and the next install, `register` / `login` / `recover` or `doctor --fix` replaces it with the current one.
+- **The block keeps its place in the file.** It was moved to the end of `CLAUDE.md` on every write. Install, `register` / `login` / `recover` and `doctor --fix` now replace it where it stands, any second AgentChat block is removed, and every line of the text before and after it is kept (only the blank lines right next to the block become exactly one; in a CRLF file the block is written with LF line endings). `logout` removes it and writes the setup offer at the end of the file.
+- **`CLAUDE.md` is never left half-written.** The block is written to a temp file beside `CLAUDE.md`, flushed, then renamed over it, so a crash or a full disk mid-write leaves the old file as it was; where that cannot be done (a directory that takes no new file, a single-file bind mount) it is written in place, as before. A symlinked `CLAUDE.md` stays a symlink, its permission bits are kept, and a read-only one is refused rather than replaced. A file that is not UTF-8 text is never rewritten: 0.4.0 turned bytes it could not decode into replacement characters and wrote them back; 0.4.1 leaves the file as it is and says so (`save it as UTF-8`). A write that would change nothing is skipped.
+- **A `CLAUDE.md` that cannot be read no longer hides the rest.** `status` and `doctor` fail the identity check alone (`cannot read …`) and still report and repair everything else — the manual, the hosted tools, the service; `logout` and `uninstall` report a failed identity step instead of stopping with an error. A block this agent's, but older or next to a second AgentChat block, is a warning (`–`), as the doctor reports it.
+- **The help text and README say what is true about the previous switch name.** They said `AGENTCHAT_DOORBELL=off` worked "this release". It is the previous name of `AGENTCHAT_INTEGRATION=off`, still read by this release (agent contract v1, section 7, schedules its removal for 2027-02-01), and `AGENTCHAT_INTEGRATION` wins when both are set. They also say now that install, `daemon install` and `doctor --fix` each capture the switches again from the shell that runs them, and that the key is never captured. The daemon logs a warning when only the previous name turned it off.
+
+### Changed
+
+- Internal names only: the service functions are named for the listener (`ensureListenerService`, `listenerServiceCurrent`, `removeListenerService`), and comments and test titles use the current words. Nothing on disk is renamed: the service label (`agentchatd-claude-code`, or `agentchatd-claude-code-<8 hex>` under a relocated `CLAUDE_CONFIG_DIR`), the daemon bundle path and the identity-home files are as they were, so an installed service keeps working.
+- The switches captured into the service name agent-core's `INTEGRATION_ENV` / `INTEGRATION_ENV_LEGACY` constants instead of string literals, so the build breaks, rather than keeping dead code, on the day agent-core drops the previous name.
+
+### Removed
+
+- The `doorbell` key in `status --json` (an alias of `integration`, kept since 0.2.0; agent-core 0.4.1 drops it). Read `integration`.
+
 ## 0.4.0 — 2026-11-08
 
 Needs `@agentchatme/agent-core` 0.4.0 (pinned exactly: the presets, and the integration on the SDK kit) and `agentchatme` 1.3.0.

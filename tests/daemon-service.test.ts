@@ -11,7 +11,7 @@ import { installFakeClaude, type FakeClaude } from './helpers/fake-claude.js'
 // A shipped defect once wired the unit to a command that did not exist; it
 // restart-looped forever behind a green pipeline because the only check on the
 // daemon was that a FILE EXISTED. So: never assert a path exists — RUN it, and
-// assert it got far enough to prove it is the doorbell.
+// assert it got far enough to prove it is the listener.
 
 const DIST = path.join(__dirname, '..', 'dist')
 const DAEMON = path.join(DIST, 'daemon-main.js')
@@ -135,13 +135,17 @@ describe('the daemon is RESIDENT — it idles rather than exiting', () => {
     expect(out).not.toContain(b)
   }, 20_000)
 
-  it('AGENTCHAT_DOORBELL=off holds no socket and says so', async () => {
+  // A compatibility check: AGENTCHAT_DOORBELL is the switch's previous name,
+  // still read; agent contract v1 (section 7) schedules its removal for 2027-02-01. A service
+  // installed before the rename carries it in its unit.
+  it('AGENTCHAT_DOORBELL=off (the previous name) still holds no socket, and says it is the previous name', async () => {
     const home = path.join(sandbox, 'off-home')
     fs.mkdirSync(home, { recursive: true })
     fs.writeFileSync(path.join(home, 'credentials'), JSON.stringify({ api_key: 'ac_live_' + 'a'.repeat(40), handle: 'cc-agent', api_base: 'http://127.0.0.1:9' }))
     const { out, alive } = await runFor(DAEMON, ['--home', home], 1500, { AGENTCHAT_DOORBELL: 'off' })
     expect(alive).toBe(true)
     expect(out).toContain('AGENTCHAT_DOORBELL=off')
+    expect(out).toContain('schedules its removal for 2027-02-01')
     const status = JSON.parse(fs.readFileSync(path.join(home, 'integration.status.json'), 'utf-8')) as { socket: string }
     expect(status.socket).toBe('off')
   }, 20_000)
@@ -253,6 +257,44 @@ describe.skipIf(!serviceOs)('the service label follows the config dir', () => {
     const other = writeForeignDefinition('agentchatd-claude-code', path.join(sandbox, '.claude', 'agentchat'))
     await run(CLI, ['daemon', 'install'], { CLAUDE_CONFIG_DIR: cfg })
     expect(fs.existsSync(other)).toBe(true)
+  })
+})
+
+describe.skipIf(!serviceOs)('daemon install captures the switches into the service', () => {
+  // A launchd/systemd service does not inherit the shell, so the switches are
+  // written into its definition. AGENTCHAT_DOORBELL is captured too: it is the
+  // off switch's previous name, a compatibility reader the daemon still reads
+  // until 2027-02-01, and an operator who sets it must find it in the unit.
+  it('the off switch under both names, and the run profile, land in the definition', async () => {
+    const installed = await run(CLI, ['daemon', 'install'], { AGENTCHAT_INTEGRATION: 'off', AGENTCHAT_DOORBELL: 'off', AGENTCHAT_RUN_PROFILE: 'work' })
+    expect(installed.code, installed.out).toBe(0)
+    const definition = fs.readFileSync(definitionPath('agentchatd-claude-code'), 'utf-8')
+    for (const [key, value] of [['AGENTCHAT_INTEGRATION', 'off'], ['AGENTCHAT_DOORBELL', 'off'], ['AGENTCHAT_RUN_PROFILE', 'work']] as const) {
+      // systemd: Environment="KEY=value"; launchd: <key>KEY</key><string>value</string>
+      expect(definition).toMatch(new RegExp(`${key}(=|</key>\\s*<string>)${value}`))
+    }
+  })
+
+  // Pinned on purpose, so that changing it is a decision and not an accident:
+  // every install, `daemon install` and `doctor --fix` writes the definition
+  // again from the shell that runs it. A switch captured earlier is not
+  // carried forward — an `off` set at `daemon install` is gone after a plain
+  // install from a shell without it. `daemon disable` is the off that
+  // survives every install and `doctor --fix`.
+  it('a later install from a shell without the switch writes the definition without it; daemon disable is the off that survives', async () => {
+    const label = definitionPath('agentchatd-claude-code')
+    expect((await run(CLI, ['daemon', 'install'], { AGENTCHAT_INTEGRATION: 'off' })).code).toBe(0)
+    expect(fs.readFileSync(label, 'utf-8')).toMatch(/AGENTCHAT_INTEGRATION(=|<\/key>\s*<string>)off/)
+
+    const plain = await run(CLI, [])
+    expect(plain.code, plain.out).toBe(0)
+    expect(fs.readFileSync(label, 'utf-8')).not.toContain('AGENTCHAT_INTEGRATION')
+
+    expect((await run(CLI, ['daemon', 'disable'])).code).toBe(0)
+    expect(fs.existsSync(label)).toBe(false)
+    expect((await run(CLI, [])).code).toBe(0)
+    expect((await run(CLI, ['doctor', '--fix'])).out).toContain('disabled by the user')
+    expect(fs.existsSync(label)).toBe(false)
   })
 })
 

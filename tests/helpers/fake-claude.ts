@@ -19,6 +19,11 @@ export interface FakeClaude {
  *   FAKE_CLAUDE_LOGGED_OUT=1   `auth status` exits 1
  *   FAKE_CLAUDE_RUN=ok|fail|nostart|signedout|hang   how a `-p` run ends (default ok)
  *   FAKE_CLAUDE_RECORD=<file>  where `-p` runs append their record
+ *
+ * A run's record also says what its `--mcp-config` file held when the run
+ * started (server names, URL, header names, the file mode, and the
+ * Authorization header as a SHA-256 — never the key itself) and the text of its
+ * `--append-system-prompt-file`: both are written for one run and removed after it.
  */
 export function installFakeClaude(root: string, version = '2.1.316'): FakeClaude {
   const binDir = path.join(root, 'fake-bin')
@@ -76,7 +81,13 @@ export function installFakeClaude(root: string, version = '2.1.316'): FakeClaude
       "  process.stdin.setEncoding('utf8')",
       "  process.stdin.on('data', (c) => { stdin += c })",
       "  process.stdin.on('end', () => {",
-      "    const record = { argv: args, stdin, cwd: process.cwd(), env: { CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR, CLAUDE_CODE_MCP_STARTUP_WAIT_MS: process.env.CLAUDE_CODE_MCP_STARTUP_WAIT_MS, DISABLE_AUTOUPDATER: process.env.DISABLE_AUTOUPDATER, CLAUDECODE: process.env.CLAUDECODE } }",
+      "    const at = args.indexOf('--mcp-config')",
+      '    let mcpConfig = null',
+      "    if (at >= 0) { try { const file = args[at + 1]; const servers = JSON.parse(fs.readFileSync(file, 'utf8')).mcpServers || {}; const entry = servers.agentchat || {}; const headers = entry.headers || {}; mcpConfig = { servers: Object.keys(servers), type: entry.type, url: entry.url, headerNames: Object.keys(headers), authorizationSha256: headers.Authorization === undefined ? null : require('node:crypto').createHash('sha256').update(headers.Authorization).digest('hex'), client: headers['X-AgentChat-Client'], clientVersion: headers['X-AgentChat-Client-Version'], mode: fs.statSync(file).mode & 0o777 } } catch { mcpConfig = 'unreadable' } }",
+      "    const sp = args.indexOf('--append-system-prompt-file')",
+      '    let appendedSystemPrompt = null',
+      "    if (sp >= 0) { try { appendedSystemPrompt = fs.readFileSync(args[sp + 1], 'utf8') } catch { appendedSystemPrompt = 'unreadable' } }",
+      "    const record = { argv: args, stdin, cwd: process.cwd(), mcpConfig, appendedSystemPrompt, env: { CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR, CLAUDE_CODE_MCP_STARTUP_WAIT_MS: process.env.CLAUDE_CODE_MCP_STARTUP_WAIT_MS, DISABLE_AUTOUPDATER: process.env.DISABLE_AUTOUPDATER, CLAUDECODE: process.env.CLAUDECODE, CLAUDE_CODE_SESSION_ID: process.env.CLAUDE_CODE_SESSION_ID, CLAUDE_CODE_DISABLE_CLAUDE_MDS: process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS, CLAUDE_CODE_DISABLE_AUTO_MEMORY: process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, AGENTCHAT_API_KEY: process.env.AGENTCHAT_API_KEY } }",
       "    if (process.env.FAKE_CLAUDE_RECORD) fs.appendFileSync(process.env.FAKE_CLAUDE_RECORD, JSON.stringify(record) + '\\n')",
       "    const mode = process.env.FAKE_CLAUDE_RUN || 'ok'",
       "    if (mode === 'nostart') process.exit(2)",
@@ -106,11 +117,35 @@ export function installFakeClaude(root: string, version = '2.1.316'): FakeClaude
   }
 }
 
-export function readRuns(fake: FakeClaude): Array<{ argv: string[]; stdin: string; cwd: string; env: Record<string, string | undefined> }> {
+/** What a run's `--mcp-config` held when it started (`'unreadable'` when it could not be read). */
+export interface FakeMcpConfig {
+  servers: string[]
+  type?: string
+  url?: string
+  headerNames: string[]
+  /** SHA-256 hex of the Authorization header's value; null without one. */
+  authorizationSha256: string | null
+  client?: string
+  clientVersion?: string
+  mode: number
+}
+
+export interface FakeClaudeRun {
+  argv: string[]
+  stdin: string
+  cwd: string
+  env: Record<string, string | undefined>
+  /** Null without `--mcp-config`. */
+  mcpConfig: FakeMcpConfig | 'unreadable' | null
+  /** The text of the run's `--append-system-prompt-file`; null without one. */
+  appendedSystemPrompt: string | null
+}
+
+export function readRuns(fake: FakeClaude): FakeClaudeRun[] {
   if (!fs.existsSync(fake.recordPath)) return []
   return fs
     .readFileSync(fake.recordPath, 'utf-8')
     .split('\n')
     .filter((line) => line.trim().length > 0)
-    .map((line) => JSON.parse(line) as { argv: string[]; stdin: string; cwd: string; env: Record<string, string | undefined> })
+    .map((line) => JSON.parse(line) as FakeClaudeRun)
 }

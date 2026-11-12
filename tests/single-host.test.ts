@@ -7,7 +7,7 @@ import * as crypto from 'node:crypto'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { MANUAL, manualVersion } from '@agentchatme/agent-core'
+import { MANUAL, manualVersion, PEER_RUN_WARNING } from '@agentchatme/agent-core'
 import { VERSION } from '../src/version.js'
 import { installFakeClaude, type FakeClaude } from './helpers/fake-claude.js'
 
@@ -522,6 +522,41 @@ describe('there is no way to address another agent', () => {
     expect(snapshot(codexDir())).toEqual(before)
   })
 
+  it('logout and uninstall remove what an interrupted answer run left in the identity home (its tool config holds the key), and nothing else there', async () => {
+    const presets = path.join(home(), 'presets')
+    const leave = (): void => {
+      fs.mkdirSync(presets, { recursive: true })
+      fs.writeFileSync(path.join(presets, 'claude-code.mcp.run-1.json'), JSON.stringify({ mcpServers: { agentchat: { headers: { Authorization: `Bearer ${KEY}` } } } }), { mode: 0o600 })
+      fs.writeFileSync(path.join(presets, 'claude-code.mcp.run-1.identity.md'), 'I am @claude-agent on AgentChat.\n')
+    }
+    giveClaudeAnIdentity()
+    expect((await run([])).code).toBe(0)
+    leave()
+    const out = await run(['logout'])
+    expect(out.code, out.stdout + out.stderr).toBe(0)
+    expect(out.stdout).toMatch(/runs: removed 2 files an answer run left/)
+    expect(fs.existsSync(presets)).toBe(false)
+
+    giveClaudeAnIdentity()
+    expect((await run([])).code).toBe(0)
+    leave()
+    fs.writeFileSync(path.join(presets, 'mine.txt'), 'not the integration\'s')
+    const removed = await run(['uninstall'])
+    expect(removed.code, removed.stdout + removed.stderr).toBe(0)
+    expect(fs.readdirSync(presets)).toEqual(['mine.txt'])
+    expect(fs.existsSync(creds())).toBe(true)
+  })
+
+  it('the help says what each profile lets a peer-started run do, and where an answer run works', async () => {
+    const out = await run(['--help'])
+    const flat = out.stdout.replace(/\s+/g, ' ')
+    expect(flat).toContain('answer (default): the AgentChat tools and reads inside the run\'s work folder only — no web, no shell, no other MCP server, no CLAUDE.md, memory or hooks')
+    expect(flat).toContain('permissions.additionalDirectories')
+    expect(flat).toContain(`work and full: ${PEER_RUN_WARNING}`)
+    expect(flat).toContain('AGENTCHAT_RUN_CWD')
+    expect(flat).toContain('agentchat-answer-workdir')
+  })
+
   it('the help says the previous switch name is still read, when its removal is scheduled, and that switches are captured again on every install', async () => {
     // AGENTCHAT_DOORBELL is the switch's previous name: a compatibility reader, its removal scheduled for 2027-02-01.
     const out = await run(['--help'])
@@ -595,6 +630,83 @@ describe('doctor', () => {
     const fixed = await run(['doctor', '--fix'])
     expect(fixed.stdout).toContain('PASS hosted-mcp:')
     expect(mcpEntry()).toMatchObject({ headers: { Authorization: `Bearer ${rotated}` } })
+  })
+})
+
+describe('doctor: what a peer-started run may do, and whether one can start', () => {
+  const STATUS = (extra: Record<string, unknown>): string =>
+    JSON.stringify({
+      version: 2,
+      updated_at: new Date().toISOString(),
+      pid: process.pid,
+      runtime: 'claude',
+      handle: 'claude-agent',
+      profile: 'answer',
+      socket: 'ready',
+      wakes: 3,
+      wakes_absorbed: 0,
+      invites: 0,
+      runs_started: 3,
+      runs_ok: 0,
+      runs_failed: 3,
+      runs_timed_out: 0,
+      runs_not_started: 0,
+      runs_skipped_empty: 0,
+      last_run: null,
+      retry_rung: 0,
+      retry_due_at: null,
+      last_error: null,
+      texts: null,
+      ...extra,
+    })
+
+  it('answer (the default): the profile in plain words, and the runner’s own preflight passes', { timeout: 30_000 }, async () => {
+    giveClaudeAnIdentity()
+    await run([])
+    const out = await run(['doctor'])
+    expect(out.stdout).toContain(`PASS run-profile: answer: the AgentChat tools and reads inside ${path.join(sandbox, '.claude', 'agentchat-workdir')} only — no web, no shell, no other MCP server, no CLAUDE.md, memory or hooks`)
+    expect(out.stdout).toContain('PASS run-preflight: the daemon can start a run')
+  })
+
+  it('permissions.additionalDirectories in the user’s settings: run-preflight FAILs naming the file, in the runner’s words', { timeout: 30_000 }, async () => {
+    giveClaudeAnIdentity()
+    await run([])
+    const settings = path.join(sandbox, '.claude', 'settings.json')
+    fs.writeFileSync(settings, JSON.stringify({ permissions: { additionalDirectories: [path.join(sandbox, 'shared')] } }))
+    const out = await run(['doctor'])
+    expect(out.code).toBe(1)
+    expect(out.stdout).toMatch(new RegExp(`FAIL run-preflight: no run starts: answer runs do not start while ${settings.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} lists permissions\\.additionalDirectories`))
+    // work is the operator's opt-in, and is not refused for it.
+    const work = await run(['doctor'], { AGENTCHAT_RUN_PROFILE: 'work' })
+    expect(work.stdout).toContain('PASS run-preflight')
+    expect(work.stdout).toContain(`WARN run-profile: work: ${PEER_RUN_WARNING}`)
+  })
+
+  it('a work folder that is the home folder: answer runs work in their own folder, and doctor says so', { timeout: 30_000 }, async () => {
+    giveClaudeAnIdentity()
+    await run([])
+    const out = await run(['doctor'], { AGENTCHAT_RUN_CWD: sandbox })
+    expect(out.stdout).toContain(`WARN run-workdir: ${sandbox} is your home folder or contains it — answer runs work in ${path.join(sandbox, '.claude', 'agentchat-answer-workdir')} instead`)
+    expect(out.stdout).toContain(`PASS run-profile: answer: the AgentChat tools and reads inside ${path.join(sandbox, '.claude', 'agentchat-answer-workdir')} only`)
+  })
+
+  it('runs failing for a runtime reason, and another listener serving the agent, are said in doctor and status', { timeout: 30_000 }, async () => {
+    giveClaudeAnIdentity()
+    await run([])
+    const statusFile = path.join(home(), 'integration.status.json')
+    const since = new Date(Date.now() - 60_000).toISOString()
+    fs.writeFileSync(statusFile, STATUS({ runs_failing: { reason: 'claude: claude is not signed in (run `claude` once and sign in)', since, runs_missed: 3, checked_at: new Date().toISOString() } }))
+    const doctor = await run(['doctor'])
+    expect(doctor.code).toBe(1)
+    expect(doctor.stdout).toContain('FAIL runs: runs failing: claude: claude is not signed in')
+    expect(doctor.stdout).toContain('WARN integration: socket ready, but runs are failing: claude: claude is not signed in')
+    const status = await run(['status'])
+    expect(status.stdout).toContain('runs failing: claude: claude is not signed in')
+
+    fs.writeFileSync(statusFile, STATUS({ socket: 'idle', standby: { home: '/elsewhere/.agentchat', pid: 4242, since } }))
+    const standby = await run(['doctor'])
+    expect(standby.stdout).toContain('WARN integration: standing by — /elsewhere/.agentchat (pid 4242) serves this agent')
+    expect((await run(['status'])).stdout).toContain('standby: /elsewhere/.agentchat (pid 4242) serves this agent')
   })
 })
 

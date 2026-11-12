@@ -12,7 +12,10 @@ set -euo pipefail
 workspace="$PWD"
 root="${SMOKE_ROOT:-${RUNNER_TEMP:-/tmp}/smoke}"
 rm -rf "$root"
-mkdir -p "$root/verify" "$root/npxlike"
+mkdir -p "$root/verify" "$root/npxlike" "$root/locks"
+# Every daemon here takes its agent lock (one agent, one listener) in a folder
+# of this smoke's own, never the user's.
+export AGENTCHAT_LOCK_DIR="$root/locks"
 
 # The actual package boundary, not files beside the checkout.
 tgz="$(npm pack --ignore-scripts --pack-destination "$root/verify" | tail -1)"

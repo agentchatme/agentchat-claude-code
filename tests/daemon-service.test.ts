@@ -45,6 +45,8 @@ const baseEnv = (): Record<string, string> => ({
   // address the REAL user's domain. Without this, these tests register actual
   // services on the developer's machine pointed at a temp dir. It happened.
   AGENTCHAT_SERVICE_DRY_RUN: '1',
+  // This test file's own agent-lock folder (tests/setup/isolated-locks.ts), never the user's.
+  AGENTCHAT_LOCK_DIR: process.env['AGENTCHAT_LOCK_DIR'] ?? path.join(sandbox, 'locks'),
 })
 
 /** Run a script to completion, capturing everything. Never throws. */
@@ -321,6 +323,19 @@ describe('the run workdir is outside the identity home', () => {
     expect(fs.existsSync(path.join(sandbox, '.claude', 'agentchat-workdir')), out).toBe(true)
     expect(fs.existsSync(path.join(home, 'daemon-workdir'))).toBe(false)
     expect(out).not.toMatch(/cannot read their own working directory/)
+  }, 30_000)
+
+  it('the shipped daemon’s answer runner passes its preflight: it is given the AgentChat-only tool config an answer run needs', async () => {
+    // Without that config the engine refuses every answer run ("an answer run
+    // needs the AgentChat-only tool config") and the daemon never holds the socket.
+    const home = path.join(sandbox, '.claude', 'agentchat')
+    signIn(home)
+    const { out, alive } = await runFor(DAEMON, ['--home', home], 6000)
+    expect(alive, out).toBe(true)
+    expect(out).toMatch(/integration up as @cc-agent via claude \(claude-code [^)]+\), profile answer/)
+    expect(out).not.toMatch(/AgentChat-only tool config|not connecting yet/)
+    // No run happened, so no per-run file exists; the folder they go in is the denied identity home.
+    expect(fs.existsSync(path.join(home, 'presets'))).toBe(false)
   }, 30_000)
 
   it('AGENTCHAT_RUN_CWD inside the identity home is warned once, with the fix, and the daemon still serves', async () => {

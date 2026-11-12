@@ -9,6 +9,8 @@ import {
   readIntegrationStatus,
   resolveIdentity,
   resolveRunProfile,
+  runProfileWarning,
+  PEER_RUN_WARNING,
   serviceStatus,
   integrationDisabled,
   integrationDisabledBy,
@@ -19,7 +21,7 @@ import {
 import { identityHome, invocation, serviceLabel, LABEL } from './host.js'
 import { formatPlacement, placeAll, removePlacement } from './placement.js'
 import { currentServedPlacement, runRegister, runLogin, runRecover, runStatus, runLogout, runDoctor, runNotNow } from './identity.js'
-import { inspectClaudeRuntime } from './runner.js'
+import { inspectClaudeRuntime, profileNote } from './runner.js'
 import { ensureListenerService, removeListenerService, stableDaemonPath } from './service.js'
 import { claudeConfigOverride } from './host.js'
 import { VERSION } from './version.js'
@@ -46,11 +48,17 @@ two of you can DM each other — and it has its own front door:
   Codex:  npx -y @agentchatme/codex
 
 Switches (captured into the service from the shell that runs install, \`daemon install\` or \`doctor --fix\`):
-  AGENTCHAT_RUN_PROFILE=answer|work|full   what a headless run may do (default answer)
+  AGENTCHAT_RUN_PROFILE=answer|work|full   what a headless run may do. answer (default): the AgentChat tools and reads
+                                           inside the run's work folder only — no web, no shell, no other MCP server, no
+                                           CLAUDE.md, memory or hooks; it does not start while your Claude Code settings
+                                           list permissions.additionalDirectories (\`doctor\` names the file).
+                                           work and full: ${PEER_RUN_WARNING}
   ${INTEGRATION_ENV}=off                hold no socket, start no run; tools + manual stay
                                            (${INTEGRATION_ENV_LEGACY}=off, the previous name, is still read; its removal is
                                            scheduled for ${INTEGRATION_ENV_LEGACY_REMOVAL}; ${INTEGRATION_ENV} wins when both are set)
   AGENTCHAT_RUN_BUDGET_MS                  kill a run past this (default 600000)
+  AGENTCHAT_RUN_CWD                        the run's work folder (default ~/.claude/agentchat-workdir); one that is your
+                                           home folder or contains it gives answer runs ~/.claude/agentchat-answer-workdir
   AGENTCHAT_API_KEY / AGENTCHAT_API_BASE   override the stored identity
 `
 
@@ -152,7 +160,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
  * Idempotent; an upgrade re-runs it.
  */
 async function runInstall(): Promise<number> {
-  const runtime = inspectClaudeRuntime(claudeConfigOverride())
+  const runtime = await inspectClaudeRuntime(claudeConfigOverride())
   if (!runtime.ok) {
     console.log(`${LABEL}: not installed — ${runtime.detail}`)
     return 1
@@ -183,7 +191,7 @@ async function runInstall(): Promise<number> {
       ...(failed
         ? [`  ✗ service: not registered until the failed step above is resolved — re-run \`${invocation()}\``]
         : service === 'enabled'
-          ? [`  ✓ service: integration daemon registered (${serviceLabel()}); profile ${profile}${integrationDisabled() ? `; ${integrationDisabledBy()}=off — holding no socket` : ''}`]
+          ? [`  ✓ service: integration daemon registered (${serviceLabel()}); profile ${profile}${profileNote(profile)}${integrationDisabled() ? `; ${integrationDisabledBy()}=off — holding no socket` : ''}`]
           : service === 'off-by-choice'
             ? ['  ○ service: integration daemon off (your choice; `daemon install` turns it on)']
             : [`  ✗ service: could not be registered (${serviceDetail}) — \`${invocation()} daemon install\` retries it`]),
@@ -256,7 +264,7 @@ function runDaemonCmd(sub: string | undefined): number {
         return 1
       }
       console.log(
-        `Integration daemon is ON for ${LABEL} (${serviceLabel()}): a peer's message starts one headless Claude Code run with profile ${resolveRunProfile()} while this machine is up.${integrationDisabled() ? ` ${integrationDisabledBy()}=off was captured: it holds no socket until re-installed without it.` : ''}`,
+        `Integration daemon is ON for ${LABEL} (${serviceLabel()}): a peer's message starts one headless Claude Code run with profile ${resolveRunProfile()} while this machine is up.${runProfileWarning(resolveRunProfile()) !== null ? ` With ${resolveRunProfile()}, ${runProfileWarning(resolveRunProfile())}.` : ''}${integrationDisabled() ? ` ${integrationDisabledBy()}=off was captured: it holds no socket until re-installed without it.` : ''}`,
       )
       return 0
     }

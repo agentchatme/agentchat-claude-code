@@ -32,6 +32,7 @@ import {
   skillDir,
   skillPath,
 } from './host.js'
+import { answerToolConfigFor, removeAnswerRunFiles } from './runner.js'
 
 // ─── Placement: the four texts, where Claude Code loads them ────────────────
 //
@@ -75,7 +76,7 @@ import {
 export type PlacementStatus = 'ok' | 'changed' | 'warned' | 'skipped' | 'failed'
 
 export interface PlacementStep {
-  readonly name: 'identity' | 'manual' | 'mcp' | 'legacy'
+  readonly name: 'identity' | 'manual' | 'mcp' | 'legacy' | 'runs'
   readonly status: PlacementStatus
   readonly detail: string
 }
@@ -482,6 +483,24 @@ export function removeLegacyWiring(): PlacementStep | null {
   return { name: 'legacy', status: 'changed', detail: notes.join('; ') }
 }
 
+// ─── What answer runs leave behind ──────────────────────────────────────────
+
+/**
+ * An answer run writes its own tool config (it holds the key) and its
+ * identity line into `<identity home>/presets/` and removes both when it ends;
+ * a run cut off (power loss, a killed daemon) leaves them there. Logout takes
+ * them out with the key; uninstall with the rest. Null when there were none.
+ */
+export function removeAnswerRunLeftovers(): PlacementStep | null {
+  const dir = path.dirname(answerToolConfigFor(identityHome()))
+  const { removed, failed } = removeAnswerRunFiles(identityHome())
+  if (failed.length > 0) {
+    return { name: 'runs', status: 'failed', detail: `could not remove ${failed.join(', ')} from ${dir} (left by an answer run; a tool config there holds the key) — delete ${failed.length === 1 ? 'it' : 'them'} by hand` }
+  }
+  if (removed.length === 0) return null
+  return { name: 'runs', status: 'changed', detail: `removed ${removed.length} file${removed.length === 1 ? '' : 's'} an answer run left in ${dir} (its own tool config and identity line)` }
+}
+
 // ─── All together ───────────────────────────────────────────────────────────
 
 /**
@@ -506,13 +525,16 @@ export async function placeAll(identity: PlacementIdentity | null, manual: Serve
 }
 
 /**
- * Logout: the key leaves Claude Code; the manual and the skill stay.
+ * Logout: the key leaves Claude Code (the MCP entry, and any tool config an
+ * answer run left behind); the manual and the skill stay.
  * `identity` is the identity as it was BEFORE the credential was cleared
  * (agent-core hands it over), so the entry is recognised by its key and its
  * server rather than by a guessed default base.
  */
 export function unplaceIdentity(identity: UnplaceIdentity): PlacementStep[] {
   const steps = [removeHostedMcp(identity)]
+  const leftovers = removeAnswerRunLeftovers()
+  if (leftovers) steps.push(leftovers)
   steps.push(placeOffer())
   return steps
 }
@@ -523,6 +545,8 @@ export function removePlacement(identity: UnplaceIdentity): PlacementStep[] {
   const legacy = removeLegacyWiring()
   if (legacy) steps.push(legacy)
   steps.push(removeHostedMcp(identity))
+  const leftovers = removeAnswerRunLeftovers()
+  if (leftovers) steps.push(leftovers)
   steps.push(removeSkill())
   try {
     steps.push({

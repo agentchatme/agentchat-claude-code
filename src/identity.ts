@@ -4,6 +4,7 @@ import {
   alwaysOnOptedOut,
   alwaysOnState,
   createIdentityCommands,
+  DEFAULT_API_BASE,
   fetchServedTexts,
   integrationDisabledBy,
   INTEGRATION_ENV,
@@ -15,6 +16,9 @@ import {
   renderAnchorBlock,
   renderDeclinedBlock,
   resolveIdentity,
+  resolveRunProfile,
+  runProfileWarning,
+  workdirExposesHome,
   writeAnchor,
   type DoctorCheck,
   type DoctorContext,
@@ -23,9 +27,10 @@ import {
   type ServedManual,
   type StatusContext,
 } from '@agentchatme/agent-core'
+import { claudeAnswerFallbackWorkdir } from '@agentchatme/agent-core/presets'
 import { CLIENT, identityHome, anchorFile, claudeConfigOverride, invocation, LABEL, legacyRunWorkdirFor, resolveRunWorkdir, runWorkdirFor } from './host.js'
 import { checkPlacement, placeAll, placementMark, skillPresent, unplaceIdentity, type PlacementIdentity } from './placement.js'
-import { claudeIsLoggedIn, deniedAncestorOf, denyReadPathsFor, inspectClaudeRuntime } from './runner.js'
+import { ClaudeRunner, claudeIsLoggedIn, deniedAncestorOf, denyReadPathsFor, inspectClaudeRuntime, profileNote } from './runner.js'
 import { ensureListenerService, listenerServiceCurrent } from './service.js'
 import { VERSION } from './version.js'
 
@@ -96,13 +101,19 @@ const profile: HostProfile = {
       apiBase: identity?.apiBase ?? process.env['AGENTCHAT_API_BASE']?.trim() ?? 'https://api.agentchat.me',
     }).map((s) => `  ${s.name}: ${s.detail}`),
   logoutHints: () => [`To remove the integration too, run \`${invocation()} uninstall\`.`],
-  extraDoctorChecks: async (ctx: DoctorContext): Promise<DoctorCheck[]> => [
-    ...runtimeChecks(),
-    ...(await placementChecks(ctx.fix === true, ctx, ctx.manual)),
-    serviceCheck(ctx.fix === true),
-    workdirCheck(ctx.fix === true),
-    integrationCheck(),
-  ],
+  extraDoctorChecks: async (ctx: DoctorContext): Promise<DoctorCheck[]> => {
+    const runtime = await runtimeChecks()
+    return [
+      ...runtime,
+      ...(await placementChecks(ctx.fix === true, ctx, ctx.manual)),
+      serviceCheck(ctx.fix === true),
+      workdirCheck(ctx.fix === true),
+      profileCheck(),
+      // The runner's own gate needs a working, signed-in Claude Code first; the checks above say when it is not.
+      ...(runtime.every((c) => c.verdict === 'PASS') ? [await preflightCheck()] : []),
+      integrationCheck(),
+    ]
+  },
   // The shared status already fetched the served texts once; the placement
   // checks reuse the identity line, its template and the announced manual
   // rather than fetching `/v1/texts` again.
@@ -123,15 +134,15 @@ function concise(value: string): string {
   return value.replace(/\s+/g, ' ').trim().slice(0, 180)
 }
 
-function runtimeChecks(): DoctorCheck[] {
-  const version = inspectClaudeRuntime(claudeConfigOverride())
+async function runtimeChecks(): Promise<DoctorCheck[]> {
+  const version = await inspectClaudeRuntime(claudeConfigOverride())
   if (!version.ok) {
     return [
       { name: 'claude-cli', verdict: 'FAIL', detail: version.detail },
       { name: 'claude-auth', verdict: 'FAIL', detail: 'cannot check until the Claude CLI works' },
     ]
   }
-  const authenticated = claudeIsLoggedIn(claudeConfigOverride())
+  const authenticated = await claudeIsLoggedIn(claudeConfigOverride())
   return [
     { name: 'claude-cli', verdict: 'PASS', detail: concise(version.detail) || 'available' },
     {
@@ -180,15 +191,73 @@ function serviceCheck(fix: boolean): DoctorCheck {
 }
 
 /**
+ * The runner the daemon builds for this config, from the same switches the
+ * service captures (this shell's: install, `daemon install` and `doctor --fix`
+ * write the service from it).
+ */
+function daemonRunner(): ClaudeRunner {
+  const configDir = claudeConfigOverride()
+  return new ClaudeRunner({
+    configDir,
+    workdir: resolveRunWorkdir(configDir),
+    profile: resolveRunProfile(),
+    apiBase: resolveIdentity(identityHome())?.apiBase ?? DEFAULT_API_BASE,
+  })
+}
+
+/**
+ * What a run started by a peer's message may do. `answer`: the AgentChat tools
+ * and reads inside its work folder, nothing else. `work` and `full` are the
+ * operator's opt-in, said with the engine's own warning (`runProfileWarning`).
+ */
+export function profileCheck(): DoctorCheck {
+  const profile = resolveRunProfile()
+  const warning = runProfileWarning(profile)
+  if (warning !== null) return { name: 'run-profile', verdict: 'WARN', detail: `${profile}: ${warning} (AGENTCHAT_RUN_PROFILE; answer is the default)` }
+  return {
+    name: 'run-profile',
+    verdict: 'PASS',
+    detail: `answer: the AgentChat tools and reads inside ${daemonRunner().workdir()} only — no web, no shell, no other MCP server, no CLAUDE.md, memory or hooks`,
+  }
+}
+
+/**
+ * The runner's own preflight: the gate the daemon applies before it holds the
+ * socket, in its exact words. An answer run, for one, does not start while a
+ * settings file lists `permissions.additionalDirectories` (Claude Code counts
+ * those as working directories). Like the daemon, it creates the run's work
+ * folder (owner-only) when there is none.
+ */
+export async function preflightCheck(): Promise<DoctorCheck> {
+  const pre = await daemonRunner().preflight()
+  return pre.ok
+    ? { name: 'run-preflight', verdict: 'PASS', detail: 'the daemon can start a run (the runner\'s preflight passes)' }
+    : { name: 'run-preflight', verdict: 'FAIL', detail: `no run starts: ${pre.detail ?? 'the runner\'s preflight failed'}` }
+}
+
+/**
  * Where runs work, and whether they can read it. The daemon passes the deny
  * rules for the identity home and ~/.claude.json on every run, so a workdir
  * inside either is a cwd the run cannot read (the pre-fix default was one).
- * The same env the service captured decides the path here, as it does for the
- * service check.
+ * A workdir that is the home folder or contains it is no answer run's: those
+ * work in an empty folder of their own, and `work`/`full` runs would see the
+ * whole home. The same env the service captured decides the path here, as it
+ * does for the service check.
  */
 export function workdirCheck(fix: boolean): DoctorCheck {
   const configDir = claudeConfigOverride()
   const workdir = resolveRunWorkdir(configDir)
+  if (workdirExposesHome(workdir)) {
+    return {
+      name: 'run-workdir',
+      verdict: 'WARN',
+      detail: `${workdir} is your home folder or contains it — ${
+        resolveRunProfile() === 'answer'
+          ? `answer runs work in ${claudeAnswerFallbackWorkdir(configDir)} instead`
+          : "a run started by a peer's message there can see everything under it"
+      }; point AGENTCHAT_RUN_CWD at a folder of its own (or unset it for ${runWorkdirFor(configDir)}), then \`${invocation()} daemon install\``,
+    }
+  }
   const denied = deniedAncestorOf(workdir, denyReadPathsFor(configDir))
   if (denied !== null) {
     return {
@@ -232,12 +301,26 @@ function integrationCheck(): DoctorCheck {
   const age = integrationStatusAge(status) ?? Number.POSITIVE_INFINITY
   if (age > 3 * 60_000) return { name: 'integration', verdict: 'FAIL', detail: `status last written ${Math.round(age / 60_000)} min ago — the daemon is not running` }
   if (status.socket === 'off') return { name: 'integration', verdict: 'PASS', detail: `${integrationDisabledBy() ?? INTEGRATION_ENV}=off — resident, holding no socket` }
+  // One agent, one listener: another daemon (the CLI listener, say) serves this agent from its own home.
+  const standby = status.standby ?? null
+  if (standby !== null) {
+    return {
+      name: 'integration',
+      verdict: 'WARN',
+      detail: `standing by — ${standby.home ?? 'another identity home'}${standby.pid !== null ? ` (pid ${standby.pid})` : ''} serves this agent; this daemon holds no socket and starts no run while it does, and takes over when it stops`,
+    }
+  }
   if (status.socket === 'ready') {
     const texts = status.texts?.source ?? 'none'
+    // The daemon's own recheck after runs that did not get done (the `runs` check above is its FAIL).
+    const failing = status.runs_failing ?? null
+    if (failing !== null) {
+      return { name: 'integration', verdict: 'WARN', detail: `socket ready, but runs are failing: ${failing.reason} (since ${failing.since}, ${failing.runs_missed} run(s) missed)` }
+    }
     return {
       name: 'integration',
       verdict: texts === 'none' ? 'WARN' : 'PASS',
-      detail: `socket ready (acks on receipt), ${status.wakes} wake(s), ${status.runs_started} run(s) (${status.runs_ok} ok), texts ${texts === 'server' ? 'served' : texts === 'cache' ? 'from cache' : 'NOT fetched yet'}, profile ${status.profile}`,
+      detail: `socket ready (acks on receipt), ${status.wakes} wake(s), ${status.runs_started} run(s) (${status.runs_ok} ok), texts ${texts === 'server' ? 'served' : texts === 'cache' ? 'from cache' : 'NOT fetched yet'}, profile ${status.profile}${profileNote(status.profile)}`,
     }
   }
   return { name: 'integration', verdict: 'WARN', detail: `socket ${status.socket}${status.last_error ? ` — ${status.last_error}` : ''}` }

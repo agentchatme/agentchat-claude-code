@@ -2,6 +2,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import {
   alwaysOnOptedOut,
+  agentLockDir,
   alwaysOnState,
   createIdentityCommands,
   DEFAULT_API_BASE,
@@ -25,6 +26,7 @@ import {
   type DoctorContext,
   type DoctorOpts,
   type HostProfile,
+  type IntegrationUnservable,
   type RunProfile,
   type ServedManual,
   type StatusContext,
@@ -114,6 +116,7 @@ const profile: HostProfile = {
       // The runner's own gate needs a working, signed-in Claude Code first; the checks above say when it is not.
       ...(runtime.every((c) => c.verdict === 'PASS') ? [await preflightCheck()] : []),
       integrationCheck(),
+      ...[leaseCheck()].filter((c): c is DoctorCheck => c !== null),
     ]
   },
   // The shared status already fetched the served texts once; the placement
@@ -341,6 +344,10 @@ function integrationCheck(): DoctorCheck {
   const age = integrationStatusAge(status) ?? Number.POSITIVE_INFINITY
   if (age > 3 * 60_000) return { name: 'integration', verdict: 'FAIL', detail: `status last written ${Math.round(age / 60_000)} min ago — the daemon is not running` }
   if (status.socket === 'off') return { name: 'integration', verdict: 'PASS', detail: `${integrationDisabledBy() ?? INTEGRATION_ENV}=off — resident, holding no socket` }
+  // A home that cannot serve gave the agent up (no socket, no run): what it said and what clears it,
+  // as the shared `runs` check above says it in full.
+  const gaveUp = status.unservable ?? null
+  if (gaveUp !== null) return { name: 'integration', verdict: 'FAIL', detail: gaveUpLine(gaveUp) }
   // One agent, one listener: another daemon (the CLI listener, say) serves this agent from its own home.
   const standby = status.standby ?? null
   if (standby !== null) {
@@ -363,18 +370,31 @@ function integrationCheck(): DoctorCheck {
       detail: `socket ready (acks on receipt), ${status.wakes} wake(s), ${status.runs_started} run(s) (${status.runs_ok} ok), texts ${texts === 'server' ? 'served' : texts === 'cache' ? 'from cache' : 'NOT fetched yet'}, profile ${status.profile}${profileNote(status.profile)}`,
     }
   }
-  // A home whose runs kept failing gives the agent up (no socket, no run) so a healthy listener for it
-  // can serve, and serves again once Claude Code checks out (`runs` above says why).
-  const failing = status.runs_failing ?? null
-  if (failing !== null) {
-    return {
-      name: 'integration',
-      verdict: 'FAIL',
-      detail: `this home gave the agent up: runs failing: ${failing.reason} (since ${failing.since}, ${failing.runs_missed} run(s) missed); it holds no socket and starts no run until that is fixed (checked again every minute), and another listener for this agent may serve it meanwhile`,
-    }
-  }
-  // Not serving for another reason, in the daemon's own words (not connecting yet; a key the server refuses, after which it gave the agent up).
+  // Not serving for another reason, in the daemon's own words (not connecting yet, say).
   return { name: 'integration', verdict: 'WARN', detail: `socket ${status.socket}${status.last_error ? ` — ${status.last_error}` : ''}` }
+}
+
+/**
+ * Why this home gave its agent up and what clears it (the engine's
+ * `unservable`): a refused key until a sign-in the server accepts; runs failing
+ * (given up only to a healthy listener that was waiting) until a runtime check
+ * passes. Either way it takes the agent back whenever no other listener holds it.
+ */
+export function gaveUpLine(gaveUp: IntegrationUnservable): string {
+  return gaveUp.reason === 'key_refused'
+    ? `this home gave the agent up: the server refuses its key (${gaveUp.detail}); signing in again here (\`${invocation()} login\` or \`recover\`) clears this at once — or log out here if another home serves the agent; it looks again at ${gaveUp.retry_at}`
+    : `this home gave the agent up to another listener that was waiting: ${gaveUp.detail} (since ${gaveUp.since}); a runtime check that passes clears this (next at ${gaveUp.retry_at}, every 60 s), and it takes the agent back whenever no other listener holds it`
+}
+
+/** Lock renewals that failed (the engine's `lease_errors`): a lock that cannot be renewed for 45 s is given up. Null when none did. */
+function leaseCheck(): DoctorCheck | null {
+  const errors = readIntegrationStatus(identityHome())?.lease_errors ?? null
+  if (errors === null || errors.count === 0) return null
+  return {
+    name: 'locks',
+    verdict: 'WARN',
+    detail: `${errors.count} lock renewal(s) failed${errors.last ? ` (last: ${errors.last})` : ''}; a lock that cannot be renewed for 45 s is given up — check that ${identityHome()} and ${agentLockDir()} are there and writable`,
+  }
 }
 
 const commands = createIdentityCommands(profile)

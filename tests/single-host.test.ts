@@ -712,22 +712,41 @@ describe('doctor: what a peer-started run may do, and whether one can start', ()
     expect((await run(['doctor'])).stdout).toMatch(/FAIL integration: status last written 30 min ago — the daemon is not running/)
   })
 
-  it('a home that gave the agent up — runs kept failing — is said by doctor and status', { timeout: 30_000 }, async () => {
+  it('a home that gave the agent up is said by doctor and status, with what clears it — a refused key, or failing runs handed to a waiting listener', { timeout: 30_000 }, async () => {
     giveClaudeAnIdentity()
     await run([])
+    const statusFile = path.join(home(), 'integration.status.json')
     const since = new Date(Date.now() - 120_000).toISOString()
+    const retryAt = new Date(Date.now() + 60_000).toISOString()
+    fs.writeFileSync(statusFile, STATUS({ socket: 'idle', unservable: { reason: 'key_refused', detail: 'auth rejected (close 1008 Invalid token)', since, retry_at: retryAt } }))
+    const refused = await run(['doctor'])
+    expect(refused.code).toBe(1)
+    expect(refused.stdout).toContain('FAIL integration: this home gave the agent up: the server refuses its key (auth rejected (close 1008 Invalid token)); signing in again here')
+    expect(refused.stdout).toContain('clears this at once')
+    expect((await run(['status'])).stdout).toContain("gave up: the server refuses this home's key")
+
+    const reason = 'claude: claude is not signed in (run `claude` once and sign in)'
     fs.writeFileSync(
-      path.join(home(), 'integration.status.json'),
+      statusFile,
       STATUS({
         socket: 'idle',
-        last_error: 'this home cannot serve @claude-agent: runs failing: claude: claude is not signed in (run `claude` once and sign in). It holds no socket and starts no run until that is fixed (checked again every 60 s); another listener for @claude-agent may serve it meanwhile.',
-        runs_failing: { reason: 'claude: claude is not signed in (run `claude` once and sign in)', since, runs_missed: 3, checked_at: new Date().toISOString() },
+        runs_failing: { reason, since, runs_missed: 3, checked_at: new Date().toISOString() },
+        unservable: { reason: 'runs_failing', detail: `runs failing: ${reason}`, since, retry_at: retryAt },
       }),
     )
-    const doctor = await run(['doctor'])
-    expect(doctor.code).toBe(1)
-    expect(doctor.stdout).toContain('FAIL integration: this home gave the agent up: runs failing: claude: claude is not signed in')
-    expect((await run(['status'])).stdout).toContain('this home cannot serve @claude-agent')
+    const handedOver = await run(['doctor'])
+    expect(handedOver.stdout).toContain(`FAIL integration: this home gave the agent up to another listener that was waiting: runs failing: ${reason} (since ${since}); a runtime check that passes clears this`)
+    expect(handedOver.stdout).toContain('it takes the agent back whenever no other listener holds it')
+    // A lone install keeps serving while runs fail: ready, with the failing runs said.
+    fs.writeFileSync(statusFile, STATUS({ runs_failing: { reason, since, runs_missed: 3, checked_at: new Date().toISOString() } }))
+    expect((await run(['doctor'])).stdout).toContain(`WARN integration: socket ready, but runs are failing: ${reason}`)
+  })
+
+  it('lock renewals that failed are said', { timeout: 30_000 }, async () => {
+    giveClaudeAnIdentity()
+    await run([])
+    fs.writeFileSync(path.join(home(), 'integration.status.json'), STATUS({ runs_failed: 0, lease_errors: { count: 2, last: 'ENOSPC: no space left on device' } }))
+    expect((await run(['doctor'])).stdout).toContain('WARN locks: 2 lock renewal(s) failed (last: ENOSPC: no space left on device); a lock that cannot be renewed for 45 s is given up')
   })
 
   it('a sign-in check that does not answer is said as that, not as signed out', { timeout: 60_000 }, async () => {

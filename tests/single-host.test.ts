@@ -703,10 +703,34 @@ describe('doctor: what a peer-started run may do, and whether one can start', ()
     const status = await run(['status'])
     expect(status.stdout).toContain('runs failing: claude: claude is not signed in')
 
-    fs.writeFileSync(statusFile, STATUS({ socket: 'idle', standby: { home: '/elsewhere/.agentchat', pid: 4242, since } }))
+    // A standing-by daemon rewrites its status only when its reason changes: an old file with the
+    // daemon still holding the home's lock is a healthy standby; without a live holder, a daemon that is down.
+    const longAgo = new Date(Date.now() - 30 * 60_000).toISOString()
+    fs.writeFileSync(statusFile, STATUS({ updated_at: longAgo, socket: 'idle', standby: { home: '/elsewhere/.agentchat', pid: 4242, since } }))
+    fs.writeFileSync(path.join(home(), 'daemon.lock'), JSON.stringify({ pid: process.pid }))
     const standby = await run(['doctor'])
     expect(standby.stdout).toContain('WARN integration: standing by — /elsewhere/.agentchat (pid 4242) serves this agent')
     expect((await run(['status'])).stdout).toContain('standby: /elsewhere/.agentchat (pid 4242) serves this agent')
+    fs.rmSync(path.join(home(), 'daemon.lock'))
+    expect((await run(['doctor'])).stdout).toContain('FAIL integration: the daemon is not running (it last stood by for another listener)')
+  })
+
+  it('the profile and work folder are the daemon’s own when it has recorded them; what this shell would change is said', { timeout: 30_000 }, async () => {
+    giveClaudeAnIdentity()
+    await run([])
+    fs.writeFileSync(path.join(home(), 'integration.status.json'), STATUS({ profile: 'work', workdir: path.join(sandbox, 'project'), runs_failed: 0, runs_ok: 3 }))
+    const out = await run(['doctor'])
+    expect(out.stdout).toContain(`WARN run-profile: work: ${PEER_RUN_WARNING} (the daemon's, from its status; install, \`daemon install\` or \`doctor --fix\` from this shell would set profile answer and work folder ${path.join(sandbox, '.claude', 'agentchat-workdir')})`)
+  })
+
+  it('a work folder that contains the key store where no deny rule can carry it is said: a run there could read the key', { timeout: 30_000 }, async () => {
+    // A comma or whitespace in the path is one such case (every path on Windows is the other).
+    const spaced = path.join(sandbox, 'with space', '.claude')
+    fs.mkdirSync(spaced, { recursive: true })
+    fs.mkdirSync(path.join(spaced, 'agentchat'), { recursive: true })
+    fs.writeFileSync(path.join(spaced, 'agentchat', 'credentials'), JSON.stringify({ api_key: KEY, handle: 'claude-agent', api_base: 'http://127.0.0.1:9' }))
+    const out = await run(['doctor'], { CLAUDE_CONFIG_DIR: spaced, AGENTCHAT_RUN_CWD: spaced })
+    expect(out.stdout).toContain(`WARN run-workdir: ${spaced} contains ${path.join(spaced, 'agentchat')} and ${path.join(spaced, '.claude.json')}, where the key is, and no read-deny rule can carry them here`)
   })
 })
 

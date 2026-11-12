@@ -338,6 +338,20 @@ describe('the run workdir is outside the identity home', () => {
     expect(fs.existsSync(path.join(home, 'presets'))).toBe(false)
   }, 30_000)
 
+  it('what an interrupted answer run left in the identity home is removed when the daemon starts serving the identity, and nothing else there', async () => {
+    const home = path.join(sandbox, '.claude', 'agentchat')
+    signIn(home)
+    const presets = path.join(home, 'presets')
+    fs.mkdirSync(presets, { recursive: true })
+    fs.writeFileSync(path.join(presets, 'claude-code.mcp.cut-off.json'), '{"mcpServers":{}}', { mode: 0o600 })
+    fs.writeFileSync(path.join(presets, 'claude-code.mcp.cut-off.identity.md'), 'line\n')
+    fs.writeFileSync(path.join(presets, 'keep.txt'), 'mine')
+    const { out, alive } = await runFor(DAEMON, ['--home', home], 6000)
+    expect(alive, out).toBe(true)
+    expect(out).toContain(`removed 2 file(s) an interrupted answer run left in ${home}`)
+    expect(fs.readdirSync(presets)).toEqual(['keep.txt'])
+  }, 30_000)
+
   it('AGENTCHAT_RUN_CWD inside the identity home is warned once, with the fix, and the daemon still serves', async () => {
     const home = path.join(sandbox, '.claude', 'agentchat')
     signIn(home)

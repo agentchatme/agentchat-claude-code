@@ -1,9 +1,9 @@
 import { parseArgs } from 'node:util'
 import * as path from 'node:path'
-import { resolveRunProfile } from '@agentchatme/agent-core'
+import { log, resolveRunProfile } from '@agentchatme/agent-core'
 import { runIntegration, type RunnerFactory } from '@agentchatme/agent-core/daemon'
 import { CLIENT, claudeConfigOverride, identityHome, resolveRunWorkdir, skillPath } from './host.js'
-import { ClaudeRunner, runPointer } from './runner.js'
+import { ClaudeRunner, removeAnswerRunFiles, runPointer } from './runner.js'
 
 // ─── The integration daemon binary ──────────────────────────────────────────
 //
@@ -28,7 +28,11 @@ import { ClaudeRunner, runPointer } from './runner.js'
 //
 // The runner is built per identity (a `RunnerFactory`): an answer run's own
 // AgentChat-only tool config points at the API base of the agent the daemon
-// serves, and a new sign-in builds a new runner.
+// serves, and a new sign-in builds a new runner. Building it is also when
+// what an interrupted answer run left in the identity home is removed (its
+// tool config holds a key): this daemon holds the home's lock, and no run of
+// the new runner has started yet; one of the previous runner's that is still
+// stopping already read its files.
 
 async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   let values: { home?: string | undefined; workdir?: string | undefined }
@@ -56,7 +60,11 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   const runner: RunnerFactory = {
     // The runner's own name (`ClaudeRunner.name`), for status before any identity is known.
     name: 'claude',
-    create: (identity) => new ClaudeRunner({ configDir, workdir, profile, identityHome: identity.home, apiBase: identity.apiBase }),
+    create: (identity) => {
+      const { removed } = removeAnswerRunFiles(identity.home)
+      if (removed.length > 0) log.info(`removed ${removed.length} file(s) an interrupted answer run left in ${identity.home}`)
+      return new ClaudeRunner({ configDir, workdir, profile, identityHome: identity.home, apiBase: identity.apiBase, handle: identity.handle })
+    },
   }
 
   return await runIntegration({

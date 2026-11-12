@@ -5,7 +5,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { hostedMcpUrl, manualPointer, PEER_RUN_WARNING } from '@agentchatme/agent-core'
 import { AGENTCHAT_TOOL_ALLOW, claudeProjectsDirFor, claudeRunArgs, readDenyRules, workdirReadRules } from '@agentchatme/agent-core/presets'
-import { ClaudeRunner, answerToolConfigFor, buildClaudeEnv, deniedAncestorOf, denyReadPathsFor, profileNote, removeAnswerRunFiles, runPointer } from '../src/runner.js'
+import { ClaudeRunner, answerRunKey, answerToolConfigFor, buildClaudeEnv, deniedAncestorOf, denyReadPathsFor, profileNote, removeAnswerRunFiles, runPointer } from '../src/runner.js'
 import { claudeUserStatePathFor, identityHomeFor, legacyRunWorkdirFor, resolveRunWorkdir, runWorkdirFor } from '../src/host.js'
 import { VERSION } from '../src/version.js'
 import { installFakeClaude, readRuns, type FakeClaude, type FakeMcpConfig } from './helpers/fake-claude.js'
@@ -348,6 +348,27 @@ describe('ClaudeRunner', () => {
     expect(signedOut).toMatchObject({ state: 'not_started', detail: expect.stringMatching(/no AgentChat key/) })
     expect(readRuns(fake)).toHaveLength(2)
     expect(runFilesLeft(home)).toEqual([])
+  })
+
+  it('an answer run never follows the identity file to ANOTHER agent or server: no key, no run (the daemon builds a runner for that one)', async () => {
+    const home = identityHomeFor(undefined)
+    signIn(home, KEY)
+    const runner = new ClaudeRunner({ configDir: undefined, workdir, profile: 'answer', apiBase: API_BASE, handle: 'cc-agent', env: env() })
+    fs.mkdirSync(workdir, { recursive: true })
+    expect((await runner.start({ kind: 'wake', prompt: 'P', runId: 'a1', budgetMs: 10_000 })).state).toBe('ok')
+    // Re-login as another agent before the daemon noticed: that agent's key must not go out as this runner's.
+    fs.writeFileSync(path.join(home, 'credentials'), JSON.stringify({ api_key: OTHER_KEY, handle: 'someone-else', api_base: API_BASE }))
+    expect(await runner.start({ kind: 'wake', prompt: 'P', runId: 'a2', budgetMs: 10_000 })).toMatchObject({ state: 'not_started', detail: expect.stringMatching(/no AgentChat key/) })
+    // The same agent on another server: no run either.
+    fs.writeFileSync(path.join(home, 'credentials'), JSON.stringify({ api_key: KEY, handle: 'cc-agent', api_base: 'https://elsewhere.agentchat.test' }))
+    expect((await runner.start({ kind: 'wake', prompt: 'P', runId: 'a3', budgetMs: 10_000 })).state).toBe('not_started')
+    expect(readRuns(fake)).toHaveLength(1)
+    expect(runFilesLeft(home)).toEqual([])
+    // A rotated key for the same agent is followed.
+    signIn(home, OTHER_KEY)
+    expect(answerRunKey(home, API_BASE, 'cc-agent')).toBe(OTHER_KEY)
+    expect(answerRunKey(home, API_BASE)).toBe(OTHER_KEY)
+    expect(answerRunKey(path.join(sandbox, 'nobody'), API_BASE, 'cc-agent')).toBeNull()
   })
 
   it('a daemon serving another identity home: the runs’ key comes from THAT home, which every run is denied too', async () => {

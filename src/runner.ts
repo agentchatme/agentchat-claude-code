@@ -64,12 +64,33 @@ export interface IntegrationRunnerOptions extends Omit<ClaudeRunnerOptions, 'den
    * serves. Denied to every run, like the default one.
    */
   readonly identityHome?: string
+  /**
+   * The handle of the agent the runner was built for (the daemon passes its
+   * identity's). An answer run's key is read from the identity file when it
+   * starts, so a rotated key is followed; a file that by then names another
+   * agent, or another API base, gives no key (no run): the daemon is about to
+   * build a runner for that one, and a run must not send one agent's key to
+   * another's server.
+   */
+  readonly handle?: string
+}
+
+/**
+ * The key an answer run is given: the identity home's, as it is now — when it
+ * is still the agent (handle, from the file) and the server (`apiBase`) the
+ * runner was built for. Null otherwise, and when signed out.
+ */
+export function answerRunKey(identityHome: string, apiBase: string, handle?: string): string | null {
+  const id = resolveIdentity(identityHome)
+  if (id === null || id.apiBase !== apiBase) return null
+  if (handle !== undefined && id.source === 'file' && id.handle !== null && id.handle !== handle) return null
+  return id.apiKey
 }
 
 /** The preset's runner with this integration's deny list and, for answer runs, its AgentChat-only tool config. */
 export class ClaudeRunner extends PresetClaudeRunner {
   constructor(options: IntegrationRunnerOptions) {
-    const { apiBase, identityHome: given, ...rest } = options
+    const { apiBase, identityHome: given, handle, ...rest } = options
     const identityHome = given !== undefined ? path.resolve(given) : identityHomeFor(options.configDir)
     const deny = denyReadPathsFor(options.configDir)
     super({
@@ -78,8 +99,8 @@ export class ClaudeRunner extends PresetClaudeRunner {
       answerMcp: {
         file: answerToolConfigFor(identityHome),
         apiBase,
-        // Read for each run: a run follows the credential as it is when it starts.
-        apiKey: () => resolveIdentity(identityHome)?.apiKey ?? null,
+        // Read for each run: a run follows the credential as it is when it starts (`answerRunKey`).
+        apiKey: () => answerRunKey(identityHome, apiBase, handle),
         clientVersion: VERSION,
       },
       workdirAdvice: `Point AGENTCHAT_RUN_CWD outside it, or unset it for the default ${runWorkdirFor(options.configDir)}, then re-run \`${invocation()} daemon install\``,

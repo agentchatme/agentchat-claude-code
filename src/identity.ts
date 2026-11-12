@@ -10,7 +10,6 @@ import {
   INTEGRATION_ENV,
   integrationStatusAge,
   isRunProfile,
-  lockHolder,
   probeHostedMcp,
   readCredentials,
   readIntegrationStatus,
@@ -33,7 +32,7 @@ import {
 import { claudeAnswerFallbackWorkdir, inexpressibleDenyPaths } from '@agentchatme/agent-core/presets'
 import { CLIENT, identityHome, anchorFile, claudeConfigOverride, invocation, LABEL, legacyRunWorkdirFor, resolveRunWorkdir, runWorkdirFor } from './host.js'
 import { checkPlacement, placeAll, placementMark, skillPresent, unplaceIdentity, type PlacementIdentity } from './placement.js'
-import { ClaudeRunner, claudeIsLoggedIn, deniedAncestorOf, denyReadPathsFor, inspectClaudeRuntime, profileNote } from './runner.js'
+import { ClaudeRunner, claudeSignIn, deniedAncestorOf, denyReadPathsFor, inspectClaudeRuntime, profileNote } from './runner.js'
 import { ensureListenerService, listenerServiceCurrent } from './service.js'
 import { VERSION } from './version.js'
 
@@ -145,13 +144,18 @@ async function runtimeChecks(): Promise<DoctorCheck[]> {
       { name: 'claude-auth', verdict: 'FAIL', detail: 'cannot check until the Claude CLI works' },
     ]
   }
-  const authenticated = await claudeIsLoggedIn(claudeConfigOverride())
+  // A check that did not answer (it hung and was killed) is said as that, not as signed out.
+  const signIn = await claudeSignIn(claudeConfigOverride())
   return [
     { name: 'claude-cli', verdict: 'PASS', detail: concise(version.detail) || 'available' },
     {
       name: 'claude-auth',
-      verdict: authenticated ? 'PASS' : 'FAIL',
-      detail: authenticated ? 'Claude Code is signed in; headless runs can start' : 'Claude Code is not signed in — run `claude` once and sign in',
+      verdict: signIn.signedIn ? 'PASS' : 'FAIL',
+      detail: signIn.signedIn
+        ? 'Claude Code is signed in; headless runs can start'
+        : signIn.unanswered !== null
+          ? `cannot tell whether Claude Code is signed in: ${signIn.unanswered}`
+          : 'Claude Code is not signed in — run `claude` once and sign in',
     },
   ]
 }
@@ -333,22 +337,19 @@ function integrationCheck(): DoctorCheck {
   if (readCredentials(home) === null) return { name: 'integration', verdict: 'PASS', detail: 'no identity — the daemon idles by design' }
   const status = readIntegrationStatus(home)
   if (status === null) return { name: 'integration', verdict: 'WARN', detail: 'no status written yet — the daemon has not run, or is still starting' }
+  // Every daemon rewrites its status while it runs — one standing by or waiting to serve again too — so an old file is a daemon that is down.
+  const age = integrationStatusAge(status) ?? Number.POSITIVE_INFINITY
+  if (age > 3 * 60_000) return { name: 'integration', verdict: 'FAIL', detail: `status last written ${Math.round(age / 60_000)} min ago — the daemon is not running` }
+  if (status.socket === 'off') return { name: 'integration', verdict: 'PASS', detail: `${integrationDisabledBy() ?? INTEGRATION_ENV}=off — resident, holding no socket` }
   // One agent, one listener: another daemon (the CLI listener, say) serves this agent from its own home.
-  // A standing-by daemon rewrites its status only when its reason changes, so
-  // the file's age says nothing about it: whether it still holds this home's
-  // lock (`daemon.lock`, the engine's leader lock) does.
   const standby = status.standby ?? null
   if (standby !== null) {
-    if (lockHolder(path.join(home, 'daemon.lock')) === null) return { name: 'integration', verdict: 'FAIL', detail: 'the daemon is not running (it last stood by for another listener)' }
     return {
       name: 'integration',
       verdict: 'WARN',
       detail: `standing by — ${standby.home ?? 'another identity home'}${standby.pid !== null ? ` (pid ${standby.pid})` : ''} serves this agent; this daemon holds no socket and starts no run while it does, and takes over when it stops`,
     }
   }
-  const age = integrationStatusAge(status) ?? Number.POSITIVE_INFINITY
-  if (age > 3 * 60_000) return { name: 'integration', verdict: 'FAIL', detail: `status last written ${Math.round(age / 60_000)} min ago — the daemon is not running` }
-  if (status.socket === 'off') return { name: 'integration', verdict: 'PASS', detail: `${integrationDisabledBy() ?? INTEGRATION_ENV}=off — resident, holding no socket` }
   if (status.socket === 'ready') {
     const texts = status.texts?.source ?? 'none'
     // The daemon's own recheck after runs that did not get done (the `runs` check above is its FAIL).
@@ -362,6 +363,17 @@ function integrationCheck(): DoctorCheck {
       detail: `socket ready (acks on receipt), ${status.wakes} wake(s), ${status.runs_started} run(s) (${status.runs_ok} ok), texts ${texts === 'server' ? 'served' : texts === 'cache' ? 'from cache' : 'NOT fetched yet'}, profile ${status.profile}${profileNote(status.profile)}`,
     }
   }
+  // A home whose runs kept failing gives the agent up (no socket, no run) so a healthy listener for it
+  // can serve, and serves again once Claude Code checks out (`runs` above says why).
+  const failing = status.runs_failing ?? null
+  if (failing !== null) {
+    return {
+      name: 'integration',
+      verdict: 'FAIL',
+      detail: `this home gave the agent up: runs failing: ${failing.reason} (since ${failing.since}, ${failing.runs_missed} run(s) missed); it holds no socket and starts no run until that is fixed (checked again every minute), and another listener for this agent may serve it meanwhile`,
+    }
+  }
+  // Not serving for another reason, in the daemon's own words (not connecting yet; a key the server refuses, after which it gave the agent up).
   return { name: 'integration', verdict: 'WARN', detail: `socket ${status.socket}${status.last_error ? ` — ${status.last_error}` : ''}` }
 }
 

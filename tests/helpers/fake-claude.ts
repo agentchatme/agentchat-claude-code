@@ -17,6 +17,7 @@ export interface FakeClaude {
  *
  * Env knobs read by the fake at run time:
  *   FAKE_CLAUDE_LOGGED_OUT=1   `auth status` exits 1
+ *   FAKE_CLAUDE_AUTH=hang      `auth status` never answers (the probe kills it)
  *   FAKE_CLAUDE_RUN=ok|fail|nostart|signedout|hang   how a `-p` run ends (default ok)
  *   FAKE_CLAUDE_RECORD=<file>  where `-p` runs append their record
  *
@@ -43,6 +44,7 @@ export function installFakeClaude(root: string, version = '2.1.316'): FakeClaude
       'const readState = () => { try { return JSON.parse(fs.readFileSync(statePath, "utf8")) } catch { return {} } }',
       'const writeState = (doc) => { fs.mkdirSync(path.dirname(statePath), { recursive: true }); fs.writeFileSync(statePath, JSON.stringify(doc, null, 2)) }',
       `if (args[0] === '--version') { console.log(${JSON.stringify(`${version} (Claude Code)`)}); process.exit(0) }`,
+      "if (args[0] === 'auth' && args[1] === 'status' && process.env.FAKE_CLAUDE_AUTH === 'hang') { setInterval(() => {}, 1000); return }",
       "if (args[0] === 'auth' && args[1] === 'status') { if (process.env.FAKE_CLAUDE_LOGGED_OUT === '1') { console.log('{\"loggedIn\":false}'); process.exit(1) } console.log('{\"loggedIn\":true}'); process.exit(0) }",
       "if (args[0] === 'mcp' && args[1] === 'add') {",
       '  const rest = args.slice(2); const flags = {}; const positionals = []; const headers = {}',

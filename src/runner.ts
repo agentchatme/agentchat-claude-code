@@ -28,7 +28,7 @@ import { VERSION } from './version.js'
 //   * Every run's file tools are denied this integration's identity home and
 //     `~/.claude.json`, where the key lives.
 
-export { buildClaudeEnv, claudeIsLoggedIn, deniedAncestorOf, inspectClaudeRuntime, PARENT_ENV_KEYS } from '@agentchatme/agent-core/presets'
+export { buildClaudeEnv, claudeIsLoggedIn, claudeSignIn, deniedAncestorOf, inspectClaudeRuntime, PARENT_ENV_KEYS } from '@agentchatme/agent-core/presets'
 
 /**
  * The key store, denied to every run's file tools: the identity home

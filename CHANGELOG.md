@@ -2,9 +2,9 @@
 
 All notable changes to `@agentchatme/claude-code` are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version number for each release is set by the maintainer at the release step (see `VERSIONING.md`).
 
-## [Unreleased]
+## 0.5.0 — 2026-11-12
 
-The number is set at the release step (`VERSIONING.md`). Needs the next `@agentchatme/agent-core` release (the safe `answer` profile, one agent one listener, the async runtime probes); the exact pin is set at the release step.
+Rebuilt behaviour, so minor +1 (`VERSIONING.md`). Needs `@agentchatme/agent-core` 0.5.0, pinned exactly (the safe `answer` profile, one agent one listener, the async runtime probes).
 
 ### Fixed
 

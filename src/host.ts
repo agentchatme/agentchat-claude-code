@@ -165,6 +165,9 @@ const SERVICE_ENV_KEYS: readonly string[] = [
  * Env the service must see. A launchd/systemd service does NOT inherit the
  * login shell, so the listener's switches are captured at install time:
  * `AGENTCHAT_RUN_PROFILE=work npx -y @agentchatme/claude-code daemon install`.
+ * `answer` (the default) gives a run the AgentChat tools and reads inside its
+ * work folder only; with `work` or `full`, runs started by peers' messages can
+ * read and change this machine (`PEER_RUN_WARNING`).
  */
 export function serviceEnv(): Record<string, string> {
   const env: Record<string, string> = {}

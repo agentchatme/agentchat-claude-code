@@ -1,9 +1,9 @@
 import { parseArgs } from 'node:util'
 import * as path from 'node:path'
-import { manualPointer, resolveRunProfile } from '@agentchatme/agent-core'
-import { runIntegration } from '@agentchatme/agent-core/daemon'
+import { log, resolveRunProfile } from '@agentchatme/agent-core'
+import { runIntegration, type RunnerFactory } from '@agentchatme/agent-core/daemon'
 import { CLIENT, claudeConfigOverride, identityHome, resolveRunWorkdir, skillPath } from './host.js'
-import { ClaudeRunner } from './runner.js'
+import { ClaudeRunner, removeAnswerRunFiles, runPointer } from './runner.js'
 
 // ─── The integration daemon binary ──────────────────────────────────────────
 //
@@ -21,9 +21,18 @@ import { ClaudeRunner } from './runner.js'
 // the `claude-code` runtime (`GET /v1/texts?runtime=claude-code`, tool names
 // already spelled `mcp__agentchat__agentchat_inbox` for a user-scope server
 // named `agentchat`; code.claude.com/docs/en/mcp.md: `mcp__<server>__<tool>`),
-// then one pointer to the skill — the one line only this package knows. The
-// skill file follows the manual the same texts announce (`manualPath`): the
-// daemon downloads a new version when one is announced, on the texts' cadence.
+// then one pointer to the skill — the one line only this package knows — in
+// the profiles whose runs can open it (`runPointer`). The skill file follows
+// the manual the same texts announce (`manualPath`): the daemon downloads a new
+// version when one is announced, on the texts' cadence.
+//
+// The runner is built per identity (a `RunnerFactory`): an answer run's own
+// AgentChat-only tool config points at the API base of the agent the daemon
+// serves, and a new sign-in builds a new runner. Building it is also when
+// what an interrupted answer run left in the identity home is removed (its
+// tool config holds a key): this daemon holds the home's lock, and no run of
+// the new runner has started yet; one of the previous runner's that is still
+// stopping already read its files.
 
 async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   let values: { home?: string | undefined; workdir?: string | undefined }
@@ -48,14 +57,23 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   // every run's file tools are denied the identity home (runner.ts).
   const workdir = values.workdir !== undefined ? path.resolve(values.workdir) : resolveRunWorkdir(configDir)
   const profile = resolveRunProfile()
+  const runner: RunnerFactory = {
+    // The runner's own name (`ClaudeRunner.name`), for status before any identity is known.
+    name: 'claude',
+    create: (identity) => {
+      const { removed } = removeAnswerRunFiles(identity.home)
+      if (removed.length > 0) log.info(`removed ${removed.length} file(s) an interrupted answer run left in ${identity.home}`)
+      return new ClaudeRunner({ configDir, workdir, profile, identityHome: identity.home, apiBase: identity.apiBase, handle: identity.handle })
+    },
+  }
 
   return await runIntegration({
     home,
     workdir,
     profile,
-    runner: new ClaudeRunner({ configDir, workdir, profile }),
+    runner,
     client: CLIENT,
-    manualPointer: manualPointer(`at ${skillPath()}`),
+    manualPointer: runPointer(profile, skillPath()),
     manualPath: skillPath(),
   })
 }

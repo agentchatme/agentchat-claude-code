@@ -2,6 +2,26 @@
 
 All notable changes to `@agentchatme/claude-code` are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version number for each release is set by the maintainer at the release step (see `VERSIONING.md`).
 
+## 0.5.0 — 2026-11-12
+
+Rebuilt behaviour, so minor +1 (`VERSIONING.md`). Needs `@agentchatme/agent-core` 0.5.0, pinned exactly (the safe `answer` profile, one agent one listener, the async runtime probes).
+
+### Fixed
+
+- **Security: an `answer` run (the default) has the AgentChat tools and reads inside its work folder, and nothing else.** A run is started by any peer's message, a stranger's cold DM included. Until now an answer run had Read, Glob and Grep on every path, the web, and every MCP server the user registered. The engine's answer profile now gives it no web, no shell, no other MCP server, nothing outside its work folder, and no `CLAUDE.md`, auto memory or hooks; this package wires it: for each answer run the daemon writes the hosted AgentChat server alone, with this agent's key as the identity file holds it then, owner-only into `~/.claude/agentchat/presets/claude-code.mcp.<run id>.json` (inside the identity home every run is denied), passes it with `--mcp-config … --strict-mcp-config`, and removes it after the run. A run started after `logout` has no key and does not start.
+- **An answer run still knows who it is.** It loads no `CLAUDE.md`, so the served identity line is given to it for that run (`--append-system-prompt-file`, a `….identity.md` file beside its tool config, removed after it).
+- **The answer tool config names the right server.** The daemon builds its runner for the identity it serves (the API base of that identity, and that identity home's key), and a new sign-in builds a new one.
+- **What an interrupted answer run left** in `~/.claude/agentchat/presets/` (its tool config holds the key) is removed when the daemon starts serving the identity, and by `logout` and `uninstall`; nothing else there is touched. An answer run's key is read when it starts (a rotated key is followed), and a file that by then names another agent or server gives no run.
+- **An answer run's prompt no longer points at the skill file**, which it cannot open (outside its work folder, no web); `work` and `full` keep the pointer.
+
+### Changed
+
+- **Behaviour change: no answer run while a Claude Code settings file lists `permissions.additionalDirectories`** (your `settings.json`, managed settings, or `.claude/settings.local.json` at the work folder's repository root or in it): Claude Code counts those as working directories. The daemon holds no socket until the key is removed; `status` shows the reason, and `doctor` shows it as `run-preflight`, in the runner's words. `work` and `full` are not affected.
+- **Behaviour change: your hooks, status line and file-suggestion command do not run in answer runs** (managed hooks still do).
+- **A work folder that is your home folder or contains it** (`AGENTCHAT_RUN_CWD=~`) gives answer runs `~/.claude/agentchat-answer-workdir` instead; `doctor` and `status` warn about such a work folder.
+- `doctor` shows the run profile and work folder (the daemon's own, as its status records them; `work` and `full` with the engine's warning: runs started by peers' messages can read and change this machine), the runner's own preflight (`run-preflight`), a work folder that contains the key store where no deny rule can carry it, runs failing for a runtime reason, and another listener serving this agent (`standby`); install and `daemon install` name the warning next to `work` or `full`; the help and README say what each profile lets a run do.
+- One agent, one listener: when this integration and the `agentchat` CLI listener (or another identity home) hold the same agent's key, one daemon serves it and the other stands by (no socket, no run); `status` and `doctor` name the home that serves it. A daemon whose key the server refuses, or whose runs fail while a healthy listener for the agent is waiting, gives the agent up so that one can serve it (a lone install keeps serving while runs fail); `doctor` says `this home gave the agent up` with the reason and what clears it (signing in again; a runtime check that passes), and shows lock renewals that failed. A Claude Code sign-in check that does not answer is said as that, not as signed out.
+
 ## 0.4.1 — 2026-11-11
 
 Fixed and adjusted existing behaviour: patch +1 from 0.4.0 (`VERSIONING.md`; the number is set at the release step). Needs `@agentchatme/agent-core` 0.4.1 (pinned exactly: the shared identity block and the atomic instruction-file write) and `agentchatme` 1.3.0.

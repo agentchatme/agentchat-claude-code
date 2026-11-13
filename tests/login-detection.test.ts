@@ -35,26 +35,26 @@ afterEach(() => {
 const MISSING = path.join(os.tmpdir(), 'no-such-claude-binary')
 
 describe('login detection', () => {
-  it('trusts `claude auth status` when it answers with JSON', () => {
-    expect(claudeIsLoggedIn(dir)).toBe(true)
+  it('trusts `claude auth status` when it answers with JSON', async () => {
+    expect(await claudeIsLoggedIn(dir)).toBe(true)
     process.env['FAKE_CLAUDE_LOGGED_OUT'] = '1'
     // Even with a stray credentials file: the CLI's answer is authoritative.
     fs.writeFileSync(path.join(dir, '.credentials.json'), '{}')
-    expect(claudeIsLoggedIn(dir)).toBe(false)
+    expect(await claudeIsLoggedIn(dir)).toBe(false)
   })
 
-  it('falls back to the credentials file when the CLI cannot answer', () => {
+  it('falls back to the credentials file when the CLI cannot answer', async () => {
     fs.writeFileSync(path.join(dir, '.credentials.json'), '{}')
-    expect(claudeIsLoggedIn(dir, MISSING)).toBe(true)
+    expect(await claudeIsLoggedIn(dir, MISSING)).toBe(true)
   })
 
-  it('does not depend on the file alone on macOS', () => {
+  it('does not depend on the file alone on macOS', async () => {
     // No file, no CLI answer. On darwin the fallback is the keychain, so it is
     // whatever the real machine says — NOT an automatic false.
     if (process.platform !== 'darwin') return
     const present =
       spawnSync('security', ['find-generic-password', '-s', 'Claude Code-credentials'], { encoding: 'utf-8', timeout: 5_000 }).status === 0
-    expect(claudeIsLoggedIn(dir, MISSING)).toBe(present)
+    expect(await claudeIsLoggedIn(dir, MISSING)).toBe(present)
   })
 
   it('the keychain probe never asks for or reveals the secret', () => {
@@ -65,8 +65,8 @@ describe('login detection', () => {
     expect(`${r.stdout ?? ''}`).not.toMatch(/^password:/m)
   })
 
-  it('reports signed-out honestly when there is nothing anywhere', () => {
+  it('reports signed-out honestly when there is nothing anywhere', async () => {
     if (process.platform === 'darwin') return
-    expect(claudeIsLoggedIn(dir, MISSING)).toBe(false)
+    expect(await claudeIsLoggedIn(dir, MISSING)).toBe(false)
   })
 })

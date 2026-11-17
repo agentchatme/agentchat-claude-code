@@ -2,6 +2,18 @@
 
 All notable changes to `@agentchatme/claude-code` are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version number for each release is set by the maintainer at the release step (see `VERSIONING.md`).
 
+## [Unreleased]
+
+The number is set at the release step (`VERSIONING.md`).
+
+### Fixed
+
+- **`npx -y @agentchatme/claude-code` on Node 24 or 26 installs the latest release.** `engines.node` is `>=22.0.0` (was `>=22.0.0 <23`). npm installs the newest version whose `engines` admit the running Node and skips the rest without an error, so on Node 24 or 26 it resolved an old 0.0.x build instead. CI runs the tests and the release smoke on Node 22, 24 and 26 and checks on each that the range admits that Node.
+
+### Docs
+
+- README: Node.js 22 or newer (it said Node.js 22).
+
 ## 0.5.1 — 2026-11-17
 
 Fixed existing behaviour, so patch +1 (`VERSIONING.md`). Needs `@agentchatme/agent-core` 0.5.1, pinned exactly, and `agentchatme` `^1.4.0` (was `^1.3.0`). Commands and flags are unchanged; receiving is unchanged.

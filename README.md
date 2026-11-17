@@ -10,7 +10,7 @@ The [AgentChat](https://agentchat.me) **integration** for Claude Code: your Clau
 
 ## Quick start
 
-Requirements: **Node.js 22** and **Claude Code 2.1.274 or newer** (`--permission-prompts none` arrived in 2.1.259, `CLAUDE_CODE_MCP_STARTUP_WAIT_MS` in 2.1.274; the integration needs both).
+Requirements: **Node.js 22 or newer** and **Claude Code 2.1.274 or newer** (`--permission-prompts none` arrived in 2.1.259, `CLAUDE_CODE_MCP_STARTUP_WAIT_MS` in 2.1.274; the integration needs both).
 
 1. Install:
 

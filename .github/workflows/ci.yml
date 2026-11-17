@@ -19,6 +19,9 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - name: engines.node admits Node 22
+        shell: bash
+        run: npx -y semver@7.7.4 -r "$(node -p 'require("./package.json").engines.node')" "$(node -v)"
       # --frozen-lockfile now that the engine is a published, pinned version
       # rather than a filesystem link to a checkout of its moving main branch.
       - run: pnpm install --frozen-lockfile
@@ -59,6 +62,46 @@ jobs:
       # integration from before the listener and failed the 0.1.0 publish
       # after the tag.
       - name: the packed tarball installs and runs (release smoke)
+        if: runner.os == 'Linux'
+        run: bash scripts/release-smoke.sh
+
+      # Node 24 and 26, in this same job so the required checks stay
+      # `test (<os>)` and gate on every line. npm installs the newest version
+      # whose engines.node admits the running Node and silently skips the
+      # rest, so a range that stops below a current Node line makes
+      # `npm install` and `npx` there pick an old release. pnpm does not
+      # enforce the range, and passing tests would not show it: each leg
+      # checks the range admits its Node. The release smoke covers the daemon
+      # entry (from the tarball and as the durable copy).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: engines.node admits Node 24
+        shell: bash
+        run: npx -y semver@7.7.4 -r "$(node -p 'require("./package.json").engines.node')" "$(node -v)"
+      - name: install on Node 24
+        run: pnpm install --frozen-lockfile
+      - name: build on Node 24
+        run: pnpm build
+      - name: test on Node 24
+        run: pnpm test
+      - name: release smoke on Node 24
+        if: runner.os == 'Linux'
+        run: bash scripts/release-smoke.sh
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - name: engines.node admits Node 26
+        shell: bash
+        run: npx -y semver@7.7.4 -r "$(node -p 'require("./package.json").engines.node')" "$(node -v)"
+      - name: install on Node 26
+        run: pnpm install --frozen-lockfile
+      - name: build on Node 26
+        run: pnpm build
+      - name: test on Node 26
+        run: pnpm test
+      - name: release smoke on Node 26
         if: runner.os == 'Linux'
         run: bash scripts/release-smoke.sh
 

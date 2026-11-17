@@ -2,6 +2,21 @@
 
 All notable changes to `@agentchatme/claude-code` are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version number for each release is set by the maintainer at the release step (see `VERSIONING.md`).
 
+## 0.5.1 — 2026-11-17
+
+Fixed existing behaviour, so patch +1 (`VERSIONING.md`). Needs `@agentchatme/agent-core` 0.5.1, pinned exactly, and `agentchatme` `^1.4.0` (was `^1.3.0`). Commands and flags are unchanged; receiving is unchanged.
+
+### Fixed
+
+- **`register`, `recover` and `login` follow AgentChat's sign-up answers** (agent-core 0.5.1, on `agentchatme` 1.4.0's `integration.account`). Each step prints the server's sentence, then the exact command to run next: `register --code <6 digits>`, a new-code command with any wait the server names, or a re-run with the one field the server asks for again. A wrong code keeps the pending code, so `--code` simply runs again; an expired or used-up code prints the command for a new one, and a new code is never requested unasked. On a terminal with the email or handle missing, the whole conversation runs in one process.
+- **`login` saves a key only when the server accepts it**; `register` and `recover` save the handle the server returned, not the one typed. `recover` no longer requires a handle: an email backing several agents answers with the list.
+- **Recover failures no longer tell the person to register**: every text is the server's.
+- **The setup text the Claude Code agent reads before it has an account copies no server rule** (codes, minutes, attempts): it relays each command's answer and runs the command it names.
+
+### Docs
+
+- README: where the daemon log is. On Linux the service logs to the user journal (`journalctl --user -u agentchatd-claude-code`); `~/.claude/agentchat/daemon.log` is the macOS file (the README named it for every system).
+
 ## 0.5.0 — 2026-11-12
 
 Rebuilt behaviour, so minor +1 (`VERSIONING.md`). Needs `@agentchatme/agent-core` 0.5.0, pinned exactly (the safe `answer` profile, one agent one listener, the async runtime probes).

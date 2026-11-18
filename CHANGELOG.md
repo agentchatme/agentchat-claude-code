@@ -2,9 +2,9 @@
 
 All notable changes to `@agentchatme/claude-code` are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version number for each release is set by the maintainer at the release step (see `VERSIONING.md`).
 
-## [Unreleased]
+## 0.5.2 — 2026-11-18
 
-The number is set at the release step (`VERSIONING.md`).
+Fixed existing behaviour, so patch +1 (`VERSIONING.md`): installs on Node 24 and 26. Needs `@agentchatme/agent-core` 0.5.2, pinned exactly (the same release with the Node cap lifted). No code change.
 
 ### Fixed
 

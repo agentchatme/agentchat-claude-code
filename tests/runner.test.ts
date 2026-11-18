@@ -371,6 +371,18 @@ describe('ClaudeRunner', () => {
     expect(answerRunKey(path.join(sandbox, 'nobody'), API_BASE, 'cc-agent')).toBeNull()
   })
 
+  it('an exported key that is not the home’s never reaches a run', async () => {
+    const home = identityHomeFor(undefined)
+    signIn(home, KEY)
+    process.env['AGENTCHAT_API_KEY'] = OTHER_KEY
+    expect(answerRunKey(home, API_BASE, 'cc-agent')).toBe(KEY)
+    expect(answerRunKey(home, API_BASE)).toBe(KEY)
+    const runner = new ClaudeRunner({ configDir: undefined, workdir, profile: 'answer', apiBase: API_BASE, handle: 'cc-agent', env: env() })
+    fs.mkdirSync(workdir, { recursive: true })
+    expect((await runner.start({ kind: 'wake', prompt: 'P', runId: 'x1', budgetMs: 10_000 })).state).toBe('ok')
+    expect((readRuns(fake)[0]!.mcpConfig as FakeMcpConfig).authorizationSha256).toBe(sha256(`Bearer ${KEY}`))
+  })
+
   it('a daemon serving another identity home: the runs’ key comes from THAT home, which every run is denied too', async () => {
     const served = path.join(sandbox, 'served-home')
     signIn(served, OTHER_KEY)

@@ -17,7 +17,6 @@ import {
   recordOfferDeclined,
   renderAnchorBlock,
   renderDeclinedBlock,
-  resolveIdentity,
   resolveRunProfile,
   runProfileWarning,
   workdirExposesHome,
@@ -37,6 +36,7 @@ import { checkPlacement, placeAll, placementMark, skillPresent, unplaceIdentity,
 import { ClaudeRunner, claudeSignIn, deniedAncestorOf, denyReadPathsFor, inspectClaudeRuntime, profileNote } from './runner.js'
 import { ensureListenerService, listenerServiceCurrent } from './service.js'
 import { VERSION } from './version.js'
+import { homeIdentity } from './home-identity.js'
 
 // ─── This agent, described once ─────────────────────────────────────────────
 //
@@ -53,7 +53,7 @@ export type ServedIdentityTexts = Pick<StatusContext, 'identityLine' | 'identity
 const NO_IDENTITY_TEXTS: ServedIdentityTexts = { identityLine: null, identityLineTemplate: null }
 
 export function currentPlacementIdentity(texts: ServedIdentityTexts = NO_IDENTITY_TEXTS): PlacementIdentity | null {
-  const identity = resolveIdentity(identityHome())
+  const identity = homeIdentity(identityHome())
   if (identity === null || identity.handle === null) return null
   return {
     handle: identity.handle,
@@ -93,7 +93,7 @@ const profile: HostProfile = {
   // the identity line and the manual they announce. Writing the block needs no
   // template (it is found by its fences), so none is passed here.
   place: async (handle, apiKey, identityLine, manual) => {
-    const identity = resolveIdentity(identityHome())
+    const identity = homeIdentity(identityHome())
     const steps = await placeAll({ handle, apiKey, apiBase: identity?.apiBase ?? 'https://api.agentchat.me', identityLine, identityLineTemplate: null }, manual)
     return steps.map((s) => `  ${s.status === 'failed' ? 'FAILED' : s.name}: ${s.detail}`)
   },
@@ -230,7 +230,7 @@ function daemonRunner(settings: ReturnType<typeof runSettings> = runSettings()):
     configDir: claudeConfigOverride(),
     workdir: settings.workdir,
     profile: settings.profile,
-    apiBase: resolveIdentity(identityHome())?.apiBase ?? DEFAULT_API_BASE,
+    apiBase: homeIdentity(identityHome())?.apiBase ?? DEFAULT_API_BASE,
   })
 }
 

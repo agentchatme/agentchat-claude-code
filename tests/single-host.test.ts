@@ -152,7 +152,7 @@ describe('install places the four texts', () => {
     expect(out.stdout).toContain('✓ service:')
   })
 
-  it('with an identity: the hosted MCP server at user scope with the key, the identity line, the skill', async () => {
+  it('with an identity: the hosted MCP server at user scope (its headers helper hands over the key), the identity line, the skill', async () => {
     giveClaudeAnIdentity()
     const out = await run([])
     expect(out.code, out.stdout + out.stderr).toBe(0)
@@ -160,8 +160,10 @@ describe('install places the four texts', () => {
     expect(mcpEntry()).toEqual({
       type: 'http',
       url: 'http://127.0.0.1:9/mcp',
-      headers: { Authorization: `Bearer ${KEY}`, 'X-AgentChat-Client': 'claude-code', 'X-AgentChat-Client-Version': VERSION },
+      headers: { 'X-AgentChat-Client': 'claude-code', 'X-AgentChat-Client-Version': VERSION },
+      headersHelper: expect.stringContaining(path.join(home(), 'bin', 'mcp-headers.mjs')),
     })
+    expect(fs.readFileSync(fakeClaude.relocatedUserState, 'utf-8')).not.toContain(KEY)
     if (process.platform !== 'win32') expect(fs.statSync(fakeClaude.relocatedUserState).mode & 0o777).toBe(0o600)
 
     // The shared block: the fences, the handle line, the served line, and nothing else.
@@ -620,16 +622,24 @@ describe('doctor', () => {
     expect(fs.readFileSync(claudeMd(), 'utf-8')).toContain('I am @claude-agent on AgentChat')
   })
 
-  it('re-registers the hosted MCP entry when the key changed', { timeout: 30_000 }, async () => {
+  it('a changed key needs no re-registration: the entry holds none, and its helper reads the new one', { timeout: 30_000 }, async () => {
     giveClaudeAnIdentity()
     await run([])
+    const before = mcpEntry()
     const rotated = 'ac_live_' + 'r'.repeat(40)
     fs.writeFileSync(creds(), JSON.stringify({ api_key: rotated, handle: 'claude-agent', api_base: 'http://127.0.0.1:9' }))
     const seen = await run(['doctor'])
-    expect(seen.stdout).toContain('carries a different key')
+    expect(seen.stdout).toContain('PASS hosted-mcp:')
+    expect(mcpEntry()).toEqual(before)
+  })
+
+  it('an entry an earlier release registered with an old key says so; doctor --fix replaces it with the helper', { timeout: 30_000 }, async () => {
+    giveClaudeAnIdentity()
+    fs.writeFileSync(fakeClaude.relocatedUserState, JSON.stringify({ mcpServers: { agentchat: { type: 'http', url: 'http://127.0.0.1:9/mcp', headers: { Authorization: `Bearer ${'ac_live_' + 'q'.repeat(40)}` } } } }))
+    expect((await run(['doctor'])).stdout).toContain('carries a different key')
     const fixed = await run(['doctor', '--fix'])
     expect(fixed.stdout).toContain('PASS hosted-mcp:')
-    expect(mcpEntry()).toMatchObject({ headers: { Authorization: `Bearer ${rotated}` } })
+    expect(fs.readFileSync(fakeClaude.relocatedUserState, 'utf-8')).not.toContain('ac_live_')
   })
 })
 
@@ -833,26 +843,29 @@ describe('the hosted tools are told this agent is on Claude Code', () => {
     expect(VERSION).toBe(pkg.version)
   })
 
-  it('an entry an earlier release registered (the key, no client headers) is re-registered with them by install', { timeout: 30_000 }, async () => {
+  const HELPER = expect.stringContaining('mcp-headers.mjs')
+
+  it('an entry an earlier release registered (the key, no client headers) is re-registered by install: the client headers, the helper, no key', { timeout: 30_000 }, async () => {
     giveClaudeAnIdentity()
     expect((await run([])).code).toBe(0)
     fs.writeFileSync(fakeClaude.relocatedUserState, entry({ Authorization: `Bearer ${KEY}` }))
     const status = (await run(['status'])).stdout
-    expect(status).toContain('✗ mcp: user MCP "agentchat" → http://127.0.0.1:9/mcp does not send X-AgentChat-Client')
+    expect(status).toContain(`✗ mcp: user MCP "agentchat" holds this agent's key in ${fakeClaude.relocatedUserState}`)
     const install = await run([])
     expect(install.code, install.stdout).toBe(0)
-    expect(install.stdout).toContain('re-registered with the client headers')
-    expect(mcpEntry()).toEqual({ type: 'http', url: 'http://127.0.0.1:9/mcp', headers: { Authorization: `Bearer ${KEY}`, ...CLIENT_HEADERS } })
+    expect(install.stdout).toContain('is taken out of it')
+    expect(mcpEntry()).toEqual({ type: 'http', url: 'http://127.0.0.1:9/mcp', headers: CLIENT_HEADERS, headersHelper: HELPER })
     expect((await run(['status'])).stdout).toContain('✓ mcp: hosted tools registered as user MCP "agentchat" → http://127.0.0.1:9/mcp')
   })
 
   it('an entry named by another release’s version still works and is brought to this version by doctor --fix', { timeout: 30_000 }, async () => {
     giveClaudeAnIdentity()
     expect((await run([])).code).toBe(0)
-    fs.writeFileSync(fakeClaude.relocatedUserState, entry({ Authorization: `Bearer ${KEY}`, 'x-agentchat-client': 'claude-code', 'x-agentchat-client-version': '0.4.0' }))
-    expect((await run(['status'])).stdout).toContain(`✓ mcp: hosted tools registered as user MCP "agentchat" → http://127.0.0.1:9/mcp (named by an earlier release; install or \`doctor --fix\` names it as Claude Code ${VERSION})`)
+    const placed = mcpEntry()!
+    fs.writeFileSync(fakeClaude.relocatedUserState, JSON.stringify({ mcpServers: { agentchat: { ...placed, headers: { 'x-agentchat-client': 'claude-code', 'x-agentchat-client-version': '0.4.0' } } } }))
+    expect((await run(['status'])).stdout).toContain(`✓ mcp: hosted tools registered as user MCP "agentchat" → http://127.0.0.1:9/mcp (the key stays in ${creds()}; Claude Code asks ${path.join(home(), 'bin', 'mcp-headers.mjs')} for it) (named by an earlier release; install or \`doctor --fix\` names it as Claude Code ${VERSION})`)
     await run(['doctor', '--fix'])
-    expect(mcpEntry()).toEqual({ type: 'http', url: 'http://127.0.0.1:9/mcp', headers: { Authorization: `Bearer ${KEY}`, ...CLIENT_HEADERS } })
+    expect(mcpEntry()).toEqual({ type: 'http', url: 'http://127.0.0.1:9/mcp', headers: CLIENT_HEADERS, headersHelper: HELPER })
   })
 
   it('an entry that is not this integration’s is left alone, and status says it does not name the runtime', { timeout: 30_000 }, async () => {

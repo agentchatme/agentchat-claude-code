@@ -8,12 +8,19 @@ export interface FakeClaude {
   relocatedUserState: string
   /** JSON lines, one per `claude -p` run: argv, stdin, cwd, selected env. */
   recordPath: string
+  /** JSON lines, one per invocation of any kind: its argv, as `ps` would have shown it. */
+  argvLogPath: string
 }
 
 /**
  * A deterministic `claude` for tests. Models exactly the surfaces the integration
- * uses — `--version`, `auth status`, `mcp add|remove|get` at user scope, and
- * `-p` headless runs — so nothing here reaches a developer's real Claude Code.
+ * uses — `--version`, `auth status`, `mcp add|add-json|remove|get` at user
+ * scope, and `-p` headless runs — so nothing here reaches a developer's real
+ * Claude Code. Every invocation's argv is appended to `argvLogPath`: what any
+ * other user of the machine could have read with `ps` while it ran.
+ * `mcp add-json <name> -` reads the JSON from stdin and, like the real CLI
+ * (2.1.327), refuses that inside a Claude Code session
+ * (`CLAUDE_CODE_CHILD_SESSION` set).
  *
  * Env knobs read by the fake at run time:
  *   FAKE_CLAUDE_LOGGED_OUT=1   `auth status` exits 1
@@ -29,6 +36,7 @@ export interface FakeClaude {
 export function installFakeClaude(root: string, version = '2.1.316'): FakeClaude {
   const binDir = path.join(root, 'fake-bin')
   const recordPath = path.join(root, 'fake-claude-runs.jsonl')
+  const argvLogPath = path.join(root, 'fake-claude-argv.jsonl')
   fs.mkdirSync(binDir, { recursive: true })
   const script = path.join(binDir, 'claude')
   fs.writeFileSync(
@@ -41,6 +49,7 @@ export function installFakeClaude(root: string, version = '2.1.316'): FakeClaude
       "const home = process.env.HOME || process.env.USERPROFILE || ''",
       "const statePath = configured ? path.join(configured, '.claude.json') : path.join(home, '.claude.json')",
       'const args = process.argv.slice(2)',
+      `fs.appendFileSync(${JSON.stringify(argvLogPath)}, JSON.stringify(args) + '\\n')`,
       'const readState = () => { try { return JSON.parse(fs.readFileSync(statePath, "utf8")) } catch { return {} } }',
       'const writeState = (doc) => { fs.mkdirSync(path.dirname(statePath), { recursive: true }); fs.writeFileSync(statePath, JSON.stringify(doc, null, 2)) }',
       `if (args[0] === '--version') { console.log(${JSON.stringify(`${version} (Claude Code)`)}); process.exit(0) }`,
@@ -63,6 +72,24 @@ export function installFakeClaude(root: string, version = '2.1.316'): FakeClaude
       "  else doc.mcpServers = { ...(doc.mcpServers || {}), [name]: { type: 'stdio', command: target, args: positionals.slice(2), env: {} } }",
       '  writeState(doc)',
       "  console.log('Added ' + flags.transport + ' MCP server ' + name + ' to user config')",
+      '  process.exit(0)',
+      '}',
+      "if (args[0] === 'mcp' && args[1] === 'add-json') {",
+      '  const rest = args.slice(2); const flags = {}; const positionals = []',
+      '  for (let i = 0; i < rest.length; i++) {',
+      "    if (rest[i] === '--scope' || rest[i] === '-s') flags.scope = rest[++i]",
+      '    else positionals.push(rest[i])',
+      '  }',
+      "  if (flags.scope !== 'user') { console.error('fake claude: the integration must register at user scope'); process.exit(2) }",
+      '  const [name, raw] = positionals',
+      "  if (raw === '-' && process.env.CLAUDE_CODE_CHILD_SESSION) { console.error('Reading the JSON from stdin is refused inside a Claude Code session, because its permission prompt would not show the server. Run the command outside the session.'); process.exit(1) }",
+      "  const text = raw === '-' ? fs.readFileSync(0, 'utf8') : raw",
+      "  let config; try { config = JSON.parse(text) } catch { console.error('Invalid JSON'); process.exit(1) }",
+      '  const doc = readState()',
+      "  if (doc.mcpServers && doc.mcpServers[name]) { console.error('MCP server ' + name + ' already exists in user config'); process.exit(1) }",
+      '  doc.mcpServers = { ...(doc.mcpServers || {}), [name]: config }',
+      '  writeState(doc)',
+      "  console.log('Added ' + config.type + ' MCP server ' + name + ' to user config')",
       '  process.exit(0)',
       '}',
       "if (args[0] === 'mcp' && args[1] === 'remove') {",
@@ -116,6 +143,7 @@ export function installFakeClaude(root: string, version = '2.1.316'): FakeClaude
     defaultUserState: path.join(root, '.claude.json'),
     relocatedUserState: path.join(root, '.claude', '.claude.json'),
     recordPath,
+    argvLogPath,
   }
 }
 
@@ -141,6 +169,16 @@ export interface FakeClaudeRun {
   mcpConfig: FakeMcpConfig | 'unreadable' | null
   /** The text of the run's `--append-system-prompt-file`; null without one. */
   appendedSystemPrompt: string | null
+}
+
+/** Every argv the fake was started with, in order. */
+export function readArgvLog(fake: FakeClaude): string[][] {
+  if (!fs.existsSync(fake.argvLogPath)) return []
+  return fs
+    .readFileSync(fake.argvLogPath, 'utf-8')
+    .split('\n')
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line) as string[])
 }
 
 export function readRuns(fake: FakeClaude): FakeClaudeRun[] {

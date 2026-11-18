@@ -2,6 +2,17 @@
 
 All notable changes to `@agentchatme/claude-code` are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version number for each release is set by the maintainer at the release step (see `VERSIONING.md`).
 
+## Unreleased
+
+### Fixed
+
+- **The key is on no command line and in `~/.claude.json` no more.** The hosted MCP entry was registered with `claude mcp add … --header "Authorization: Bearer <key>"`, so on every placement (sign-up, login, recover, `doctor --fix`, reinstall) the live key was on `claude`'s argv, readable in `ps` by any other user of the machine, and then sat in `~/.claude.json` and Claude Code's backups of it. The entry is now registered with `claude mcp add-json --scope user agentchat '<json>'`, holding the URL, the client headers and a `headersHelper` (`~/.claude/agentchat/bin/mcp-headers.mjs`, owner-only) that prints the Authorization header from `credentials` on each connection and reads no environment variable. A new key is used from the next connection with nothing re-registered. `status` and `doctor` run the helper the way Claude Code does. An entry from 0.5.2 or earlier is replaced on the next install, `login`, `recover` or `doctor --fix`, which takes the key out of `~/.claude.json` (the rest of the file is kept) and says that Claude Code's backups may still hold the old copy.
+- **An exported `AGENTCHAT_API_KEY` never makes this agent another one.** With another agent's key exported, `doctor --fix` registered that key for Claude Code. Every placement, check and answer run now reads the key from the identity home's `credentials`; the exported key is used only when the home holds none. (`status` and `doctor` refusing the split in words come with the next `@agentchatme/agent-core` release.)
+
+### Docs
+
+- README: where the key is and is not, the headers helper, upgrading from 0.5.2, what an exported key does, and the honest limit (an agent with a shell can still read `credentials` deliberately). `login` is documented with a prompt or stdin only, never `--api-key <key>` or `AGENTCHAT_API_KEY=…`; `--help` the same.
+
 ## 0.5.2 — 2026-11-18
 
 Fixed existing behaviour, so patch +1 (`VERSIONING.md`): installs on Node 24 and 26. Needs `@agentchatme/agent-core` 0.5.2, pinned exactly (the same release with the Node cap lifted). No code change.

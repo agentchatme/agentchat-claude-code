@@ -7,7 +7,6 @@ import {
   formatIntegrationStatus,
   markAlwaysOnOptOut,
   readIntegrationStatus,
-  resolveIdentity,
   resolveRunProfile,
   runProfileWarning,
   PEER_RUN_WARNING,
@@ -25,6 +24,7 @@ import { inspectClaudeRuntime, profileNote } from './runner.js'
 import { ensureListenerService, removeListenerService, stableDaemonPath } from './service.js'
 import { claudeConfigOverride } from './host.js'
 import { VERSION } from './version.js'
+import { homeIdentity } from './home-identity.js'
 
 const USAGE = `agentchat-claude-code ${VERSION} — the AgentChat integration for Claude Code
 
@@ -33,7 +33,7 @@ Usage:
   ${invocation()} register --email <e> --handle <h>
   ${invocation()} register --code <6-digit-code>
   ${invocation()} register --not-now                stop offering to set this up
-  ${invocation()} login --api-key -                 already have an account: key on stdin (or AGENTCHAT_API_KEY=…, or --api-key <ac_…>)
+  ${invocation()} login                            already have an account: paste the key when asked (or pipe it: login --api-key - < key.txt)
   ${invocation()} recover --handle <h> --email <e>  lost your key (rotates it; --handle defaults to yours)
   ${invocation()} recover --code <6-digit-code>
   ${invocation()} status [--json]
@@ -59,7 +59,10 @@ Switches (captured into the service from the shell that runs install, \`daemon i
   AGENTCHAT_RUN_BUDGET_MS                  kill a run past this (default 600000)
   AGENTCHAT_RUN_CWD                        the run's work folder (default ~/.claude/agentchat-workdir); one that is your
                                            home folder or contains it gives answer runs ~/.claude/agentchat-answer-workdir
-  AGENTCHAT_API_KEY / AGENTCHAT_API_BASE   override the stored identity
+  AGENTCHAT_API_BASE                       the API base (default: the one stored with the identity, else https://api.agentchat.me)
+
+The key is in ${identityHome()}/credentials only. An exported AGENTCHAT_API_KEY never
+replaces it: commands and placements act as the agent that file names.
 `
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
@@ -220,7 +223,7 @@ function runUninstall(): number {
 
   // The credential is preserved by uninstall, so it is still readable here;
   // the MCP entry is recognised by its key and its server.
-  const identity = resolveIdentity(identityHome())
+  const identity = homeIdentity(identityHome())
   const steps = removePlacement({
     apiKey: identity?.apiKey ?? null,
     apiBase: identity?.apiBase ?? process.env['AGENTCHAT_API_BASE']?.trim() ?? 'https://api.agentchat.me',

@@ -1,6 +1,7 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { manualPointer, resolveIdentity, runProfileWarning, type RunProfile } from '@agentchatme/agent-core'
+import { manualPointer, runProfileWarning, type RunProfile } from '@agentchatme/agent-core'
+import { homeIdentity } from './home-identity.js'
 import { ClaudeRunner as PresetClaudeRunner, claudeMcpConfigPath, type ClaudeRunnerOptions } from '@agentchatme/agent-core/presets'
 import { claudeUserStatePathFor, identityHomeFor, invocation, runWorkdirFor } from './host.js'
 import { VERSION } from './version.js'
@@ -25,15 +26,17 @@ import { VERSION } from './version.js'
 //     Its identity line comes from the served texts the same way (a
 //     `….identity.md` file beside it, `--append-system-prompt-file`): an
 //     answer run loads no CLAUDE.md.
-//   * Every run's file tools are denied this integration's identity home and
-//     `~/.claude.json`, where the key lives.
+//   * Every run's file tools are denied this integration's identity home,
+//     where the key lives, and `~/.claude.json` (an entry from 0.5.2 or
+//     earlier still holds the key there until it is re-placed).
 
 export { buildClaudeEnv, claudeIsLoggedIn, claudeSignIn, deniedAncestorOf, inspectClaudeRuntime, PARENT_ENV_KEYS } from '@agentchatme/agent-core/presets'
 
 /**
  * The key store, denied to every run's file tools: the identity home
  * (credentials, status, logs, an answer run's own tool config) and
- * ~/.claude.json, where the user-scope MCP entry carries the key. A run
+ * ~/.claude.json (where an entry from 0.5.2 or earlier carries the key, and
+ * other servers' secrets may be). A run
  * judging peer text must not be able to read either and send it. ONE list, so
  * what the runs are denied and what the workdir is checked against cannot
  * drift apart.
@@ -81,7 +84,7 @@ export interface IntegrationRunnerOptions extends Omit<ClaudeRunnerOptions, 'den
  * runner was built for. Null otherwise, and when signed out.
  */
 export function answerRunKey(identityHome: string, apiBase: string, handle?: string): string | null {
-  const id = resolveIdentity(identityHome)
+  const id = homeIdentity(identityHome)
   if (id === null || id.apiBase !== apiBase) return null
   if (handle !== undefined && id.source === 'file' && id.handle !== null && id.handle !== handle) return null
   return id.apiKey

@@ -53,15 +53,29 @@ import { answerToolConfigFor, removeAnswerRunFiles } from './runner.js'
 //    is written only when there is no file and nothing verified can be had.
 // 3. **The hosted tool server** — the user-scope MCP server `agentchat`,
 //    transport HTTP, `https://api.agentchat.me/mcp`, registered through Claude
-//    Code's own CLI: `claude mcp add --transport http --scope user agentchat
-//    <url> --header "Authorization: Bearer <key>"` (code.claude.com/docs/en/mcp.md).
-//    Claude Code stores user-scope servers in `~/.claude.json`, so the key lands
-//    in that file; this module tightens its mode to 0600 afterwards (best effort;
-//    Claude Code may rewrite the file with its own mode). There is no documented
-//    way to keep a user-scope header out of that file short of a `headersHelper`
-//    command, which would need a separate key store — a later refinement.
-// 4. **The key** — already in the identity home's `credentials` (0600) and, by
-//    the registration above, in the MCP entry.
+//    Code's own CLI: `claude mcp add-json --scope user agentchat '<json>'`
+//    (code.claude.com/docs/en/mcp.md, "Add MCP servers from JSON
+//    configuration"). The entry carries the client headers and a
+//    `headersHelper`, never the key: Claude Code runs the helper "fresh on each
+//    connection, at session start and on reconnect" and again after a 401/403,
+//    and sends the JSON object it prints as headers (same page, "Use dynamic
+//    headers for custom authentication"; a user-scope helper needs no folder
+//    trust and runs in the configuration directory). Ours is a fixed script,
+//    `<identity home>/bin/mcp-headers.mjs`, that prints
+//    `{"Authorization":"Bearer <key>"}` from the `credentials` file beside it
+//    and reads no environment variable. So the key is on no command line (the
+//    JSON on `add-json`'s argv holds two paths) and in no file but
+//    `credentials`: not in `~/.claude.json`, not in the copies of it Claude
+//    Code keeps in `~/.claude/backups`, not in `claude mcp get`'s output. A new
+//    key (login, recover, rotate) is the helper's next answer, with no
+//    re-registration. Releases up to 0.5.2 put the key in a static
+//    `Authorization` header with `claude mcp add --header`, which showed it in
+//    `ps` to every user of the machine while `claude` ran; install, login,
+//    recover and `doctor --fix` replace such an entry.
+//    Not `add-json -` (JSON on stdin): Claude Code refuses stdin inside a
+//    Claude Code session, which is where the agent itself runs sign-up.
+// 4. **The key** — in the identity home's `credentials` (0600), and nowhere
+//    the registration above writes.
 //
 // Legacy cleanup on upgrade: the four lifecycle hooks the hook-based releases wrote
 // into `settings.json`, the stdio `mcp-proxy` MCP entry, the stable CLI bundle
@@ -128,6 +142,122 @@ function runClaude(args: string[], timeout = 20_000): { ok: boolean; detail: str
   return { ok: result.status === 0, detail: output || `exited ${result.status}` }
 }
 
+// ─── The headers helper: the key, read from `credentials` on each connection ─
+
+/** Where the helper lives: the identity home's `bin/`, beside the durable daemon bundle. */
+export function headersHelperPath(): string {
+  return path.join(identityHome(), 'bin', 'mcp-headers.mjs')
+}
+
+/**
+ * The helper, byte for byte. Claude Code sends what it prints as headers. It
+ * reads the `credentials` file of the home it sits in and nothing else (no
+ * environment variable: the identity is the home's), prints
+ * `{"Authorization":"Bearer <key>"}`, or `{}` when there is no key (the hosted
+ * tools then show the sign-up tools), and never fails a connection.
+ */
+export const HEADERS_HELPER_SOURCE = [
+  '// Written by @agentchatme/claude-code. Claude Code runs this on each connection to the',
+  '// user MCP server "agentchat" (its headersHelper) and sends what it prints as headers:',
+  '// the Authorization header for the key in the credentials file of this identity home,',
+  '// or nothing when there is none. It reads no environment variable. Do not edit: install',
+  '// and doctor --fix rewrite it.',
+  "import { readFileSync } from 'node:fs'",
+  'let headers = {}',
+  'try {',
+  "  const creds = JSON.parse(readFileSync(new URL('../credentials', import.meta.url), 'utf8'))",
+  "  const key = creds !== null && typeof creds.api_key === 'string' ? creds.api_key.trim() : ''",
+  '  if (key.length >= 20 && !/\\s/.test(key)) headers = { Authorization: `Bearer ${key}` }',
+  '} catch {}',
+  'process.stdout.write(JSON.stringify(headers))',
+  '',
+].join('\n')
+
+/**
+ * The `headersHelper` command: this Node and the helper, each quoted for the
+ * shell Claude Code runs it in — single quotes on POSIX (a `'` inside written
+ * as `'\\''`), double quotes on Windows. Null when a path holds what that
+ * quoting cannot carry (`"`, `%`, `$` or a backtick on Windows) or a line
+ * break anywhere. The Codex integration writes the same command for its
+ * `http_headers_helper`.
+ */
+export function headersHelperCommand(node: string = process.execPath, script: string = headersHelperPath(), platform: NodeJS.Platform = process.platform): string | null {
+  const paths = [node, script]
+  if (paths.some((p) => /[\r\n]/.test(p))) return null
+  if (platform === 'win32') return paths.some((p) => /["%$`]/.test(p)) ? null : paths.map((p) => `"${p}"`).join(' ')
+  return paths.map((p) => `'${p.replace(/'/g, `'\\''`)}'`).join(' ')
+}
+
+const POSIX_TOKEN = "'((?:[^'\\r\\n]|'\\\\'')*)'"
+
+/** The Node and the script a `headersHelper` command of ours names; null for any other command. */
+export function parseHeadersHelper(command: unknown): { node: string; script: string } | null {
+  if (typeof command !== 'string') return null
+  const posix = new RegExp(`^${POSIX_TOKEN} ${POSIX_TOKEN}$`).exec(command)
+  if (posix !== null) return { node: posix[1]!.replace(/'\\''/g, "'"), script: posix[2]!.replace(/'\\''/g, "'") }
+  const win = /^"([^"\r\n]+)" "([^"\r\n]+)"$/.exec(command)
+  return win === null ? null : { node: win[1]!, script: win[2]! }
+}
+
+function helperSourceCurrent(): boolean {
+  try {
+    return fs.readFileSync(headersHelperPath(), 'utf-8') === HEADERS_HELPER_SOURCE
+  } catch {
+    return false
+  }
+}
+
+function isExecutable(file: string): boolean {
+  try {
+    fs.accessSync(file, fs.constants.X_OK)
+    return fs.statSync(file).isFile()
+  } catch {
+    return false
+  }
+}
+
+/** Write the helper when it is missing or not this release's. Owner-only: it sits in the identity home. */
+export function writeHeadersHelper(): void {
+  if (helperSourceCurrent()) return
+  atomicWriteFile(headersHelperPath(), HEADERS_HELPER_SOURCE, 0o600)
+}
+
+/**
+ * Whether the entry's `headersHelper` is ours and works as written:
+ * `current` (our script, this release's text, a Node that is there),
+ * `stale` (ours, but the script or the Node is not), `missing` (none, or
+ * someone else's command).
+ */
+export type HeadersHelperState = 'current' | 'stale' | 'missing'
+
+function headersHelperStateOf(command: unknown): HeadersHelperState {
+  const parsed = parseHeadersHelper(command)
+  if (parsed === null || path.resolve(parsed.script) !== path.resolve(headersHelperPath())) return 'missing'
+  return helperSourceCurrent() && isExecutable(parsed.node) ? 'current' : 'stale'
+}
+
+/**
+ * Run the entry's helper the way Claude Code does (its Node, its script) and
+ * say whether it yields this agent's key. Null when it does; else why not, in
+ * words that never contain a key.
+ */
+export function headersHelperProblem(command: unknown, apiKey: string): string | null {
+  const parsed = parseHeadersHelper(command)
+  if (parsed === null) return 'the entry has no headers helper of this integration'
+  const result = spawnCommandSync(parsed.node, [parsed.script], { encoding: 'utf-8', timeout: 10_000, windowsHide: true, cwd: claudeHome() })
+  if (result.error) return `its helper could not run (${result.error.message})`
+  if (result.status !== 0) return `its helper exited ${result.status}`
+  let headers: unknown
+  try {
+    headers = JSON.parse(String(result.stdout ?? ''))
+  } catch {
+    return 'its helper printed something other than a JSON object'
+  }
+  const auth = headers !== null && typeof headers === 'object' ? (headers as Record<string, unknown>)['Authorization'] : undefined
+  if (auth === undefined) return `its helper finds no key in ${path.join(identityHome(), 'credentials')}`
+  return auth === `Bearer ${apiKey}` ? null : "its helper yields a key other than this agent's credentials"
+}
+
 // ─── The hosted MCP entry ───────────────────────────────────────────────────
 
 /**
@@ -142,7 +272,16 @@ export type ClientHeadersState = 'current' | 'stale' | 'missing'
 
 export type McpEntryState =
   | { state: 'missing' }
-  | { state: 'ours'; url: string; currentKey: boolean; clientHeaders: ClientHeadersState }
+  | {
+      state: 'ours'
+      url: string
+      /** The entry's static `Authorization` header is this identity's key (how releases up to 0.5.2 placed it). */
+      currentKey: boolean
+      /** Any static `Authorization` header: a key written into `~/.claude.json`, which this release takes out. */
+      staticKey: boolean
+      helper: HeadersHelperState
+      clientHeaders: ClientHeadersState
+    }
   | { state: 'legacy' }
   | { state: 'foreign'; detail: string; clientHeaders: ClientHeadersState }
   | { state: 'unavailable'; detail: string }
@@ -169,6 +308,17 @@ function readUserState(): Record<string, unknown> | null {
   return parsed as Record<string, unknown>
 }
 
+/** One field of the user-scope `agentchat` entry as it is on disk, or undefined. */
+function readEntryField(field: string): unknown {
+  try {
+    const servers = readUserState()?.['mcpServers']
+    const entry = servers !== null && typeof servers === 'object' ? (servers as Record<string, unknown>)[MCP_SERVER_NAME] : undefined
+    return entry !== null && typeof entry === 'object' ? (entry as Record<string, unknown>)[field] : undefined
+  } catch {
+    return undefined
+  }
+}
+
 function isLegacyStdioEntry(entry: Record<string, unknown>): boolean {
   const args = Array.isArray(entry['args']) ? entry['args'] : []
   return (
@@ -183,10 +333,12 @@ function isLegacyStdioEntry(entry: Record<string, unknown>): boolean {
 
 /**
  * Classify the user-scope `agentchat` server. Ours when it is an HTTP entry at
- * this identity's hosted MCP URL, OR one carrying this identity's key in its
- * `Authorization` header — the key is the stronger evidence, and it is what
- * keeps a non-default `api_base` registration from being left behind as
- * "foreign" on logout. `apiKey` also decides `currentKey`.
+ * this identity's hosted MCP URL, OR one whose `headersHelper` is this
+ * integration's script, OR one carrying this identity's key in a static
+ * `Authorization` header (how releases up to 0.5.2 placed it) — the helper and
+ * the key are the stronger evidence, and they are what keep a non-default
+ * `api_base` registration from being left behind as "foreign" on logout.
+ * `apiKey` decides `currentKey`.
  */
 export function inspectHostedMcp(apiKey: string | null, apiBase: string): McpEntryState {
   let state: Record<string, unknown> | null
@@ -207,23 +359,24 @@ export function inspectHostedMcp(apiKey: string | null, apiBase: string): McpEnt
   const type = record['type']
   const url = record['url']
   const headers = record['headers']
+  // Header names are case-insensitive: an entry written by hand may spell it either way.
   const auth =
     headers && typeof headers === 'object' && !Array.isArray(headers)
-      ? ((headers as Record<string, unknown>)['Authorization'] ?? (headers as Record<string, unknown>)['authorization'])
+      ? Object.entries(headers as Record<string, unknown>).find(([name]) => name.toLowerCase() === 'authorization')?.[1]
       : undefined
   const currentKey = apiKey !== null && typeof auth === 'string' && auth === `Bearer ${apiKey}`
   const isHttp = type === 'http' || type === 'streamable-http'
   const named = clientHeadersStateOf(headers)
-  if (isHttp && typeof url === 'string' && (url === hostedMcpUrl(apiBase) || currentKey)) {
-    return { state: 'ours', url, currentKey, clientHeaders: named }
+  const helper = headersHelperStateOf(record['headersHelper'])
+  if (isHttp && typeof url === 'string' && (url === hostedMcpUrl(apiBase) || currentKey || helper !== 'missing')) {
+    return { state: 'ours', url, currentKey, staticKey: auth !== undefined, helper, clientHeaders: named }
   }
   return { state: 'foreign', detail: `the user-scope server named "agentchat" points at ${typeof url === 'string' ? url : 'a different command'} and is not this integration's`, clientHeaders: named }
 }
 
 function tightenUserStateMode(): void {
-  // The key is in this file now. Claude Code may rewrite it with its own mode
-  // later; this is the best an installer can do without a documented
-  // user-scope secret store.
+  // The key is no longer in this file, but other servers' secrets may be.
+  // Claude Code may rewrite it with its own mode later.
   try {
     fs.chmodSync(claudeUserStatePath(), 0o600)
   } catch {
@@ -231,35 +384,63 @@ function tightenUserStateMode(): void {
   }
 }
 
-/** Register (or re-register with the current key) the hosted MCP server at user scope. */
+/**
+ * Register the hosted MCP server at user scope: the URL, the client headers,
+ * and the helper that reads the key from `credentials` — never the key. An
+ * entry an earlier release wrote with the key in it is replaced, which takes
+ * the key out of `~/.claude.json`.
+ */
 export function placeHostedMcp(identity: PlacementIdentity): PlacementStep {
   const current = inspectHostedMcp(identity.apiKey, identity.apiBase)
   if (current.state === 'unavailable') return { name: 'mcp', status: 'failed', detail: current.detail }
   if (current.state === 'foreign') {
     return { name: 'mcp', status: 'skipped', detail: `${current.detail} — left untouched; rename or remove it, then re-run` }
   }
-  if (current.state === 'ours' && current.currentKey && current.clientHeaders === 'current') {
-    tightenUserStateMode()
-    return { name: 'mcp', status: 'ok', detail: `hosted tools registered as user MCP "${MCP_SERVER_NAME}" → ${current.url}` }
+  try {
+    writeHeadersHelper()
+  } catch (err) {
+    return { name: 'mcp', status: 'failed', detail: `could not write the headers helper ${headersHelperPath()}: ${String(err)}` }
   }
+  const keyNote = `the key stays in ${path.join(identityHome(), 'credentials')}; Claude Code asks ${headersHelperPath()} for it on each connection`
+  if (current.state === 'ours' && !current.staticKey && current.helper === 'current' && current.clientHeaders === 'current') {
+    tightenUserStateMode()
+    return { name: 'mcp', status: 'ok', detail: `hosted tools registered as user MCP "${MCP_SERVER_NAME}" → ${current.url} (${keyNote})` }
+  }
+  const command = headersHelperCommand()
+  if (command === null) {
+    return { name: 'mcp', status: 'failed', detail: `the path of Node (${process.execPath}) or of ${headersHelperPath()} holds a character a shell command cannot carry quoted; move it, then re-run` }
+  }
+  // Before the old entry goes: the helper, run as Claude Code runs it, yields this agent's key.
+  const problem = headersHelperProblem(command, identity.apiKey)
+  if (problem !== null) return { name: 'mcp', status: 'failed', detail: `the user MCP "${MCP_SERVER_NAME}" was left as it was: ${problem}` }
   if (current.state === 'ours' || current.state === 'legacy') {
     const removed = runClaude(['mcp', 'remove', '--scope', 'user', MCP_SERVER_NAME])
     if (!removed.ok) return { name: 'mcp', status: 'failed', detail: `could not replace the existing "${MCP_SERVER_NAME}" MCP entry: ${removed.detail}` }
   }
   const url = hostedMcpUrl(identity.apiBase)
-  // `--header` once per header (`-H, --header <header...>`; code.claude.com/docs/en/mcp.md).
-  const headerArgs = Object.entries(clientHeaders()).flatMap(([name, value]) => ['--header', `${name}: ${value}`])
-  const added = runClaude(['mcp', 'add', '--transport', 'http', '--scope', 'user', MCP_SERVER_NAME, url, '--header', `Authorization: Bearer ${identity.apiKey}`, ...headerArgs])
-  if (!added.ok) return { name: 'mcp', status: 'failed', detail: `claude mcp add failed: ${added.detail}` }
+  // No key in this JSON: it is on `claude`'s command line, where `ps` shows it.
+  const entry = { type: 'http', url, headers: clientHeaders(), headersHelper: command }
+  const added = runClaude(['mcp', 'add-json', '--scope', 'user', MCP_SERVER_NAME, JSON.stringify(entry)])
+  if (!added.ok) return { name: 'mcp', status: 'failed', detail: `claude mcp add-json failed: ${added.detail}` }
   const after = inspectHostedMcp(identity.apiKey, identity.apiBase)
-  if (after.state !== 'ours' || !after.currentKey || after.clientHeaders !== 'current') {
-    return { name: 'mcp', status: 'failed', detail: `claude mcp add reported success but ${claudeUserStatePath()} does not carry the entry with this key and the client headers` }
+  if (after.state !== 'ours' || after.staticKey || after.helper !== 'current' || after.clientHeaders !== 'current') {
+    return { name: 'mcp', status: 'failed', detail: `claude mcp add-json reported success but ${claudeUserStatePath()} does not carry the entry with the headers helper and the client headers` }
   }
   tightenUserStateMode()
+  const replaced =
+    current.state === 'legacy'
+      ? '; the local stdio server was replaced'
+      : current.state === 'ours' && current.staticKey
+        ? current.currentKey
+          ? `; the key an earlier release wrote into ${claudeUserStatePath()} is taken out of it (copies Claude Code made of that file under ${path.join(claudeHome(), 'backups')} may still hold it)`
+          : `; the entry held a key other than this agent's in ${claudeUserStatePath()} (an old one, or another agent's) and was replaced — if it was another agent's, that agent's own credentials still hold it`
+        : current.state === 'ours' && current.clientHeaders !== 'current'
+          ? '; re-registered with the client headers'
+          : ''
   return {
     name: 'mcp',
     status: 'changed',
-    detail: `hosted tools registered as user MCP "${MCP_SERVER_NAME}" → ${url} (Authorization header with this agent's key, named as Claude Code ${CLIENT.version}${current.state === 'legacy' ? '; the local stdio server was replaced' : current.state === 'ours' && current.clientHeaders !== 'current' ? '; re-registered with the client headers' : ''})`,
+    detail: `hosted tools registered as user MCP "${MCP_SERVER_NAME}" → ${url} (${keyNote}; named as Claude Code ${CLIENT.version}${replaced})`,
   }
 }
 
@@ -549,6 +730,12 @@ export function removePlacement(identity: UnplaceIdentity): PlacementStep[] {
   if (leftovers) steps.push(leftovers)
   steps.push(removeSkill())
   try {
+    // The helper holds no key; with the entry gone nothing runs it.
+    fs.rmSync(headersHelperPath(), { force: true })
+  } catch {
+    /* a locked file stays inert */
+  }
+  try {
     steps.push({
       name: 'identity',
       status: removeAnchorAt(anchorFile()) === 'removed' ? 'changed' : 'ok',
@@ -624,19 +811,30 @@ export function checkPlacement(identity: PlacementIdentity | null, manual: Serve
   checks.push({ name: 'manual', ok: skill.state === 'current' || skill.state === 'unchecked', verdict: skill.verdict, detail: skill.detail })
   const mcp = inspectHostedMcp(identity?.apiKey ?? null, identity?.apiBase ?? 'https://api.agentchat.me')
   const headerHint = Object.entries(clientHeaders()).map(([name, value]) => `--header "${name}: ${value}"`).join(' ')
+  // Only when everything else about the entry is right: run its helper the way Claude Code will.
+  const helperProblem =
+    mcp.state === 'ours' && identity !== null && !mcp.staticKey && mcp.helper === 'current'
+      ? headersHelperProblem(readEntryField('headersHelper'), identity.apiKey)
+      : null
   checks.push({
     name: 'mcp',
-    ok: mcp.state === 'ours' ? (identity === null || mcp.currentKey) && mcp.clientHeaders !== 'missing' : false,
+    ok: mcp.state === 'ours' ? (identity === null || (!mcp.staticKey && mcp.helper === 'current' && helperProblem === null)) && mcp.clientHeaders !== 'missing' : false,
     // A user-scope "agentchat" that is not this integration's (another URL,
-    // another key) is never touched; the check says, too, when it does not
+    // another helper) is never touched; the check says, too, when it does not
     // name this runtime to the hosted tools.
     detail:
       mcp.state === 'ours'
-        ? identity !== null && !mcp.currentKey
-          ? `user MCP "${MCP_SERVER_NAME}" carries a different key than this agent's credentials`
-          : mcp.clientHeaders === 'missing'
-            ? `user MCP "${MCP_SERVER_NAME}" → ${mcp.url} does not send ${Object.keys(clientHeaders())[0]}, so the hosted tools take this agent for an unknown client and show it the wake-webhook tools`
-            : `hosted tools registered as user MCP "${MCP_SERVER_NAME}" → ${mcp.url}${mcp.clientHeaders === 'stale' ? ` (named by an earlier release; install or \`doctor --fix\` names it as Claude Code ${CLIENT.version})` : ''}`
+        ? identity !== null && mcp.staticKey
+          ? mcp.currentKey
+            ? `user MCP "${MCP_SERVER_NAME}" holds this agent's key in ${claudeUserStatePath()} (an earlier release's registration) — install or \`doctor --fix\` takes it out and has Claude Code read it from ${path.join(identityHome(), 'credentials')}`
+            : `user MCP "${MCP_SERVER_NAME}" carries a different key than this agent's credentials, in ${claudeUserStatePath()}`
+          : identity !== null && mcp.helper !== 'current'
+            ? `user MCP "${MCP_SERVER_NAME}" ${mcp.helper === 'stale' ? `asks a headers helper that is out of date or whose Node is gone (${headersHelperPath()})` : 'has no headers helper of this integration'}, so no key reaches the hosted tools`
+            : helperProblem !== null
+              ? `user MCP "${MCP_SERVER_NAME}" → ${mcp.url}: ${helperProblem}`
+              : mcp.clientHeaders === 'missing'
+                ? `user MCP "${MCP_SERVER_NAME}" → ${mcp.url} does not send ${Object.keys(clientHeaders())[0]}, so the hosted tools take this agent for an unknown client and show it the wake-webhook tools`
+                : `hosted tools registered as user MCP "${MCP_SERVER_NAME}" → ${mcp.url}${identity !== null ? ` (the key stays in ${path.join(identityHome(), 'credentials')}; Claude Code asks ${headersHelperPath()} for it)` : ''}${mcp.clientHeaders === 'stale' ? ` (named by an earlier release; install or \`doctor --fix\` names it as Claude Code ${CLIENT.version})` : ''}`
         : mcp.state === 'legacy'
           ? `user MCP "${MCP_SERVER_NAME}" is the old local stdio server`
           : mcp.state === 'missing'

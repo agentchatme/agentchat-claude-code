@@ -34,3 +34,18 @@ describe('the NPX package is internally consistent', () => {
     expect(pkg['files']).toEqual(['dist', 'README.md', 'LICENSE'])
   })
 })
+
+// ─── A release runs on the engine its texts describe ────────────────────────
+//
+// The help, the README and `doctor` describe the `own` run profile (the
+// default from the @agentchatme/agent-core release that added it). Pull
+// requests may land on an older pinned engine — the tests that need `own` skip
+// there — but a release may not: on a tag build (the publish workflow's gate
+// job runs these tests for the tag), this fails until the pin is moved.
+describe('the release gate on the engine pin', () => {
+  it.runIf(process.env['GITHUB_REF_TYPE'] === 'tag')('a tagged release bundles an engine with the own profile', async () => {
+    const engine = (await import('@agentchatme/agent-core')) as { RUN_PROFILES: readonly string[]; DEFAULT_RUN_PROFILE: string }
+    expect(engine.RUN_PROFILES).toContain('own')
+    expect(engine.DEFAULT_RUN_PROFILE).toBe('own')
+  })
+})

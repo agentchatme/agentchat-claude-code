@@ -1,6 +1,6 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { manualPointer, runProfileWarning, type RunProfile } from '@agentchatme/agent-core'
+import { manualPointer, PEER_RUN_WARNING, type RunProfile } from '@agentchatme/agent-core'
 import { homeIdentity } from './home-identity.js'
 import { ClaudeRunner as PresetClaudeRunner, claudeMcpConfigPath, type ClaudeRunnerOptions } from '@agentchatme/agent-core/presets'
 import { claudeUserStatePathFor, identityHomeFor, invocation, runWorkdirFor } from './host.js'
@@ -15,17 +15,21 @@ import { VERSION } from './version.js'
 // drift. What is this integration's own is which agent the runs act as and
 // what they must not read:
 //
-//   * `work` and `full` runs reach the hosted tools through the user-scope MCP
-//     server the installer registered (`mcp__agentchat__*`), beside every
-//     other MCP server the user has, as in any session.
-//   * An `answer` run (the default, started by any peer's message) loads the
-//     AgentChat server ALONE: the preset writes it a tool config of its own
-//     for that run (`<identity home>/presets/claude-code.mcp.<run id>.json`,
-//     owner-only, this agent's key read at that moment), passes it with
+//   * `own` (the default: the agent itself, under the user's own Claude Code
+//     permission settings), `work` and `full` runs reach the hosted tools
+//     through the user-scope MCP server the installer registered
+//     (`mcp__agentchat__*`, its key from the headers helper), beside every
+//     other MCP server the user has, as in any session. An `own` run is also
+//     given the served identity line (a `….identity.md` file in
+//     `<identity home>/presets/`, `--append-system-prompt-file`), whatever its
+//     CLAUDE.md holds.
+//   * An `answer` run (the lock, an explicit opt-in) loads the AgentChat
+//     server ALONE: the preset writes it a tool config of its own for that run
+//     (`<identity home>/presets/claude-code.mcp.<run id>.json`, owner-only,
+//     this agent's key read at that moment), passes it with
 //     `--mcp-config … --strict-mcp-config`, and removes it when the run ends.
-//     Its identity line comes from the served texts the same way (a
-//     `….identity.md` file beside it, `--append-system-prompt-file`): an
-//     answer run loads no CLAUDE.md.
+//     Its identity line comes from the served texts the same way: an answer
+//     run loads no CLAUDE.md.
 //   * Every run's file tools are denied this integration's identity home,
 //     where the key lives, and `~/.claude.json` (an entry from 0.5.2 or
 //     earlier still holds the key there until it is re-placed).
@@ -112,11 +116,12 @@ export class ClaudeRunner extends PresetClaudeRunner {
 }
 
 /**
- * The files an answer run writes for itself in `<identity home>/presets/` —
- * its tool config (`claude-code.mcp.<run id>.json`, which holds the key), its
- * identity line (`claude-code.mcp.<run id>.identity.md`) and the temp files of
- * their atomic writes. Each run removes its own when it ends; a run cut off
- * (the machine lost power, the daemon was killed) leaves them behind.
+ * The files a run writes for itself in `<identity home>/presets/` — an answer
+ * run's tool config (`claude-code.mcp.<run id>.json`, which holds the key), an
+ * answer or own run's identity line (`claude-code.mcp.<run id>.identity.md`)
+ * and the temp files of their atomic writes. Each run removes its own when it
+ * ends; a run cut off (the machine lost power, the daemon was killed) leaves
+ * them behind.
  */
 function answerRunFilePattern(stem: string): RegExp {
   const escaped = stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -124,7 +129,7 @@ function answerRunFilePattern(stem: string): RegExp {
 }
 
 /**
- * Remove what answer runs left in `<identity home>/presets/` (`answerRunFilePattern`),
+ * Remove what runs left in `<identity home>/presets/` (`answerRunFilePattern`),
  * and the folder when nothing else is in it. For logout (a left-behind tool
  * config holds the key) and uninstall. Returns what was removed; never throws.
  */
@@ -161,15 +166,49 @@ export function removeAnswerRunFiles(identityHome: string): { removed: string[];
  * The line a run prompt ends with: where the manual is (the `agentchat`
  * skill). An `answer` run cannot open it — the skill file is outside its work
  * folder and it has no web — so its prompt ends with the served instruction
- * alone: the hosted tools and the served texts are everything it has. `work`
- * and `full` runs read files and the web, and get the pointer.
+ * alone: the hosted tools and the served texts are everything it has. `own`,
+ * `work` and `full` runs get the pointer: the skill by name (Claude Code's
+ * Skill tool opens it in any permission mode), its path and its address, as
+ * their settings allow.
  */
 export function runPointer(profile: RunProfile, skill: string): string {
   return profile === 'answer' ? '' : manualPointer(`at ${skill}`)
 }
 
-/** ` — <the engine's warning>` after a `work` or `full` profile name (`runProfileWarning`); nothing after `answer`. */
+/**
+ * What `own` does, in one line: the engine's `ownProfileLine('Claude Code')`
+ * (tests/runner.test.ts holds the two equal once the engine has it).
+ */
+export const OWN_PROFILE_LINE = 'reply runs use your own Claude Code permission settings, with anything that would ask refused'
+
+/** The honest sentence after it: the engine's `OWN_RUN_WARNING` (held equal the same way). */
+export const OWN_PROFILE_WARNING = "runs started by peers' messages act with those permissions"
+
+/**
+ * What a run of `profile` may do, in Claude Code's terms, for install,
+ * `daemon install`, `doctor` and the help; `workdir` is where an answer run
+ * reads. A value that is not a profile is described as `answer`, which is
+ * what the engine makes of it.
+ */
+export function profileSummary(profile: string, workdir?: string): string {
+  switch (profile) {
+    case 'own':
+      return `${OWN_PROFILE_LINE}; ${OWN_PROFILE_WARNING}`
+    case 'work':
+      return `plus the web, edits and shell; ${PEER_RUN_WARNING}`
+    case 'full':
+      return `Claude Code's bypass mode; ${PEER_RUN_WARNING}`
+    default:
+      return `the AgentChat tools and reads inside ${workdir ?? "the run's work folder"} only — no web, no shell, no other MCP server, no CLAUDE.md, memory or hooks`
+  }
+}
+
+/** ` — <what the profile does>` after a profile name (`profileSummary`). */
 export function profileNote(profile: string): string {
-  const warning = runProfileWarning(profile)
-  return warning !== null ? ` — ${warning}` : ''
+  return ` — ${profileSummary(profile)}`
+}
+
+/** Whether a run of `profile` never works in the home folder or above it (the engine's fallback folder instead): `own` and `answer`. */
+export function guardsHomeWorkdir(profile: string): boolean {
+  return profile === 'own' || profile === 'answer'
 }

@@ -8,7 +8,6 @@ import {
   markAlwaysOnOptOut,
   readIntegrationStatus,
   resolveRunProfile,
-  runProfileWarning,
   PEER_RUN_WARNING,
   serviceStatus,
   integrationDisabled,
@@ -20,7 +19,7 @@ import {
 import { identityHome, invocation, serviceLabel, LABEL } from './host.js'
 import { formatPlacement, placeAll, removePlacement } from './placement.js'
 import { currentServedPlacement, runRegister, runLogin, runRecover, runStatus, runLogout, runDoctor, runNotNow } from './identity.js'
-import { inspectClaudeRuntime, profileNote } from './runner.js'
+import { inspectClaudeRuntime, OWN_PROFILE_LINE, OWN_PROFILE_WARNING, profileNote, profileSummary } from './runner.js'
 import { ensureListenerService, removeListenerService, stableDaemonPath } from './service.js'
 import { claudeConfigOverride } from './host.js'
 import { VERSION } from './version.js'
@@ -48,17 +47,21 @@ two of you can DM each other — and it has its own front door:
   Codex:  npx -y @agentchatme/codex
 
 Switches (captured into the service from the shell that runs install, \`daemon install\` or \`doctor --fix\`):
-  AGENTCHAT_RUN_PROFILE=answer|work|full   what a headless run may do. answer (default): the AgentChat tools and reads
-                                           inside the run's work folder only — no web, no shell, no other MCP server, no
-                                           CLAUDE.md, memory or hooks; it does not start while your Claude Code settings
-                                           list permissions.additionalDirectories (\`doctor\` names the file).
+  AGENTCHAT_RUN_PROFILE=own|answer|work|full
+                                           what a headless run may do. own (default): ${OWN_PROFILE_LINE};
+                                           ${OWN_PROFILE_WARNING}.
+                                           answer: the AgentChat tools and reads inside the run's work folder only — no
+                                           web, no shell, no other MCP server, no CLAUDE.md, memory or hooks; it does not
+                                           start while your Claude Code settings list permissions.additionalDirectories
+                                           (\`doctor\` names the file). An unknown value is answer.
                                            work and full: ${PEER_RUN_WARNING}
   ${INTEGRATION_ENV}=off                hold no socket, start no run; tools + manual stay
                                            (${INTEGRATION_ENV_LEGACY}=off, the previous name, is still read; its removal is
                                            scheduled for ${INTEGRATION_ENV_LEGACY_REMOVAL}; ${INTEGRATION_ENV} wins when both are set)
   AGENTCHAT_RUN_BUDGET_MS                  kill a run past this (default 600000)
   AGENTCHAT_RUN_CWD                        the run's work folder (default ~/.claude/agentchat-workdir); one that is your
-                                           home folder or contains it gives answer runs ~/.claude/agentchat-answer-workdir
+                                           home folder or contains it gives own and answer runs
+                                           ~/.claude/agentchat-answer-workdir
   AGENTCHAT_API_BASE                       the API base (default: the one stored with the identity, else https://api.agentchat.me)
 
 The key is in ${identityHome()}/credentials only. An exported AGENTCHAT_API_KEY never
@@ -267,7 +270,7 @@ function runDaemonCmd(sub: string | undefined): number {
         return 1
       }
       console.log(
-        `Integration daemon is ON for ${LABEL} (${serviceLabel()}): a peer's message starts one headless Claude Code run with profile ${resolveRunProfile()} while this machine is up.${runProfileWarning(resolveRunProfile()) !== null ? ` With ${resolveRunProfile()}, ${runProfileWarning(resolveRunProfile())}.` : ''}${integrationDisabled() ? ` ${integrationDisabledBy()}=off was captured: it holds no socket until re-installed without it.` : ''}`,
+        `Integration daemon is ON for ${LABEL} (${serviceLabel()}): a peer's message starts one headless Claude Code run with profile ${resolveRunProfile()} while this machine is up — ${profileSummary(resolveRunProfile())}.${integrationDisabled() ? ` ${integrationDisabledBy()}=off was captured: it holds no socket until re-installed without it.` : ''}`,
       )
       return 0
     }

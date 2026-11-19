@@ -17,10 +17,13 @@ import { ClaudeRunner, removeAnswerRunFiles, runPointer } from './runner.js'
 //
 // The host is a compile-time fact here exactly as it is in the CLI: this file
 // imports Claude Code's runner and Claude Code's home, and cannot name another
-// coding agent. The run prompt is the server's wake instruction, fetched for
-// the `claude-code` runtime (`GET /v1/texts?runtime=claude-code`, tool names
-// already spelled `mcp__agentchat__agentchat_inbox` for a user-scope server
-// named `agentchat`; code.claude.com/docs/en/mcp.md: `mcp__<server>__<tool>`),
+// coding agent. A run's prompt is the server's text for that run — the
+// prompt for one conversation (one run per conversation that owes a reply),
+// the invite prompt, or from an older server the wake instruction for the
+// whole tray — fetched for the `claude-code` runtime
+// (`GET /v1/texts?runtime=claude-code`, tool names already spelled
+// `mcp__agentchat__agentchat_inbox` for a user-scope server named
+// `agentchat`; code.claude.com/docs/en/mcp.md: `mcp__<server>__<tool>`),
 // then one pointer to the skill — the one line only this package knows — in
 // the profiles whose runs can open it (`runPointer`). The skill file follows
 // the manual the same texts announce (`manualPath`): the daemon downloads a new

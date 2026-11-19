@@ -5,6 +5,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import * as engine from '@agentchatme/agent-core'
 import { hostedMcpUrl, manualPointer, PEER_RUN_WARNING, RUN_PROFILES, type RunProfile } from '@agentchatme/agent-core'
+import * as presets from '@agentchatme/agent-core/presets'
 import { AGENTCHAT_TOOL_ALLOW, claudeProjectsDirFor, claudeRunArgs, readDenyRules, workdirReadRules } from '@agentchatme/agent-core/presets'
 import { ClaudeRunner, OWN_PROFILE_LINE, OWN_PROFILE_WARNING, answerRunKey, answerToolConfigFor, buildClaudeEnv, deniedAncestorOf, denyReadPathsFor, guardsHomeWorkdir, profileNote, profileSummary, removeAnswerRunFiles, runPointer } from '../src/runner.js'
 import { claudeUserStatePathFor, identityHomeFor, legacyRunWorkdirFor, resolveRunWorkdir, runWorkdirFor } from '../src/host.js'
@@ -751,5 +752,45 @@ describe.skipIf(!ENGINE_HAS_OWN)('own: the agent itself, under the user’s own 
   it('a home-folder work folder: own runs work in the empty folder answer runs use', () => {
     const runner = new ClaudeRunner({ configDir: undefined, workdir: fakeHome, profile: OWN, apiBase: API_BASE, env: env() })
     expect(runner.workdir()).toBe(path.join(fakeHome, '.claude', 'agentchat-answer-workdir'))
+  })
+})
+
+/**
+ * The runtime check (could not process) comes from the engine's Claude Code
+ * preset: the runner here inherits it. Until the pin moves to that engine the
+ * test skips, and passes with it linked in.
+ */
+type RuntimeCheck = (options?: { signal?: AbortSignal }) => Promise<{ ok: boolean; detail?: string }>
+const ENGINE_HAS_RUNTIME_CHECK = typeof (ClaudeRunner.prototype as unknown as { checkRuntime?: unknown }).checkRuntime === 'function'
+
+describe.skipIf(!ENGINE_HAS_RUNTIME_CHECK)('the runtime check (could not process): the engine’s, as this integration’s runner inherits it', () => {
+  it('one `claude -p` with the fixed prompt: no MCP server and no tool, none of the user’s hooks or CLAUDE.md, no key in its environment, this integration’s key store denied, in an empty folder of its own; ok when the model answers, not ok when it fails', async () => {
+    signIn(identityHomeFor(undefined))
+    const runner = new ClaudeRunner({ configDir: undefined, workdir, profile: OWN, apiBase: API_BASE, env: env({ AGENTCHAT_API_KEY: KEY }) })
+    const check = (runner as unknown as { checkRuntime: RuntimeCheck }).checkRuntime.bind(runner)
+    expect(await check()).toEqual({ ok: true })
+    const runs = readRuns(fake)
+    expect(runs).toHaveLength(1)
+    const run = runs[0]!
+    expect(run.stdin).toBe((presets as unknown as { RUNTIME_CHECK_PROMPT: string }).RUNTIME_CHECK_PROMPT)
+    expect(run.stdin).toBe('Reply with the single word OK.')
+    expect(run.argv).not.toContain('--mcp-config')
+    expect(run.argv).toContain('--strict-mcp-config')
+    expect(run.argv.slice(run.argv.indexOf('--tools'), run.argv.indexOf('--tools') + 2)).toEqual(['--tools', ''])
+    expect(run.argv[run.argv.indexOf('--settings') + 1]).toBe('{"disableAllHooks":true}')
+    expect(run.mcpConfig).toBeNull()
+    expect(run.env.AGENTCHAT_API_KEY).toBeUndefined()
+    expect(run.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS).toBe('1')
+    expect(run.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe('1')
+    expect(fs.realpathSync(run.cwd)).toBe(fs.realpathSync(path.join(fakeHome, '.claude', 'agentchat-runtime-check')))
+    if (process.platform !== 'win32') {
+      const rules = run.argv[run.argv.indexOf('--disallowedTools') + 1]!.split(',')
+      for (const rule of readDenyRules(denyReadPathsFor(undefined))) expect(rules).toContain(rule)
+    }
+    expect(JSON.stringify(run)).not.toContain(KEY)
+
+    // A provider error (some output, exit 1) is not ok.
+    const failing = new ClaudeRunner({ configDir: undefined, workdir, profile: OWN, apiBase: API_BASE, env: env({ FAKE_CLAUDE_RUN: 'fail' }) })
+    expect(await (failing as unknown as { checkRuntime: RuntimeCheck }).checkRuntime()).toMatchObject({ ok: false, detail: expect.stringContaining('claude runtime check failed') })
   })
 })

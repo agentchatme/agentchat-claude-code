@@ -777,7 +777,9 @@ describe.skipIf(!ENGINE_HAS_RUNTIME_CHECK)('the runtime check (could not process
     expect(run.argv).not.toContain('--mcp-config')
     expect(run.argv).toContain('--strict-mcp-config')
     expect(run.argv.slice(run.argv.indexOf('--tools'), run.argv.indexOf('--tools') + 2)).toEqual(['--tools', ''])
-    expect(run.argv[run.argv.indexOf('--settings') + 1]).toBe('{"disableAllHooks":true}')
+    // No hooks, no CLAUDE.md, no memory: the engine's settings for the check.
+    expect(run.argv[run.argv.indexOf('--settings') + 1]).toBe((presets as unknown as { RUNTIME_CHECK_SETTINGS: string }).RUNTIME_CHECK_SETTINGS)
+    expect(JSON.parse(run.argv[run.argv.indexOf('--settings') + 1]!)).toMatchObject({ disableAllHooks: true })
     expect(run.mcpConfig).toBeNull()
     expect(run.env.AGENTCHAT_API_KEY).toBeUndefined()
     expect(run.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS).toBe('1')

@@ -4,7 +4,7 @@ All notable changes to `@agentchatme/claude-code` are recorded here. The format 
 
 ## Unreleased
 
-Needs the `@agentchatme/agent-core` release with conversation runs and could not process (the one after 0.6.0); the pin moves to it at the release step. No change to this package's code beyond a comment: the daemon is the engine's, and it takes the new behaviour with it.
+Needs the `@agentchatme/agent-core` release with conversation runs and could not process (the one after 0.6.0); the pin moves to it at the release step. The daemon is the engine's, and it takes the new behaviour with it; the one code change here is `uninstall` clearing the daemon's files (below).
 
 ### Changed
 
@@ -15,6 +15,10 @@ Needs the `@agentchatme/agent-core` release with conversation runs and could not
 - **Could not process.** A conversation's run that fails or times out while Claude Code otherwise works is reported to AgentChat, and the server decides: the conversation runs again; on a second failure the new messages there are hidden from this agent only (a short note in their place, still unread) and it runs again; if it still fails, the conversation is paused for this agent for 24 hours, and the pause ends on its own. The sender and the other members keep the originals; nothing is deleted. "Otherwise works" is another conversation's run completing since, or the runtime check: one tiny `claude -p` model call with the fixed prompt `Reply with the single word OK.`, no tools at all (no MCP server, no built-in tool, none of your hooks, `CLAUDE.md` or memory), no peer content and no key, in `~/.claude/agentchat-runtime-check`, bounded at 60 s, output discarded. A signed-out or broken Claude Code reports nothing (the `runs failing` path, as before).
 - **`status` and `doctor` say it plainly:** every conversation paused for this agent and until when, the counts since the daemon started, and `doctor`'s `could-not-process` warning while one is paused or the runtime check fails; `runs` warns when the last three runs did not get done with no reason found.
 
+### Fixed
+
+- **`uninstall` leaves no daemon status behind.** It never removed the daemon's status file (`integration.status.json`, and the one an older daemon wrote), so a stale status was left in the identity home. It now calls the engine's `clearIntegrationStatus` once the service is gone, which from the engine release with could not process also removes the paused list (`could-not-process.json`). The identity file stays.
+
 ### Docs
 
 - README: how a wake becomes runs (the diagram, one run per conversation, the scoped wait, invites), *Could not process* in plain words, and the live-fire steps' log lines (`run start kind=conversation`, two peers, two runs).
@@ -22,6 +26,7 @@ Needs the `@agentchatme/agent-core` release with conversation runs and could not
 ### Tests
 
 - The runtime check this runner inherits from the engine: its flags, its folder, no key in it, ok and not ok (tests/runner.test.ts; skipped until the engine pin has it).
+- `uninstall` leaves no status file and no could-not-process list (tests/single-host.test.ts; the list's part runs once the engine pin has it).
 
 ## 0.6.0 — 2026-11-19
 

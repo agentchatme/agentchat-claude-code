@@ -3,9 +3,10 @@ import * as crypto from 'node:crypto'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { hostedMcpUrl, manualPointer, PEER_RUN_WARNING } from '@agentchatme/agent-core'
+import * as engine from '@agentchatme/agent-core'
+import { hostedMcpUrl, manualPointer, PEER_RUN_WARNING, RUN_PROFILES, type RunProfile } from '@agentchatme/agent-core'
 import { AGENTCHAT_TOOL_ALLOW, claudeProjectsDirFor, claudeRunArgs, readDenyRules, workdirReadRules } from '@agentchatme/agent-core/presets'
-import { ClaudeRunner, answerRunKey, answerToolConfigFor, buildClaudeEnv, deniedAncestorOf, denyReadPathsFor, profileNote, removeAnswerRunFiles, runPointer } from '../src/runner.js'
+import { ClaudeRunner, OWN_PROFILE_LINE, OWN_PROFILE_WARNING, answerRunKey, answerToolConfigFor, buildClaudeEnv, deniedAncestorOf, denyReadPathsFor, guardsHomeWorkdir, profileNote, profileSummary, removeAnswerRunFiles, runPointer } from '../src/runner.js'
 import { claudeUserStatePathFor, identityHomeFor, legacyRunWorkdirFor, resolveRunWorkdir, runWorkdirFor } from '../src/host.js'
 import { VERSION } from '../src/version.js'
 import { installFakeClaude, readRuns, type FakeClaude, type FakeMcpConfig } from './helpers/fake-claude.js'
@@ -16,6 +17,14 @@ import { installFakeClaude, readRuns, type FakeClaude, type FakeMcpConfig } from
 // settings files (`~/.claude/settings.json`) before an answer run, writes an
 // answer run's tool config into the identity home, and reads the key there.
 // None of that may ever be the developer's real `~/.claude`.
+
+/**
+ * Whether the engine this build runs on has the `own` profile. The pin moves to
+ * that engine at the release step; until then the tests that need it skip,
+ * and pass with the new engine linked in (README, "Develop").
+ */
+const ENGINE_HAS_OWN = (RUN_PROFILES as readonly string[]).includes('own')
+const OWN = 'own' as RunProfile
 
 let sandbox: string
 let fakeHome: string
@@ -687,9 +696,60 @@ describe('the prompt’s last line and the profile words', () => {
     for (const profile of ['work', 'full'] as const) expect(runPointer(profile, skill)).toBe(manualPointer(`at ${skill}`))
   })
 
-  it('work and full are named with the engine’s warning; answer with nothing', () => {
-    expect(profileNote('answer')).toBe('')
-    expect(profileNote('work')).toBe(` — ${PEER_RUN_WARNING}`)
-    expect(profileNote('full')).toBe(` — ${PEER_RUN_WARNING}`)
+  it('an own run’s prompt gets the pointer: the skill opens by name in any permission mode', () => {
+    const skill = path.join(fakeHome, '.claude', 'skills', 'agentchat', 'SKILL.md')
+    expect(runPointer(OWN, skill)).toBe(manualPointer(`at ${skill}`))
+  })
+
+  it('every profile is said plainly: own in one line with the honest sentence, work and full with the engine’s warning', () => {
+    expect(OWN_PROFILE_LINE).toBe('reply runs use your own Claude Code permission settings, with anything that would ask refused')
+    expect(profileSummary('own')).toBe(`${OWN_PROFILE_LINE}; runs started by peers' messages act with those permissions`)
+    expect(profileNote('own')).toBe(` — ${profileSummary('own')}`)
+    expect(profileSummary('answer', '/w')).toBe('the AgentChat tools and reads inside /w only — no web, no shell, no other MCP server, no CLAUDE.md, memory or hooks')
+    for (const profile of ['work', 'full']) expect(profileNote(profile)).toContain(PEER_RUN_WARNING)
+    expect(profileSummary('answer')).not.toContain("peers' messages")
+    expect(guardsHomeWorkdir('own')).toBe(true)
+    expect(guardsHomeWorkdir('answer')).toBe(true)
+    expect(guardsHomeWorkdir('work')).toBe(false)
+  })
+
+  it.skipIf(!ENGINE_HAS_OWN)('the own words are the engine’s', () => {
+    const words = engine as unknown as { ownProfileLine: (label: string) => string; OWN_RUN_WARNING: string }
+    expect(OWN_PROFILE_LINE).toBe(words.ownProfileLine('Claude Code'))
+    expect(OWN_PROFILE_WARNING).toBe(words.OWN_RUN_WARNING)
+  })
+})
+
+describe.skipIf(!ENGINE_HAS_OWN)('own: the agent itself, under the user’s own Claude Code settings', () => {
+  it('the default when AGENTCHAT_RUN_PROFILE is unset; an unknown value is answer', () => {
+    expect(engine.resolveRunProfile({})).toBe(OWN)
+    expect(engine.resolveRunProfile({ AGENTCHAT_RUN_PROFILE: 'yolo' })).toBe('answer')
+  })
+
+  it('a run: the user-scope server (no tool config of its own, nothing strict), the identity line appended, the key store denied, no key in its environment', async () => {
+    const home = identityHomeFor(undefined)
+    signIn(home)
+    const runner = new ClaudeRunner({ configDir: undefined, workdir, profile: OWN, apiBase: API_BASE, env: env({ AGENTCHAT_API_KEY: OTHER_KEY }) })
+    expect(await runner.preflight()).toEqual({ ok: true })
+    const outcome = await runner.start({ kind: 'wake', prompt: 'P', runId: 'own-1', identityLine: IDENTITY_LINE, budgetMs: 10_000 })
+    expect(outcome.state).toBe('ok')
+    const [run] = readRuns(fake)
+    const argv = run!.argv
+    for (const flag of ['--mcp-config', '--strict-mcp-config', '--tools', '--settings', '--permission-mode', '--dangerously-skip-permissions']) expect(argv).not.toContain(flag)
+    expect(argv[argv.indexOf('--permission-prompts') + 1]).toBe('none')
+    expect(argv[argv.indexOf('--allowedTools') + 1]).toBe(AGENTCHAT_TOOL_ALLOW)
+    if (process.platform !== 'win32') {
+      expect(argv[argv.indexOf('--disallowedTools') + 1]).toBe(readDenyRules(denyReadPathsFor(undefined)).join(','))
+    }
+    expect(run!.appendedSystemPrompt).toBe(`${IDENTITY_LINE}\n`)
+    expect(run!.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS).toBeUndefined()
+    expect(run!.env.AGENTCHAT_API_KEY).toBeUndefined()
+    expect(JSON.stringify(argv)).not.toContain(KEY)
+    expect(runFilesLeft(home)).toEqual([])
+  })
+
+  it('a home-folder work folder: own runs work in the empty folder answer runs use', () => {
+    const runner = new ClaudeRunner({ configDir: undefined, workdir: fakeHome, profile: OWN, apiBase: API_BASE, env: env() })
+    expect(runner.workdir()).toBe(path.join(fakeHome, '.claude', 'agentchat-answer-workdir'))
   })
 })

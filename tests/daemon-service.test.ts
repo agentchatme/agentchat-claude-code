@@ -4,7 +4,11 @@ import * as crypto from 'node:crypto'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
+import { DEFAULT_RUN_PROFILE, RUN_PROFILES } from '@agentchatme/agent-core'
 import { installFakeClaude, type FakeClaude } from './helpers/fake-claude.js'
+
+/** Whether the engine this build runs on has the `own` profile (the pin moves to it at the release step). */
+const ENGINE_HAS_OWN = (RUN_PROFILES as readonly string[]).includes('own')
 
 // ─── The service runs something that can actually serve ─────────────────────
 //
@@ -277,6 +281,16 @@ describe.skipIf(!serviceOs)('daemon install captures the switches into the servi
     }
   })
 
+  // The upgrade path: a profile is captured only when it was set, so an install
+  // that set none runs whatever the engine's default is when its daemon starts
+  // (`own` from the engine that added it; `answer` before).
+  it('an install that sets no profile captures none: its daemon runs the engine’s default', async () => {
+    const installed = await run(CLI, ['daemon', 'install'])
+    expect(installed.code, installed.out).toBe(0)
+    expect(fs.readFileSync(definitionPath('agentchatd-claude-code'), 'utf-8')).not.toContain('AGENTCHAT_RUN_PROFILE')
+    expect(installed.out).toContain(`with profile ${DEFAULT_RUN_PROFILE} while this machine is up — `)
+  })
+
   // Pinned on purpose, so that changing it is a decision and not an accident:
   // every install, `daemon install` and `doctor --fix` writes the definition
   // again from the shell that runs it. A switch captured earlier is not
@@ -325,12 +339,24 @@ describe('the run workdir is outside the identity home', () => {
     expect(out).not.toMatch(/cannot read their own working directory/)
   }, 30_000)
 
+  it.skipIf(!ENGINE_HAS_OWN)('with no profile set, the shipped daemon serves own; its status names the profile and the runtime', async () => {
+    const home = path.join(sandbox, '.claude', 'agentchat')
+    signIn(home)
+    const { out, alive } = await runFor(DAEMON, ['--home', home], 6000)
+    expect(alive, out).toBe(true)
+    expect(out).toMatch(/integration up as @cc-agent via claude \(claude-code [^)]+\), profile own/)
+    expect(out).not.toMatch(/AgentChat-only tool config|not connecting yet/)
+    const status = JSON.parse(fs.readFileSync(path.join(home, 'integration.status.json'), 'utf-8')) as { profile: string; runtime_label?: string }
+    expect(status.profile).toBe('own')
+    expect(status.runtime_label).toBe('Claude Code')
+  }, 30_000)
+
   it('the shipped daemon’s answer runner passes its preflight: it is given the AgentChat-only tool config an answer run needs', async () => {
     // Without that config the engine refuses every answer run ("an answer run
     // needs the AgentChat-only tool config") and the daemon never holds the socket.
     const home = path.join(sandbox, '.claude', 'agentchat')
     signIn(home)
-    const { out, alive } = await runFor(DAEMON, ['--home', home], 6000)
+    const { out, alive } = await runFor(DAEMON, ['--home', home], 6000, { AGENTCHAT_RUN_PROFILE: 'answer' })
     expect(alive, out).toBe(true)
     expect(out).toMatch(/integration up as @cc-agent via claude \(claude-code [^)]+\), profile answer/)
     expect(out).not.toMatch(/AgentChat-only tool config|not connecting yet/)
@@ -348,7 +374,7 @@ describe('the run workdir is outside the identity home', () => {
     fs.writeFileSync(path.join(presets, 'keep.txt'), 'mine')
     const { out, alive } = await runFor(DAEMON, ['--home', home], 6000)
     expect(alive, out).toBe(true)
-    expect(out).toContain(`removed 2 file(s) an interrupted answer run left in ${home}`)
+    expect(out).toContain(`removed 2 file(s) an interrupted run left in ${home}`)
     expect(fs.readdirSync(presets)).toEqual(['keep.txt'])
   }, 30_000)
 

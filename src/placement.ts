@@ -664,22 +664,23 @@ export function removeLegacyWiring(): PlacementStep | null {
   return { name: 'legacy', status: 'changed', detail: notes.join('; ') }
 }
 
-// ─── What answer runs leave behind ──────────────────────────────────────────
+// ─── What runs leave behind ─────────────────────────────────────────────────
 
 /**
- * An answer run writes its own tool config (it holds the key) and its
- * identity line into `<identity home>/presets/` and removes both when it ends;
- * a run cut off (power loss, a killed daemon) leaves them there. Logout takes
- * them out with the key; uninstall with the rest. Null when there were none.
+ * An answer run writes its own tool config (it holds the key), and an answer
+ * or own run its identity line, into `<identity home>/presets/` and removes
+ * them when it ends; a run cut off (power loss, a killed daemon) leaves them
+ * there. Logout takes them out with the key; uninstall with the rest. Null
+ * when there were none.
  */
 export function removeAnswerRunLeftovers(): PlacementStep | null {
   const dir = path.dirname(answerToolConfigFor(identityHome()))
   const { removed, failed } = removeAnswerRunFiles(identityHome())
   if (failed.length > 0) {
-    return { name: 'runs', status: 'failed', detail: `could not remove ${failed.join(', ')} from ${dir} (left by an answer run; a tool config there holds the key) — delete ${failed.length === 1 ? 'it' : 'them'} by hand` }
+    return { name: 'runs', status: 'failed', detail: `could not remove ${failed.join(', ')} from ${dir} (left by a run; an answer run's tool config there holds the key) — delete ${failed.length === 1 ? 'it' : 'them'} by hand` }
   }
   if (removed.length === 0) return null
-  return { name: 'runs', status: 'changed', detail: `removed ${removed.length} file${removed.length === 1 ? '' : 's'} an answer run left in ${dir} (its own tool config and identity line)` }
+  return { name: 'runs', status: 'changed', detail: `removed ${removed.length} file${removed.length === 1 ? '' : 's'} a run left in ${dir} (an answer run's tool config, a run's identity line)` }
 }
 
 // ─── All together ───────────────────────────────────────────────────────────

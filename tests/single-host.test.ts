@@ -7,9 +7,12 @@ import * as crypto from 'node:crypto'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { MANUAL, manualVersion, PEER_RUN_WARNING } from '@agentchatme/agent-core'
+import { DEFAULT_RUN_PROFILE, MANUAL, manualVersion, PEER_RUN_WARNING, RUN_PROFILES } from '@agentchatme/agent-core'
 import { VERSION } from '../src/version.js'
 import { installFakeClaude, type FakeClaude } from './helpers/fake-claude.js'
+
+/** Whether the engine this build runs on has the `own` profile (the pin moves to it at the release step). */
+const ENGINE_HAS_OWN = (RUN_PROFILES as readonly string[]).includes('own')
 
 const exec = promisify(execFile)
 // Drives the publishable NPX bundle — the exact file users run.
@@ -536,7 +539,7 @@ describe('there is no way to address another agent', () => {
     leave()
     const out = await run(['logout'])
     expect(out.code, out.stdout + out.stderr).toBe(0)
-    expect(out.stdout).toMatch(/runs: removed 2 files an answer run left/)
+    expect(out.stdout).toMatch(/runs: removed 2 files a run left/)
     expect(fs.existsSync(presets)).toBe(false)
 
     giveClaudeAnIdentity()
@@ -549,14 +552,17 @@ describe('there is no way to address another agent', () => {
     expect(fs.existsSync(creds())).toBe(true)
   })
 
-  it('the help says what each profile lets a peer-started run do, and where an answer run works', async () => {
+  it('the help says what each profile lets a peer-started run do, and where own and answer runs work', async () => {
     const out = await run(['--help'])
     const flat = out.stdout.replace(/\s+/g, ' ')
-    expect(flat).toContain('answer (default): the AgentChat tools and reads inside the run\'s work folder only — no web, no shell, no other MCP server, no CLAUDE.md, memory or hooks')
+    expect(flat).toContain('AGENTCHAT_RUN_PROFILE=own|answer|work|full')
+    expect(flat).toContain("own (default): reply runs use your own Claude Code permission settings, with anything that would ask refused; runs started by peers' messages act with those permissions.")
+    expect(flat).toContain('answer: the AgentChat tools and reads inside the run\'s work folder only — no web, no shell, no other MCP server, no CLAUDE.md, memory or hooks')
+    expect(flat).toContain('An unknown value is answer.')
     expect(flat).toContain('permissions.additionalDirectories')
     expect(flat).toContain(`work and full: ${PEER_RUN_WARNING}`)
     expect(flat).toContain('AGENTCHAT_RUN_CWD')
-    expect(flat).toContain('agentchat-answer-workdir')
+    expect(flat).toContain('gives own and answer runs ~/.claude/agentchat-answer-workdir')
   })
 
   it('the help says the previous switch name is still read, when its removal is scheduled, and that switches are captured again on every install', async () => {
@@ -670,12 +676,23 @@ describe('doctor: what a peer-started run may do, and whether one can start', ()
       ...extra,
     })
 
-  it('answer (the default): the profile in plain words, and the runner’s own preflight passes', { timeout: 30_000 }, async () => {
+  it('answer (the lock, set): the profile in plain words, and the runner’s own preflight passes', { timeout: 30_000 }, async () => {
     giveClaudeAnIdentity()
     await run([])
-    const out = await run(['doctor'])
+    const out = await run(['doctor'], { AGENTCHAT_RUN_PROFILE: 'answer' })
     expect(out.stdout).toContain(`PASS run-profile: answer: the AgentChat tools and reads inside ${path.join(sandbox, '.claude', 'agentchat-workdir')} only — no web, no shell, no other MCP server, no CLAUDE.md, memory or hooks`)
     expect(out.stdout).toContain('PASS run-preflight: the daemon can start a run')
+  })
+
+  it.skipIf(!ENGINE_HAS_OWN)('own (the default): the profile in one line with the honest sentence; the preflight passes, and the additionalDirectories refusal is answer\'s alone', { timeout: 30_000 }, async () => {
+    giveClaudeAnIdentity()
+    await run([])
+    fs.writeFileSync(path.join(sandbox, '.claude', 'settings.json'), JSON.stringify({ permissions: { additionalDirectories: [path.join(sandbox, 'shared')] } }))
+    const out = await run(['doctor'])
+    expect(out.stdout).toContain(`PASS run-profile: own: reply runs use your own Claude Code permission settings, with anything that would ask refused; runs started by peers' messages act with those permissions (runs work in ${path.join(sandbox, '.claude', 'agentchat-workdir')})`)
+    expect(out.stdout).toContain('PASS run-preflight: the daemon can start a run')
+    const install = await run([])
+    expect(install.stdout).toContain("profile own — reply runs use your own Claude Code permission settings, with anything that would ask refused; runs started by peers' messages act with those permissions")
   })
 
   it('permissions.additionalDirectories in the user’s settings: run-preflight FAILs naming the file, in the runner’s words', { timeout: 30_000 }, async () => {
@@ -683,7 +700,7 @@ describe('doctor: what a peer-started run may do, and whether one can start', ()
     await run([])
     const settings = path.join(sandbox, '.claude', 'settings.json')
     fs.writeFileSync(settings, JSON.stringify({ permissions: { additionalDirectories: [path.join(sandbox, 'shared')] } }))
-    const out = await run(['doctor'])
+    const out = await run(['doctor'], { AGENTCHAT_RUN_PROFILE: 'answer' })
     expect(out.code).toBe(1)
     expect(out.stdout).toMatch(new RegExp(`FAIL run-preflight: no run starts: answer runs do not start while ${settings.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} lists permissions\\.additionalDirectories`))
     // work is the operator's opt-in, and is not refused for it.
@@ -695,9 +712,17 @@ describe('doctor: what a peer-started run may do, and whether one can start', ()
   it('a work folder that is the home folder: answer runs work in their own folder, and doctor says so', { timeout: 30_000 }, async () => {
     giveClaudeAnIdentity()
     await run([])
-    const out = await run(['doctor'], { AGENTCHAT_RUN_CWD: sandbox })
+    const out = await run(['doctor'], { AGENTCHAT_RUN_CWD: sandbox, AGENTCHAT_RUN_PROFILE: 'answer' })
     expect(out.stdout).toContain(`WARN run-workdir: ${sandbox} is your home folder or contains it — answer runs work in ${path.join(sandbox, '.claude', 'agentchat-answer-workdir')} instead`)
     expect(out.stdout).toContain(`PASS run-profile: answer: the AgentChat tools and reads inside ${path.join(sandbox, '.claude', 'agentchat-answer-workdir')} only`)
+  })
+
+  it.skipIf(!ENGINE_HAS_OWN)('a work folder that is the home folder: own runs work in the same folder of their own', { timeout: 30_000 }, async () => {
+    giveClaudeAnIdentity()
+    await run([])
+    const out = await run(['doctor'], { AGENTCHAT_RUN_CWD: sandbox })
+    expect(out.stdout).toContain(`WARN run-workdir: ${sandbox} is your home folder or contains it — own runs work in ${path.join(sandbox, '.claude', 'agentchat-answer-workdir')} instead`)
+    expect(out.stdout).toContain(`(runs work in ${path.join(sandbox, '.claude', 'agentchat-answer-workdir')})`)
   })
 
   it('runs failing for a runtime reason, and another listener serving the agent, are said in doctor and status', { timeout: 30_000 }, async () => {
@@ -771,7 +796,7 @@ describe('doctor: what a peer-started run may do, and whether one can start', ()
     await run([])
     fs.writeFileSync(path.join(home(), 'integration.status.json'), STATUS({ profile: 'work', workdir: path.join(sandbox, 'project'), runs_failed: 0, runs_ok: 3 }))
     const out = await run(['doctor'])
-    expect(out.stdout).toContain(`WARN run-profile: work: ${PEER_RUN_WARNING} (the daemon's, from its status; install, \`daemon install\` or \`doctor --fix\` from this shell would set profile answer and work folder ${path.join(sandbox, '.claude', 'agentchat-workdir')})`)
+    expect(out.stdout).toContain(`WARN run-profile: work: ${PEER_RUN_WARNING} (the daemon's, from its status; install, \`daemon install\` or \`doctor --fix\` from this shell would set profile ${DEFAULT_RUN_PROFILE} and work folder ${path.join(sandbox, '.claude', 'agentchat-workdir')})`)
   })
 
   it('a work folder that contains the key store where no deny rule can carry it is said: a run there could read the key', { timeout: 30_000 }, async () => {

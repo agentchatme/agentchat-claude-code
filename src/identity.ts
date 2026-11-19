@@ -6,6 +6,7 @@ import {
   alwaysOnState,
   createIdentityCommands,
   DEFAULT_API_BASE,
+  DEFAULT_RUN_PROFILE,
   fetchServedTexts,
   integrationDisabledBy,
   INTEGRATION_ENV,
@@ -17,8 +18,8 @@ import {
   recordOfferDeclined,
   renderAnchorBlock,
   renderDeclinedBlock,
+  PEER_RUN_WARNING,
   resolveRunProfile,
-  runProfileWarning,
   workdirExposesHome,
   writeAnchor,
   type DoctorCheck,
@@ -33,7 +34,7 @@ import {
 import { claudeAnswerFallbackWorkdir, inexpressibleDenyPaths } from '@agentchatme/agent-core/presets'
 import { CLIENT, identityHome, anchorFile, claudeConfigOverride, invocation, LABEL, legacyRunWorkdirFor, resolveRunWorkdir, runWorkdirFor } from './host.js'
 import { checkPlacement, placeAll, placementMark, skillPresent, unplaceIdentity, type PlacementIdentity } from './placement.js'
-import { ClaudeRunner, claudeSignIn, deniedAncestorOf, denyReadPathsFor, inspectClaudeRuntime, profileNote } from './runner.js'
+import { ClaudeRunner, claudeSignIn, deniedAncestorOf, denyReadPathsFor, guardsHomeWorkdir, inspectClaudeRuntime, OWN_PROFILE_LINE, OWN_PROFILE_WARNING, profileNote, profileSummary } from './runner.js'
 import { ensureListenerService, listenerServiceCurrent } from './service.js'
 import { VERSION } from './version.js'
 import { homeIdentity } from './home-identity.js'
@@ -235,19 +236,24 @@ function daemonRunner(settings: ReturnType<typeof runSettings> = runSettings()):
 }
 
 /**
- * What a run started by a peer's message may do. `answer`: the AgentChat tools
- * and reads inside its work folder, nothing else. `work` and `full` are the
- * operator's opt-in, said with the engine's own warning (`runProfileWarning`).
+ * What a run started by a peer's message may do, in plain words. `own` (the
+ * default): the user's own Claude Code permission settings, with anything that
+ * would ask refused, and the sentence that says peers' runs act with them.
+ * `answer`: the AgentChat tools and reads inside its work folder, nothing
+ * else. `work` and `full` are the operator's opt-in, said with the engine's
+ * own warning (`PEER_RUN_WARNING`).
  */
 export function profileCheck(): DoctorCheck {
   const settings = runSettings()
-  const warning = runProfileWarning(settings.profile)
-  if (warning !== null) return { name: 'run-profile', verdict: 'WARN', detail: `${settings.profile}: ${warning}${settingsNote(settings)} (AGENTCHAT_RUN_PROFILE; answer is the default)` }
-  return {
-    name: 'run-profile',
-    verdict: settings.differs !== null ? 'WARN' : 'PASS',
-    detail: `answer: the AgentChat tools and reads inside ${daemonRunner(settings).workdir()} only — no web, no shell, no other MCP server, no CLAUDE.md, memory or hooks${settingsNote(settings)}`,
+  const note = settingsNote(settings)
+  if (settings.profile === 'work' || settings.profile === 'full') {
+    return { name: 'run-profile', verdict: 'WARN', detail: `${settings.profile}: ${PEER_RUN_WARNING}${note} (AGENTCHAT_RUN_PROFILE; ${DEFAULT_RUN_PROFILE} is the default)` }
   }
+  const verdict = settings.differs !== null ? 'WARN' : 'PASS'
+  const workdir = daemonRunner(settings).workdir()
+  // A string compare: the pinned engine names the profiles.
+  if ((settings.profile as string) === 'own') return { name: 'run-profile', verdict, detail: `own: ${OWN_PROFILE_LINE}; ${OWN_PROFILE_WARNING} (runs work in ${workdir})${note}` }
+  return { name: 'run-profile', verdict, detail: `answer: ${profileSummary('answer', workdir)}${note}` }
 }
 
 /**
@@ -271,9 +277,9 @@ export async function preflightCheck(): Promise<DoctorCheck> {
  * inside either is a cwd the run cannot read (the pre-fix default was one),
  * and one that contains either is safe only where a rule can carry the path
  * (not on Windows, not with a comma or whitespace in it). A workdir that is the
- * home folder or contains it is no answer run's: those work in an empty folder
- * of their own, and `work`/`full` runs would see the whole home. The settings
- * are the daemon's own when it has recorded them (`runSettings`).
+ * home folder or contains it is no own or answer run's: those work in an empty
+ * folder of their own, and `work`/`full` runs would see the whole home. The
+ * settings are the daemon's own when it has recorded them (`runSettings`).
  */
 export function workdirCheck(fix: boolean): DoctorCheck {
   const configDir = claudeConfigOverride()
@@ -285,8 +291,8 @@ export function workdirCheck(fix: boolean): DoctorCheck {
       name: 'run-workdir',
       verdict: 'WARN',
       detail: `${workdir}${note} is your home folder or contains it — ${
-        settings.profile === 'answer'
-          ? `answer runs work in ${claudeAnswerFallbackWorkdir(configDir)} instead`
+        guardsHomeWorkdir(settings.profile)
+          ? `${settings.profile} runs work in ${claudeAnswerFallbackWorkdir(configDir)} instead`
           : "a run started by a peer's message there can see everything under it"
       }; point AGENTCHAT_RUN_CWD at a folder of its own (or unset it for ${runWorkdirFor(configDir)}), then \`${invocation()} daemon install\``,
     }

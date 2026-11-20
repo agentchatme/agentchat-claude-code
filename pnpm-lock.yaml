@@ -9,8 +9,8 @@ importers:
   .:
     devDependencies:
       '@agentchatme/agent-core':
-        specifier: 0.6.0
-        version: 0.6.0
+        specifier: 0.7.0
+        version: 0.7.0
       '@types/node':
         specifier: ^22.19.17
         version: 22.20.1
@@ -32,8 +32,8 @@ importers:
 
 packages:
 
-  '@agentchatme/agent-core@0.6.0':
-    resolution: {integrity: sha512-S1X/ExJJs6cxAuD3ixCx7FNAvP/alHKBoQJER/pwYzj1LGkNwtOrwYsAXmVEd3GD/XyYg8IbiqjC5fPTt0RiCA==}
+  '@agentchatme/agent-core@0.7.0':
+    resolution: {integrity: sha512-XmiGGGdnHai2sj34JCah/naKM5JhNVUd9zVt80rcUKcUfP/okCjSGumnC5Xo12edAuDzKlIqjbB1W+d3jtQT5g==}
     engines: {node: '>=22.0.0'}
 
   '@esbuild/aix-ppc64@0.27.7':
@@ -554,6 +554,15 @@ packages:
       ws:
         optional: true
 
+  agentchatme@1.5.0:
+    resolution: {integrity: sha512-MEuADPlgK8/Ht9rGwpJJ9yJW3pP5YxDIBCT6JgV+bfKgWci5VwvtwhGwJne3kwH5+zxfMebSgbmWN2MLHyCkgw==}
+    engines: {node: '>=20.0.0'}
+    peerDependencies:
+      ws: '>=8.21.1'
+    peerDependenciesMeta:
+      ws:
+        optional: true
+
   any-promise@1.3.0:
     resolution: {integrity: sha512-7UvmKalWRt1wgjL1RrGxoSJW/0QZFIegpeGvZG9kjp8vrRu55XTHbwnqq2GpXm9uLbcuhxm3IqX9OB4MZR1b2A==}
 
@@ -952,9 +961,9 @@ packages:
 
 snapshots:
 
-  '@agentchatme/agent-core@0.6.0':
+  '@agentchatme/agent-core@0.7.0':
     dependencies:
-      agentchatme: 1.4.0(ws@8.21.1)
+      agentchatme: 1.5.0(ws@8.21.1)
       cross-spawn: 7.0.6
       ws: 8.21.1
       zod: 3.25.76
@@ -1265,6 +1274,10 @@ snapshots:
   acorn@8.17.0: {}
 
   agentchatme@1.4.0(ws@8.21.1):
+    optionalDependencies:
+      ws: 8.21.1
+
+  agentchatme@1.5.0(ws@8.21.1):
     optionalDependencies:
       ws: 8.21.1
 

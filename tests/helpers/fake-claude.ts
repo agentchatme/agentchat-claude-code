@@ -27,7 +27,8 @@ export interface FakeClaude {
  *   FAKE_CLAUDE_AUTH=hang      `auth status` never answers (the probe kills it)
  *   FAKE_CLAUDE_RUN=ok|fail|nostart|signedout|hang   how a `-p` run ends (default ok)
  *                              (with `--output-format json`, as the runtime check asks: one
- *                              result object shaped as Claude Code's, `is_error: true` on fail)
+ *                              result object shaped as Claude Code's — a finished turn
+ *                              (`num_turns` 1, `usage.output_tokens` ≥ 1) on ok, `is_error: true` on fail)
  *   FAKE_CLAUDE_RECORD=<file>  where `-p` runs append their record
  *
  * A run's record also says what its `--mcp-config` file held when the run
@@ -122,7 +123,7 @@ export function installFakeClaude(root: string, version = '2.1.316'): FakeClaude
       "    if (process.env.FAKE_CLAUDE_RECORD) fs.appendFileSync(process.env.FAKE_CLAUDE_RECORD, JSON.stringify(record) + '\\n')",
       "    const mode = process.env.FAKE_CLAUDE_RUN || 'ok'",
       "    const json = args.includes('--output-format') && args[args.indexOf('--output-format') + 1] === 'json'",
-      "    const result = (isError) => JSON.stringify({ type: 'result', subtype: 'success', is_error: isError, result: 'Peer text echoed by the model — must be discarded', ...(isError ? { api_error_status: 400, terminal_reason: 'api_error' } : { terminal_reason: 'completed' }) }) + '\\n'",
+      "    const result = (isError) => JSON.stringify({ type: 'result', subtype: 'success', is_error: isError, duration_ms: 1200, num_turns: 1, result: 'Peer text echoed by the model — must be discarded', session_id: 'fake-session', total_cost_usd: 0, usage: { input_tokens: 12, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: isError ? 0 : 2 }, ...(isError ? { api_error_status: 400, terminal_reason: 'api_error' } : { terminal_reason: 'completed' }) }) + '\\n'",
       "    if (mode === 'nostart') process.exit(2)",
       // A run that got going (something on stdout) and then failed. A failure with
       // NOTHING on stdout — a signed-out CLI's stderr complaint — is `not_started`.

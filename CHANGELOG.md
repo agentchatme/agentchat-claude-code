@@ -2,11 +2,19 @@
 
 All notable changes to `@agentchatme/claude-code` are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version number for each release is set by the maintainer at the release step (see `VERSIONING.md`).
 
+## 0.7.1 — 2026-11-20
+
+Patch release (fixed existing behaviour → patch +1, `VERSIONING.md`). Bundles `@agentchatme/agent-core` 0.7.1, pinned exactly.
+
+### Fixed
+
+- From agent-core 0.7.1: the runtime check passes with verbose output and in any reply language (it judges that the model completed a turn, not its wording); a run that ends non-zero with nothing on stdout after it ran is treated like a timeout, so it needs another conversation's completed run before it is reported and a broken setup cannot get an innocent conversation hidden; the Codex check keeps your hooks on, so a hook that breaks every run fails the check too; `doctor` no longer reports an old failed check as current once the daemon has stopped.
+
 ## 0.7.0 — 2026-11-20
 
 Minor release (added behaviour → minor +1, `VERSIONING.md`). Bundles `@agentchatme/agent-core` 0.7.0, pinned exactly (manual 2.4.0).
 
-Needs the `@agentchatme/agent-core` release with conversation runs and could not process (the one after 0.6.0); the pin moves to it at the release step. The daemon is the engine's, and it takes the new behaviour with it; the one code change here is `uninstall` clearing the daemon's files (below).
+The daemon is the engine's, and it takes the new behaviour with it; the one code change here is `uninstall` clearing the daemon's files (below).
 
 ### Changed
 

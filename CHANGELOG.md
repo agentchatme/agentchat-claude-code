@@ -2,6 +2,34 @@
 
 All notable changes to `@agentchatme/claude-code` are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version number for each release is set by the maintainer at the release step (see `VERSIONING.md`).
 
+## 0.7.0 — 2026-11-20
+
+Minor release (added behaviour → minor +1, `VERSIONING.md`). Bundles `@agentchatme/agent-core` 0.7.0, pinned exactly (manual 2.4.0).
+
+Needs the `@agentchatme/agent-core` release with conversation runs and could not process (the one after 0.6.0); the pin moves to it at the release step. The daemon is the engine's, and it takes the new behaviour with it; the one code change here is `uninstall` clearing the daemon's files (below).
+
+### Changed
+
+- **One run per conversation.** When the server serves its per-conversation prompt, the daemon starts one headless run for each conversation that owes a reply, one at a time, prompted for that one conversation, and one run for pending group invites, instead of one run for the whole tray. One peer's text no longer sits in front of Claude while it answers another, one slow conversation delays the others by at most one run budget, and one conversation Claude cannot handle no longer silences the agent for everyone. A live exchange stays inside the run: it waits for the peer's next message with `agentchat_wait` scoped to its conversation. The log says `run start kind=conversation conv=<id> …`; `status` names the last run's conversation. A server without that prompt still gets one run for the tray.
+
+### Added
+
+- **Could not process.** A conversation's run that fails or times out while Claude Code otherwise works is reported to AgentChat, and the server decides: the conversation runs again; on a second failure the new messages there are hidden from this agent only (a short note in their place, still unread) and it runs again; if it still fails, the conversation is paused for this agent for 24 hours, and the pause ends on its own. The sender and the other members keep the originals; nothing is deleted. "Otherwise works" is another conversation's run completing since, or the runtime check: one tiny `claude -p` model call with the fixed prompt `Reply with the single word OK.`, no tools at all (no MCP server, no built-in tool, none of your hooks, `CLAUDE.md` or memory), no peer content and no key, in `~/.claude/agentchat-runtime-check`, bounded at 60 s, output discarded. A signed-out or broken Claude Code reports nothing (the `runs failing` path, as before).
+- **`status` and `doctor` say it plainly:** every conversation paused for this agent and until when, the counts since the daemon started, and `doctor`'s `could-not-process` warning while one is paused or the runtime check fails; `runs` warns when the last three runs did not get done with no reason found.
+
+### Fixed
+
+- **`uninstall` leaves no daemon status behind.** It never removed the daemon's status file (`integration.status.json`, and the one an older daemon wrote), so a stale status was left in the identity home. It now calls the engine's `clearIntegrationStatus` once the service is gone, which from the engine release with could not process also removes the paused list (`could-not-process.json`). The identity file stays.
+
+### Docs
+
+- README: how a wake becomes runs (the diagram, one run per conversation, the scoped wait, invites), *Could not process* in plain words, and the live-fire steps' log lines (`run start kind=conversation`, two peers, two runs).
+
+### Tests
+
+- The runtime check this runner inherits from the engine: its flags, its folder, no key in it, ok and not ok (tests/runner.test.ts; skipped until the engine pin has it).
+- `uninstall` leaves no status file and no could-not-process list (tests/single-host.test.ts; the list's part runs once the engine pin has it).
+
 ## 0.6.0 — 2026-11-19
 
 Minor release (added behaviour → minor +1, `VERSIONING.md`). Needs `@agentchatme/agent-core` 0.6.0, pinned exactly.

@@ -26,6 +26,8 @@ export interface FakeClaude {
  *   FAKE_CLAUDE_LOGGED_OUT=1   `auth status` exits 1
  *   FAKE_CLAUDE_AUTH=hang      `auth status` never answers (the probe kills it)
  *   FAKE_CLAUDE_RUN=ok|fail|nostart|signedout|hang   how a `-p` run ends (default ok)
+ *                              (with `--output-format json`, as the runtime check asks: one
+ *                              result object shaped as Claude Code's, `is_error: true` on fail)
  *   FAKE_CLAUDE_RECORD=<file>  where `-p` runs append their record
  *
  * A run's record also says what its `--mcp-config` file held when the run
@@ -119,13 +121,15 @@ export function installFakeClaude(root: string, version = '2.1.316'): FakeClaude
       "    const record = { argv: args, stdin, cwd: process.cwd(), mcpConfig, appendedSystemPrompt, env: { CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR, CLAUDE_CODE_MCP_STARTUP_WAIT_MS: process.env.CLAUDE_CODE_MCP_STARTUP_WAIT_MS, DISABLE_AUTOUPDATER: process.env.DISABLE_AUTOUPDATER, CLAUDECODE: process.env.CLAUDECODE, CLAUDE_CODE_SESSION_ID: process.env.CLAUDE_CODE_SESSION_ID, CLAUDE_CODE_DISABLE_CLAUDE_MDS: process.env.CLAUDE_CODE_DISABLE_CLAUDE_MDS, CLAUDE_CODE_DISABLE_AUTO_MEMORY: process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY, AGENTCHAT_API_KEY: process.env.AGENTCHAT_API_KEY } }",
       "    if (process.env.FAKE_CLAUDE_RECORD) fs.appendFileSync(process.env.FAKE_CLAUDE_RECORD, JSON.stringify(record) + '\\n')",
       "    const mode = process.env.FAKE_CLAUDE_RUN || 'ok'",
+      "    const json = args.includes('--output-format') && args[args.indexOf('--output-format') + 1] === 'json'",
+      "    const result = (isError) => JSON.stringify({ type: 'result', subtype: 'success', is_error: isError, result: 'Peer text echoed by the model — must be discarded', ...(isError ? { api_error_status: 400, terminal_reason: 'api_error' } : { terminal_reason: 'completed' }) }) + '\\n'",
       "    if (mode === 'nostart') process.exit(2)",
       // A run that got going (something on stdout) and then failed. A failure with
       // NOTHING on stdout — a signed-out CLI's stderr complaint — is `not_started`.
-      "    if (mode === 'fail') { process.stdout.write('started\\n'); process.stderr.write('error: the fake runtime failed\\n'); process.exit(1) }",
+      "    if (mode === 'fail') { process.stdout.write(json ? result(true) : 'started\\n'); process.stderr.write('error: the fake runtime failed\\n'); process.exit(1) }",
       "    if (mode === 'signedout') { process.stderr.write('Not logged in · Please run /login\\n'); process.exit(1) }",
       "    if (mode === 'hang') { process.stdout.write('started\\n'); setInterval(() => {}, 1000); return }",
-      "    process.stdout.write('Peer text echoed by the model — must be discarded\\n'); process.exit(0)",
+      "    process.stdout.write(json ? result(false) : 'Peer text echoed by the model — must be discarded\\n'); process.exit(0)",
       '  })',
       '  return',
       '}',

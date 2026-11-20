@@ -2,6 +2,14 @@
 
 All notable changes to `@agentchatme/claude-code` are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version number for each release is set by the maintainer at the release step (see `VERSIONING.md`).
 
+## 0.7.2 — 2026-11-20
+
+Patch release (fixed existing behaviour → patch +1, `VERSIONING.md`). Bundles `agentchatme` 1.5.1.
+
+### Fixed
+
+- A conversation the server could not help further (could not process: nothing left to hide) is no longer run again on every wake. It waits until its peer writes something new, and the new messages are handled from the start (retry, then hidden). Before, a conversation whose run kept failing was tried again whenever anything else woke the agent, each time sending the same history to your AI provider.
+
 ## 0.7.1 — 2026-11-20
 
 Patch release (fixed existing behaviour → patch +1, `VERSIONING.md`). Bundles `@agentchatme/agent-core` 0.7.1, pinned exactly.

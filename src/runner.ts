@@ -1,6 +1,6 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { manualPointer, PEER_RUN_WARNING, type RunProfile } from '@agentchatme/agent-core'
+import { manualPointer, PEER_RUN_WARNING, type ManualPointer, type RunProfile } from '@agentchatme/agent-core'
 import { homeIdentity } from './home-identity.js'
 import { ClaudeRunner as PresetClaudeRunner, claudeMcpConfigPath, type ClaudeRunnerOptions } from '@agentchatme/agent-core/presets'
 import { claudeUserStatePathFor, identityHomeFor, invocation, runWorkdirFor } from './host.js'
@@ -169,10 +169,11 @@ export function removeAnswerRunFiles(identityHome: string): { removed: string[];
  * alone: the hosted tools and the served texts are everything it has. `own`,
  * `work` and `full` runs get the pointer: the skill by name (Claude Code's
  * Skill tool opens it in any permission mode), its path and its address, as
- * their settings allow.
+ * their settings allow. The address is the one the served texts announce: the
+ * daemon calls this with it for each run.
  */
-export function runPointer(profile: RunProfile, skill: string): string {
-  return profile === 'answer' ? '' : manualPointer(`at ${skill}`)
+export function runPointer(profile: RunProfile, skill: string): ManualPointer {
+  return (manualUrl: string) => (profile === 'answer' ? '' : manualPointer(`at ${skill}`, manualUrl))
 }
 
 /**

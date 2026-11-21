@@ -4,7 +4,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import * as engine from '@agentchatme/agent-core'
-import { hostedMcpUrl, manualPointer, PEER_RUN_WARNING, RUN_PROFILES, type RunProfile } from '@agentchatme/agent-core'
+import { hostedMcpUrl, manualPointer, MANUAL_URL, PEER_RUN_WARNING, resolveManualPointer, RUN_PROFILES, type RunProfile } from '@agentchatme/agent-core'
 import * as presets from '@agentchatme/agent-core/presets'
 import { AGENTCHAT_TOOL_ALLOW, claudeProjectsDirFor, claudeRunArgs, readDenyRules, workdirReadRules } from '@agentchatme/agent-core/presets'
 import { ClaudeRunner, OWN_PROFILE_LINE, OWN_PROFILE_WARNING, answerRunKey, answerToolConfigFor, buildClaudeEnv, deniedAncestorOf, denyReadPathsFor, guardsHomeWorkdir, profileNote, profileSummary, removeAnswerRunFiles, runPointer } from '../src/runner.js'
@@ -691,15 +691,30 @@ describe('what an interrupted answer run leaves behind', () => {
 })
 
 describe('the prompt’s last line and the profile words', () => {
+  /** The pointer for a run, as the daemon makes it: with the address the texts in hand announce, else the constant. */
+  const pointerFor = (profile: RunProfile, skill: string, texts: { manual: { url: string; version: string } } | null): string =>
+    resolveManualPointer(runPointer(profile, skill), texts)
+  const SERVED = { manual: { url: 'https://manual.example.test/agentchat/skill.md', version: '9.9.9' } }
+
   it('an answer run’s prompt carries no pointer to a skill it cannot open; work and full get it', () => {
     const skill = path.join(fakeHome, '.claude', 'skills', 'agentchat', 'SKILL.md')
-    expect(runPointer('answer', skill)).toBe('')
-    for (const profile of ['work', 'full'] as const) expect(runPointer(profile, skill)).toBe(manualPointer(`at ${skill}`))
+    expect(pointerFor('answer', skill, SERVED)).toBe('')
+    expect(pointerFor('answer', skill, null)).toBe('')
+    for (const profile of ['work', 'full'] as const) expect(pointerFor(profile, skill, SERVED)).toBe(manualPointer(`at ${skill}`, SERVED.manual.url))
   })
 
   it('an own run’s prompt gets the pointer: the skill opens by name in any permission mode', () => {
     const skill = path.join(fakeHome, '.claude', 'skills', 'agentchat', 'SKILL.md')
-    expect(runPointer(OWN, skill)).toBe(manualPointer(`at ${skill}`))
+    expect(pointerFor(OWN, skill, SERVED)).toBe(manualPointer(`at ${skill}`, SERVED.manual.url))
+  })
+
+  it('the pointer names the manual where the served texts say it is; the constant only with no texts in hand', () => {
+    const skill = path.join(fakeHome, '.claude', 'skills', 'agentchat', 'SKILL.md')
+    const served = pointerFor(OWN, skill, SERVED)
+    expect(served).toContain(SERVED.manual.url)
+    expect(served).not.toContain(MANUAL_URL)
+    expect(pointerFor(OWN, skill, null)).toBe(manualPointer(`at ${skill}`))
+    expect(pointerFor(OWN, skill, null)).toContain(MANUAL_URL)
   })
 
   it('every profile is said plainly: own in one line with the honest sentence, work and full with the engine’s warning', () => {

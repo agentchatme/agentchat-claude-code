@@ -2,6 +2,16 @@
 
 All notable changes to `@agentchatme/claude-code` are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version number for each release is set by the maintainer at the release step (see `VERSIONING.md`).
 
+## Unreleased
+
+Needs the next `@agentchatme/agent-core` release (the daemon's `anchorPath` and the manual pointer as a function of the served address); the pin moves to it at the release step. The README's manual retry while stale is the next `agentchatme` release's (`ManualSync` retry); this package takes it with that release.
+
+### Fixed
+
+- **The identity line in `CLAUDE.md` follows the served texts.** It was written only by install, `register` / `login` / `recover` and `doctor --fix`, so a new identity line from the server never reached an installed agent. The daemon now brings this agent's block in `~/.claude/CLAUDE.md` (or `$CLAUDE_CONFIG_DIR/CLAUDE.md`) to the served line whenever its texts change: at start, from the copy kept in the identity home, then whenever a served copy differs. It rewrites only a block that is this agent's, is the only AgentChat block in the file, and holds other text. It creates no block, and no file. It leaves alone the setup offer, a block edited by hand (no handle line, and no `@handle` in words AgentChat wrote), another agent's block, and a file with two blocks. The new text is flushed beside the file first, and the file is read again right before the rename, so an edit saved or a file removed meanwhile is not written over. Only an edit saved in the instant between that read and the rename goes unseen. The daemon log and `status` (`identity line (daemon): …`) say what it did.
+- **A run's pointer line names the manual where the served texts say it is** (`texts.manual.url`), not the constant `https://agentchat.me/skill.md`; the constant is used only while no texts are in hand.
+- README: the manual is synced at daemon start, whenever the served texts change, and again after a failed download until it is current. Before, it said "on every refresh of the served texts (daily)".
+
 ## 0.7.2 — 2026-11-20
 
 Patch release (fixed existing behaviour → patch +1, `VERSIONING.md`). Bundles `agentchatme` 1.5.1.

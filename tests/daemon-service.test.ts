@@ -391,3 +391,70 @@ describe('the run workdir is outside the identity home', () => {
     expect(warnings[0]).toContain('daemon install')
   }, 30_000)
 })
+
+// ─── The identity line in CLAUDE.md follows the served texts ────────────────
+describe('the identity line in CLAUDE.md follows the served texts', () => {
+  const signIn = (home: string): void => {
+    fs.mkdirSync(home, { recursive: true })
+    fs.writeFileSync(path.join(home, 'credentials'), JSON.stringify({ api_key: 'ac_live_' + 'a'.repeat(40), handle: 'cc-agent', api_base: 'http://127.0.0.1:9' }))
+  }
+
+  // The daemon is handed Claude Code's always-loaded instruction file and
+  // brings this agent's block there to the served line whenever its texts
+  // change, starting with the copy kept in the identity home: no server is
+  // reachable here (api_base 127.0.0.1:9), so the kept copy is what it has.
+  const servedTexts = (line: string) => ({
+    version: '7',
+    manual: { url: 'https://manual.example.test/skill.md', version: '9.9.9' },
+    wake_instruction: 'SERVED WAKE INSTRUCTION: call mcp__agentchat__agentchat_inbox first.',
+    invite_prompt: 'SERVED INVITE PROMPT.',
+    identity_line: line,
+    identity_line_template: line.replace('@cc-agent', '@<handle>'),
+  })
+  const keepTexts = (home: string, line: string): void => {
+    fs.writeFileSync(path.join(home, 'texts.json'), JSON.stringify({ version: 1, runtime: 'claude-code', fetched_at: new Date().toISOString(), texts: servedTexts(line) }))
+  }
+  const block = (handle: string, line: string): string => [`<!-- agentchat:start -->`, `<!-- agentchat:handle ${handle} -->`, line, `<!-- agentchat:end -->`].join('\n')
+  const OLD_LINE = 'I am @cc-agent on AgentChat (api.agentchat.me). The line install placed.'
+  const NEW_LINE = 'I am @cc-agent on AgentChat (api.agentchat.me). The line served now.'
+  const USER = '# My Claude Code instructions\n\nPrefer small commits.'
+
+  it('the shipped daemon brings this agent\'s CLAUDE.md block to the served identity line, keeping the user\'s text, and says so', async () => {
+    const home = path.join(sandbox, '.claude', 'agentchat')
+    signIn(home)
+    keepTexts(home, NEW_LINE)
+    const claudeMd = path.join(sandbox, '.claude', 'CLAUDE.md')
+    fs.writeFileSync(claudeMd, `${USER}\n\n${block('cc-agent', OLD_LINE)}\n`)
+    const { out, alive } = await runFor(DAEMON, ['--home', home], 6000)
+    expect(alive, out).toBe(true)
+    expect(fs.readFileSync(claudeMd, 'utf-8'), out).toBe(`${USER}\n\n${block('cc-agent', NEW_LINE)}\n`)
+    expect(out).toMatch(/identity line: updated — the identity line for @cc-agent in .*CLAUDE\.md now is the served one/)
+    const status = JSON.parse(fs.readFileSync(path.join(home, 'integration.status.json'), 'utf-8')) as { identity_line?: { outcome: string; path: string; texts_version: string } }
+    expect(status.identity_line).toMatchObject({ outcome: 'updated', path: claudeMd, texts_version: '7' })
+  }, 30_000)
+
+  it('it follows CLAUDE_CONFIG_DIR, and leaves another agent\'s block, and a CLAUDE.md with no block, as they are', async () => {
+    const configDir = path.join(sandbox, 'relocated-claude')
+    const home = path.join(configDir, 'agentchat')
+    signIn(home)
+    keepTexts(home, NEW_LINE)
+    // The default config's file is not this daemon's: it is never written.
+    const defaultMd = path.join(sandbox, '.claude', 'CLAUDE.md')
+    fs.mkdirSync(path.dirname(defaultMd), { recursive: true })
+    fs.writeFileSync(defaultMd, `${USER}\n\n${block('cc-agent', OLD_LINE)}\n`)
+    const relocatedMd = path.join(configDir, 'CLAUDE.md')
+    const otherAgent = `${USER}\n\n${block('someone-else', 'I am @someone-else on AgentChat.')}\n`
+    fs.writeFileSync(relocatedMd, otherAgent)
+    let run = await runFor(DAEMON, ['--home', home], 6000, { CLAUDE_CONFIG_DIR: configDir })
+    expect(run.alive, run.out).toBe(true)
+    expect(fs.readFileSync(relocatedMd, 'utf-8')).toBe(otherAgent)
+    expect(fs.readFileSync(defaultMd, 'utf-8')).toBe(`${USER}\n\n${block('cc-agent', OLD_LINE)}\n`)
+    expect(run.out).toMatch(/identity line: other_agent — the AgentChat block in .*relocated-claude.*CLAUDE\.md is @someone-else's, but this daemon serves @cc-agent/)
+
+    fs.writeFileSync(relocatedMd, `${USER}\n`)
+    run = await runFor(DAEMON, ['--home', home], 6000, { CLAUDE_CONFIG_DIR: configDir })
+    expect(run.alive, run.out).toBe(true)
+    expect(fs.readFileSync(relocatedMd, 'utf-8')).toBe(`${USER}\n`)
+    expect(run.out).toMatch(/identity line: absent — no AgentChat block in .*relocated-claude/)
+  }, 40_000)
+})

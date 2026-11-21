@@ -15,8 +15,8 @@ importers:
         specifier: ^22.19.17
         version: 22.20.1
       agentchatme:
-        specifier: ^1.5.1
-        version: 1.5.1(ws@8.21.1)
+        specifier: ^1.6.1
+        version: 1.7.0(ws@8.21.1)
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(postcss@8.5.23)(typescript@5.9.3)
@@ -545,8 +545,8 @@ packages:
     engines: {node: '>=0.4.0'}
     hasBin: true
 
-  agentchatme@1.5.1:
-    resolution: {integrity: sha512-R7T+b8CI/wWHGb02WkPdGFuwFpA2NFAMrAXYpjQhAQ0Y4gyjwb5nffJhi/zqASUGICQkGPBFZv6C5NbRcqLAHA==}
+  agentchatme@1.7.0:
+    resolution: {integrity: sha512-ruJZEA+v2ATxi6dFsLjxDU7jMB47i90eKqnngKsTNoJUoltamD69laCIh6iHMQrHKDSm6DK1uNneh2S12DIJZQ==}
     engines: {node: '>=20.0.0'}
     peerDependencies:
       ws: '>=8.21.1'
@@ -954,7 +954,7 @@ snapshots:
 
   '@agentchatme/agent-core@0.7.1':
     dependencies:
-      agentchatme: 1.5.1(ws@8.21.1)
+      agentchatme: 1.7.0(ws@8.21.1)
       cross-spawn: 7.0.6
       ws: 8.21.1
       zod: 3.25.76
@@ -1264,7 +1264,7 @@ snapshots:
 
   acorn@8.17.0: {}
 
-  agentchatme@1.5.1(ws@8.21.1):
+  agentchatme@1.7.0(ws@8.21.1):
     optionalDependencies:
       ws: 8.21.1
 

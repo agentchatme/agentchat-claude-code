@@ -8,7 +8,6 @@ import {
   hostedMcpUrl,
   log,
   offerDeclined,
-  readAnchorHandleAt,
   anchorIsCurrentAt,
   removeAnchorAt,
   renderAnchorBlock,
@@ -756,44 +755,6 @@ export interface PlacementCheck {
   readonly verdict?: 'PASS' | 'WARN' | 'FAIL'
 }
 
-/**
- * The identity line's check. A CLAUDE.md that cannot be read (permissions,
- * a symlink loop, not UTF-8) fails this check alone: every other check, and
- * every repair `doctor --fix` makes, still runs.
- */
-function identityCheck(identity: PlacementIdentity): PlacementCheck {
-  let claimed: string | null
-  let current: boolean | null
-  try {
-    // The served template lets an unmarked block in today's words be read as
-    // this agent's; without texts, the handle line and the older wordings
-    // still are.
-    claimed = readAnchorHandleAt(anchorFile(), identity.identityLineTemplate)
-    // null: the served texts were unavailable, so only the handle can be checked.
-    current = identity.identityLine === null ? null : anchorIsCurrentAt(anchorFile(), identity.identityLine, identity.handle)
-  } catch (err) {
-    return { name: 'identity', ok: false, verdict: 'FAIL', detail: `cannot read ${anchorFile()}: ${err instanceof Error ? err.message : String(err)}` }
-  }
-  // This agent's block in older words (or without the handle line, or next
-  // to a second AgentChat block) still tells the agent who it is: not
-  // current, nothing broken — a WARN (`–`), as the shared doctor reports it.
-  // A wrong handle or no block is a FAIL.
-  const older = current === false && claimed === identity.handle
-  return {
-    name: 'identity',
-    ok: current === true || (current === null && claimed === identity.handle),
-    ...(older ? { verdict: 'WARN' as const } : {}),
-    detail: current === true
-      ? `identity line for @${identity.handle} in ${anchorFile()}`
-      : current === null && claimed === identity.handle
-        ? `identity line for @${identity.handle} in ${anchorFile()} (served texts unavailable — currency not checked)`
-      : claimed === null
-        ? `identity line missing from ${anchorFile()}`
-        : claimed !== identity.handle
-          ? `${anchorFile()} says @${claimed} but this agent is @${identity.handle}`
-          : `${anchorFile()} carries an older identity text (or a second AgentChat block) — install or \`doctor --fix\` rewrites it`,
-  }
-}
 
 /**
  * For `status` and `doctor`: is everything where it should be? `manual` is
@@ -802,9 +763,9 @@ function identityCheck(identity: PlacementIdentity): PlacementCheck {
  */
 export function checkPlacement(identity: PlacementIdentity | null, manual: ServedManual | null): PlacementCheck[] {
   const checks: PlacementCheck[] = []
-  if (identity) {
-    checks.push(identityCheck(identity))
-  }
+  // The identity line is not one of these: agent-core's `status` header and
+  // `doctor` (`identity-line`) read it with the daemon's own rules and say it
+  // once.
   const skill = checkManual({ path: skillPath(), served: manual, apiBase: identity?.apiBase ?? null })
   // `unchecked` (nothing announced: no account yet, or offline with nothing
   // cached) is a WARN with no repair to suggest; `stale` and `missing` are

@@ -246,8 +246,10 @@ describe('a CLAUDE.md written by the previous release', () => {
       fs.writeFileSync(claudeMd(), writtenByPreviousRelease(line))
 
       const status = await run(['status'])
-      expect(status.stdout).toContain(`– identity: ${claudeMd()} carries an older identity text`)
-      expect(status.stdout).not.toContain('identity line missing')
+      // One verdict for the block: the status header, in the daemon's terms.
+      expect(status.stdout).toContain(`Identity line: ${claudeMd()} carries an older identity text for @claude-agent — repair with`)
+      expect(status.stdout).not.toContain('no identity line')
+      expect(status.stdout).not.toMatch(/ identity: /)
       const doctor = await run(['doctor'])
       expect(doctor.stdout).toContain(`${claudeMd()} carries an older identity text for @claude-agent`)
       expect(doctor.stdout).not.toContain('no identity line in')
@@ -258,7 +260,7 @@ describe('a CLAUDE.md written by the previous release', () => {
       expect(fixed.stdout).toContain('repaired → @claude-agent')
       expect(fs.readFileSync(claudeMd(), 'utf-8')).toBe(refreshed(line))
 
-      expect((await run(['status'])).stdout).toContain(`✓ identity: identity line for @claude-agent in ${claudeMd()}`)
+      expect((await run(['status'])).stdout).toContain(`Identity line: current (${claudeMd()})`)
       expect((await run(['doctor'])).stdout).toContain(`PASS identity-line: @claude-agent in ${claudeMd()}`)
     })
 
@@ -625,7 +627,8 @@ describe('doctor', () => {
     const before = snapshot(codexDir())
 
     const seen = await run(['doctor'])
-    expect(seen.stdout).toContain('says @codex-agent but this agent is @claude-agent')
+    // No handle line and not a served text: the user's (never rewritten unattended), and it names the other agent.
+    expect(seen.stdout).toContain(`WARN identity-line: the AgentChat block in ${claudeMd()} was edited by hand (no handle line, and not a text AgentChat served), so it is left as it is; it names @codex-agent, not @claude-agent`)
 
     const fixed = await run(['doctor', '--fix'])
     expect(fixed.stdout).toContain('repaired → @claude-agent')
@@ -638,9 +641,11 @@ describe('doctor', () => {
   it('refreshes an identity line from an older release', { timeout: 30_000 }, async () => {
     giveClaudeAnIdentity()
     await run([])
+    // An old wording no release served, with no handle line: the user's as far as anything unattended goes;
+    // doctor says so, and `doctor --fix` (the user asking) puts the served block back.
     fs.writeFileSync(claudeMd(), '<!-- agentchat:start -->\nYou are **@claude-agent** on AgentChat.\n<!-- agentchat:end -->\n')
     const seen = await run(['doctor'])
-    expect(seen.stdout).toContain('carries an older identity text')
+    expect(seen.stdout).toContain('was edited by hand (no handle line, and not a text AgentChat served), so it is left as it is — `npx -y @agentchatme/claude-code doctor --fix` puts the served block back')
     await run(['doctor', '--fix'])
     expect(fs.readFileSync(claudeMd(), 'utf-8')).toContain('I am @claude-agent on AgentChat')
   })
@@ -932,7 +937,7 @@ describe('a CLAUDE.md that cannot be read', () => {
     fs.writeFileSync(claudeMd(), NOT_UTF8)
 
     const status = (await run(['status'])).stdout
-    expect(status).toMatch(/✗ identity: cannot read .*not UTF-8/)
+    expect(status).toMatch(/Identity line: unreadable — .*not UTF-8/)
     expect(status).toContain('mcp:')
     expect(status).toContain('manual:')
 

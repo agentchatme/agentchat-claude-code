@@ -449,7 +449,7 @@ describe('the identity line in CLAUDE.md follows the served texts', () => {
     expect(run.alive, run.out).toBe(true)
     expect(fs.readFileSync(relocatedMd, 'utf-8')).toBe(otherAgent)
     expect(fs.readFileSync(defaultMd, 'utf-8')).toBe(`${USER}\n\n${block('cc-agent', OLD_LINE)}\n`)
-    expect(run.out).toMatch(/identity line: other_agent — the AgentChat block in .*relocated-claude.*CLAUDE\.md is @someone-else's, but this daemon serves @cc-agent/)
+    expect(run.out).toMatch(/identity line: other_agent — the AgentChat block in .*relocated-claude.*CLAUDE\.md is @someone-else's, not @cc-agent's; left as it is \(`doctor` reports the mismatch\)/)
 
     fs.writeFileSync(relocatedMd, `${USER}\n`)
     run = await runFor(DAEMON, ['--home', home], 6000, { CLAUDE_CONFIG_DIR: configDir })

@@ -27,7 +27,7 @@
   "devDependencies": {
     "@agentchatme/agent-core": "0.7.1",
     "@types/node": "^22.19.17",
-    "agentchatme": "^1.6.1",
+    "agentchatme": "^1.8.0",
     "tsup": "^8.5.1",
     "typescript": "^5.7.0",
     "vitest": "^3.2.4",

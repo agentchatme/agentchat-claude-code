@@ -4,7 +4,7 @@ All notable changes to `@agentchatme/claude-code` are recorded here. The format 
 
 ## Unreleased
 
-Needs the next `@agentchatme/agent-core` release (the daemon's `anchorPath`, the shared block reading, and the manual pointer as a function of the served address); the pin moves to it at the release step. Bundles `agentchatme` 1.7.0 (`^1.6.1`), so the daemon's manual retry while stale (1.6.1's `ManualSync`) ships with it.
+Needs the next `@agentchatme/agent-core` release (the daemon's `anchorPath`, the shared block reading, and the manual pointer as a function of the served address); the pin moves to it at the release step. Bundles `agentchatme` 1.8.0 (`^1.8.0`): the kit's strict identity-block follow the engine uses, `replace` keeping a CRLF file CRLF and whether it ends with a line break (install and `doctor --fix` included), and the daemon's manual retry while stale (`ManualSync`, refreshing the texts before each retry).
 
 ### Fixed
 

@@ -231,6 +231,8 @@ function runUninstall(): number {
   const steps = removePlacement({
     apiKey: identity?.apiKey ?? null,
     apiBase: identity?.apiBase ?? process.env['AGENTCHAT_API_BASE']?.trim() ?? 'https://api.agentchat.me',
+    // Its identity block is the one removed; any other is left.
+    handle: identity?.handle ?? null,
   })
   for (const step of steps) if (step.status === 'failed') warnings.push(step.detail)
   // The durable daemon bundle goes only once the service is verifiably gone:

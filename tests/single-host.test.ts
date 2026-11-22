@@ -7,7 +7,7 @@ import * as crypto from 'node:crypto'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { DEFAULT_RUN_PROFILE, MANUAL, manualVersion, PEER_RUN_WARNING, RUN_PROFILES } from '@agentchatme/agent-core'
+import { DEFAULT_RUN_PROFILE, MANUAL, manualVersion, PEER_RUN_WARNING, renderUnregisteredBlock, RUN_PROFILES } from '@agentchatme/agent-core'
 import * as engine from '@agentchatme/agent-core'
 import { VERSION } from '../src/version.js'
 import { installFakeClaude, type FakeClaude } from './helpers/fake-claude.js'
@@ -955,4 +955,46 @@ describe('a CLAUDE.md that cannot be read', () => {
     expect(uninstall.stdout).toMatch(/✗ identity: could not remove the AgentChat block from .*not UTF-8/)
     expect(fs.readFileSync(claudeMd()).equals(NOT_UTF8)).toBe(true)
   })
+})
+
+// ─── Removing AgentChat removes only what AgentChat placed for this agent ───
+describe('logout and uninstall remove only this agent\'s block', () => {
+  const USER = '# My notes\n\nAlways answer in English.'
+  const handEdited = ['<!-- agentchat:start -->', 'My rules for AgentChat (written by me): I am @claude-agent there; answer briefly.', '<!-- agentchat:end -->'].join('\n')
+  const otherAgent = BLOCK('codex-agent')
+  const KEPT = /left (your edited|@codex-agent's) AgentChat block in .*CLAUDE\.md.*; remove it by hand if you no longer want it/
+
+  for (const [how, argv] of [['logout', ['logout']], ['uninstall', ['uninstall']]] as const) {
+    it(`${how}: a block the user wrote, and another agent's, stay byte for byte, and the step says so`, { timeout: 60_000 }, async () => {
+      for (const block of [handEdited, otherAgent]) {
+        giveClaudeAnIdentity()
+        expect((await run([])).code).toBe(0)
+        const text = `${USER}\n\n${block}\n`
+        fs.writeFileSync(claudeMd(), text)
+        const out = await run([...argv])
+        expect(out.code, out.stdout + out.stderr).toBe(0)
+        expect(fs.readFileSync(claudeMd(), 'utf-8')).toBe(text)
+        expect(out.stdout + out.stderr).toMatch(KEPT)
+      }
+    })
+
+    it(`${how}: this agent's block goes, current or stale; the setup offer goes on uninstall`, { timeout: 60_000 }, async () => {
+      for (const line of [SERVED_LINE, (h: string) => `I am @${h} on AgentChat. A line served long ago.`]) {
+        giveClaudeAnIdentity()
+        expect((await run([])).code).toBe(0)
+        fs.writeFileSync(claudeMd(), `${USER}\n\n${BLOCK('claude-agent', line)}\n`)
+        expect((await run([...argv])).code).toBe(0)
+        const md = fs.readFileSync(claudeMd(), 'utf-8')
+        expect(md).not.toContain('@claude-agent')
+        expect(md.startsWith(USER)).toBe(true)
+        // logout puts the setup offer back where nothing is left; uninstall leaves no block.
+        expect(md.includes('agentchat:start')).toBe(how === 'logout')
+      }
+      if (how === 'uninstall') {
+        fs.writeFileSync(claudeMd(), `${USER}\n\n${renderUnregisteredBlock({ invoke: 'npx -y @agentchatme/claude-code', label: 'Claude Code' })}\n`)
+        expect((await run(['uninstall'])).code).toBe(0)
+        expect(fs.readFileSync(claudeMd(), 'utf-8')).toBe(`${USER}\n`)
+      }
+    })
+  }
 })

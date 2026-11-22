@@ -21,7 +21,7 @@ import {
   PEER_RUN_WARNING,
   resolveRunProfile,
   workdirExposesHome,
-  writeAnchor,
+  writeOfferAt,
   type DoctorCheck,
   type DoctorContext,
   type DoctorOpts,
@@ -410,7 +410,9 @@ export function runNotNow(): number {
   const home = identityHome()
   recordOfferDeclined(home)
   try {
-    writeAnchor(anchorFile(), renderDeclinedBlock({ invoke: invocation(), label: LABEL }))
+    // Never over a block that is not the offer: a block the user wrote stays.
+    const written = writeOfferAt(anchorFile(), renderDeclinedBlock({ invoke: invocation(), label: LABEL }))
+    if (written.action === 'kept') console.log(`Recorded; ${written.detail}`)
   } catch (err) {
     console.error(`Recorded, but could not update ${path.basename(anchorFile())}: ${String(err)}`)
     return 1

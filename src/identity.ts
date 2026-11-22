@@ -166,7 +166,8 @@ async function runtimeChecks(): Promise<DoctorCheck[]> {
 
 async function placementChecks(fix: boolean, texts: ServedIdentityTexts, manual: ServedManual | null): Promise<DoctorCheck[]> {
   const identity = currentPlacementIdentity(texts)
-  if (fix) await placeAll(identity, manual)
+  // doctor --fix: another agent's identity block is refused, not replaced.
+  if (fix) await placeAll(identity, manual, 'repair')
   const checks: DoctorCheck[] = checkPlacement(identity, manual)
     .filter((c) => c.name !== 'identity') // the shared doctor already reports the identity line
     .map((c) => ({

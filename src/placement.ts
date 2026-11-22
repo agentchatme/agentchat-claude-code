@@ -8,7 +8,7 @@ import {
   hostedMcpUrl,
   log,
   offerDeclined,
-  anchorIsCurrentAt,
+  placeAnchorAt,
   readCachedTexts,
   removeAnchorAt,
   renderAnchorBlock,
@@ -28,6 +28,7 @@ import {
   claudeHome,
   claudeUserStatePath,
   hostCopy,
+  invocation,
   identityHome,
   settingsPath,
   skillDir,
@@ -527,7 +528,7 @@ export function removeSkill(): PlacementStep {
 
 // ─── The identity line ──────────────────────────────────────────────────────
 
-export function placeIdentityLine(handle: string, identityLine: string | null): PlacementStep {
+export function placeIdentityLine(handle: string, identityLine: string | null, mode: 'setup' | 'repair' = 'setup', template: string | null = null): PlacementStep {
   if (identityLine === null) {
     // The line is the server's. Without it (offline, nothing cached) nothing is
     // written: `doctor --fix` places it once the texts can be fetched.
@@ -538,12 +539,25 @@ export function placeIdentityLine(handle: string, identityLine: string | null): 
     }
   }
   try {
-    // Current means exactly this block (handle line and served line) and no
-    // second AgentChat block. Anything else — an older shape, older words, a
-    // stale extra block — is rewritten: in place, atomically.
-    const current = anchorIsCurrentAt(anchorFile(), identityLine, handle)
-    if (!current) writeAnchor(anchorFile(), renderAnchorBlock(identityLine, handle), handle)
-    return { name: 'identity', status: current ? 'ok' : 'changed', detail: `identity line for @${handle} in ${anchorFile()}` }
+    // One policy for every integration (agent-core's `placeAnchorAt`, on the
+    // kit's `decide`): this agent's block is updated (or placed where there is
+    // none), in place and atomically; a block edited by hand, or several, is
+    // left with the remedy; another agent's is replaced at setup and said,
+    // refused by `doctor --fix`.
+    const placed = placeAnchorAt(anchorFile(), { handle, identityLine, template, mode, fix: `${invocation()} doctor --fix` })
+    switch (placed.outcome) {
+      case 'unchanged':
+        return { name: 'identity', status: 'ok', detail: `identity line for @${handle} in ${anchorFile()}` }
+      case 'placed':
+      case 'updated':
+        return { name: 'identity', status: 'changed', detail: `identity line for @${handle} in ${anchorFile()}` }
+      case 'replaced_other':
+        return { name: 'identity', status: 'changed', detail: placed.detail }
+      case 'failed':
+        return { name: 'identity', status: 'failed', detail: placed.detail }
+      default:
+        return { name: 'identity', status: 'warned', detail: placed.detail }
+    }
   } catch (err) {
     return { name: 'identity', status: 'failed', detail: `could not write the identity line to ${anchorFile()}: ${String(err)}` }
   }
@@ -700,14 +714,19 @@ export function removeAnswerRunLeftovers(): PlacementStep | null {
  * (null when none are in hand: an existing skill is kept, a missing one gets
  * the bundled copy).
  */
-export async function placeAll(identity: PlacementIdentity | null, manual: ServedManual | null): Promise<PlacementStep[]> {
+/**
+ * Every placement for an identity (or the setup offer without one). `identityMode`:
+ * `setup` for install, register, login and recover; `repair` for `doctor --fix`
+ * (another agent's identity block is refused, not replaced).
+ */
+export async function placeAll(identity: PlacementIdentity | null, manual: ServedManual | null, identityMode: 'setup' | 'repair' = 'setup'): Promise<PlacementStep[]> {
   const steps: PlacementStep[] = []
   const legacy = removeLegacyWiring()
   if (legacy) steps.push(legacy)
   steps.push(await placeSkill(manual, identity?.apiBase ?? null))
   if (identity) {
     steps.push(placeHostedMcp(identity))
-    steps.push(placeIdentityLine(identity.handle, identity.identityLine))
+    steps.push(placeIdentityLine(identity.handle, identity.identityLine, identityMode, identity.identityLineTemplate))
   } else {
     steps.push(placeOffer())
   }
@@ -725,7 +744,10 @@ export function unplaceIdentity(identity: UnplaceIdentity): PlacementStep[] {
   const steps = [removeHostedMcp(identity)]
   const leftovers = removeAnswerRunLeftovers()
   if (leftovers) steps.push(leftovers)
-  steps.push(placeOffer())
+  // A block logout left (not this agent's) also keeps the offer out; logout's
+  // own line already says what was left, so the offer step says nothing then.
+  const offer = placeOffer()
+  if (offer.status !== 'warned') steps.push(offer)
   return steps
 }
 

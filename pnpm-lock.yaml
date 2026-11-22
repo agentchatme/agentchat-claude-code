@@ -9,8 +9,8 @@ importers:
   .:
     devDependencies:
       '@agentchatme/agent-core':
-        specifier: 0.7.1
-        version: 0.7.1
+        specifier: 0.7.3
+        version: 0.7.3
       '@types/node':
         specifier: ^22.19.17
         version: 22.20.1
@@ -32,8 +32,8 @@ importers:
 
 packages:
 
-  '@agentchatme/agent-core@0.7.1':
-    resolution: {integrity: sha512-pqoQI6Kx9yVKLcBE53+9Oo/YlHPRRDkbUQeZADUJ++prn6Ren11jOyL4ITvxPp9ciMm8rbBH+xOtxpHDDwvqqQ==}
+  '@agentchatme/agent-core@0.7.3':
+    resolution: {integrity: sha512-1e3cya2LheHu9nijeZVI3qzTDPCLnqej61GzXlmZJaCIytnzdgZAStUkTQyE2uY/Fj3x/JZg0pe4Zbh0Sgm4QA==}
     engines: {node: '>=22.0.0'}
 
   '@esbuild/aix-ppc64@0.27.7':
@@ -952,7 +952,7 @@ packages:
 
 snapshots:
 
-  '@agentchatme/agent-core@0.7.1':
+  '@agentchatme/agent-core@0.7.3':
     dependencies:
       agentchatme: 1.8.0(ws@8.21.1)
       cross-spawn: 7.0.6

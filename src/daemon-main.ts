@@ -2,7 +2,7 @@ import { parseArgs } from 'node:util'
 import * as path from 'node:path'
 import { log, resolveRunProfile } from '@agentchatme/agent-core'
 import { runIntegration, type RunnerFactory, type RunnerIdentity } from '@agentchatme/agent-core/daemon'
-import { CLIENT, claudeConfigOverride, identityHome, LABEL, resolveRunWorkdir, skillPath } from './host.js'
+import { anchorFile, CLIENT, claudeConfigOverride, identityHome, LABEL, resolveRunWorkdir, skillPath } from './host.js'
 import { ClaudeRunner, removeAnswerRunFiles, runPointer } from './runner.js'
 
 // ─── The integration daemon binary ──────────────────────────────────────────
@@ -25,9 +25,14 @@ import { ClaudeRunner, removeAnswerRunFiles, runPointer } from './runner.js'
 // `mcp__agentchat__agentchat_inbox` for a user-scope server named
 // `agentchat`; code.claude.com/docs/en/mcp.md: `mcp__<server>__<tool>`),
 // then one pointer to the skill — the one line only this package knows — in
-// the profiles whose runs can open it (`runPointer`). The skill file follows
-// the manual the same texts announce (`manualPath`): the daemon downloads a new
-// version when one is announced, on the texts' cadence.
+// the profiles whose runs can open it (`runPointer`), naming the manual's
+// address as the texts in hand announce it. Two placements follow the same
+// texts from then on: the skill file follows the manual they announce
+// (`manualPath`: synced at daemon start and whenever the texts change, and
+// retried while it is not the announced version), and this agent's identity
+// block in CLAUDE.md follows the served identity line (`anchorPath`: only
+// this agent's own block, under the engine's rules; none is created, and one
+// edited by hand or another agent's is left as it is).
 //
 // The runner is built per identity (a `RunnerFactory`): an answer run's own
 // AgentChat-only tool config points at the API base of the agent the daemon
@@ -81,6 +86,7 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
     client: CLIENT,
     manualPointer: runPointer(profile, skillPath()),
     manualPath: skillPath(),
+    anchorPath: anchorFile(),
   })
 }
 

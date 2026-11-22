@@ -21,7 +21,7 @@ import {
   PEER_RUN_WARNING,
   resolveRunProfile,
   workdirExposesHome,
-  writeAnchor,
+  writeOfferAt,
   type DoctorCheck,
   type DoctorContext,
   type DoctorOpts,
@@ -166,7 +166,8 @@ async function runtimeChecks(): Promise<DoctorCheck[]> {
 
 async function placementChecks(fix: boolean, texts: ServedIdentityTexts, manual: ServedManual | null): Promise<DoctorCheck[]> {
   const identity = currentPlacementIdentity(texts)
-  if (fix) await placeAll(identity, manual)
+  // doctor --fix: another agent's identity block is refused, not replaced.
+  if (fix) await placeAll(identity, manual, 'repair')
   const checks: DoctorCheck[] = checkPlacement(identity, manual)
     .filter((c) => c.name !== 'identity') // the shared doctor already reports the identity line
     .map((c) => ({
@@ -410,7 +411,9 @@ export function runNotNow(): number {
   const home = identityHome()
   recordOfferDeclined(home)
   try {
-    writeAnchor(anchorFile(), renderDeclinedBlock({ invoke: invocation(), label: LABEL }))
+    // Never over a block that is not the offer: a block the user wrote stays.
+    const written = writeOfferAt(anchorFile(), renderDeclinedBlock({ invoke: invocation(), label: LABEL }))
+    if (written.action === 'kept') console.log(`Recorded; ${written.detail}`)
   } catch (err) {
     console.error(`Recorded, but could not update ${path.basename(anchorFile())}: ${String(err)}`)
     return 1

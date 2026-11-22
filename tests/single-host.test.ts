@@ -7,7 +7,7 @@ import * as crypto from 'node:crypto'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { DEFAULT_RUN_PROFILE, MANUAL, manualVersion, PEER_RUN_WARNING, RUN_PROFILES } from '@agentchatme/agent-core'
+import { DEFAULT_RUN_PROFILE, MANUAL, manualVersion, PEER_RUN_WARNING, renderUnregisteredBlock, RUN_PROFILES } from '@agentchatme/agent-core'
 import * as engine from '@agentchatme/agent-core'
 import { VERSION } from '../src/version.js'
 import { installFakeClaude, type FakeClaude } from './helpers/fake-claude.js'
@@ -246,8 +246,10 @@ describe('a CLAUDE.md written by the previous release', () => {
       fs.writeFileSync(claudeMd(), writtenByPreviousRelease(line))
 
       const status = await run(['status'])
-      expect(status.stdout).toContain(`– identity: ${claudeMd()} carries an older identity text`)
-      expect(status.stdout).not.toContain('identity line missing')
+      // One verdict for the block: the status header, in the daemon's terms.
+      expect(status.stdout).toContain(`Identity line: ${claudeMd()} carries an older identity text for @claude-agent — repair with`)
+      expect(status.stdout).not.toContain('no identity line')
+      expect(status.stdout).not.toMatch(/ identity: /)
       const doctor = await run(['doctor'])
       expect(doctor.stdout).toContain(`${claudeMd()} carries an older identity text for @claude-agent`)
       expect(doctor.stdout).not.toContain('no identity line in')
@@ -258,7 +260,7 @@ describe('a CLAUDE.md written by the previous release', () => {
       expect(fixed.stdout).toContain('repaired → @claude-agent')
       expect(fs.readFileSync(claudeMd(), 'utf-8')).toBe(refreshed(line))
 
-      expect((await run(['status'])).stdout).toContain(`✓ identity: identity line for @claude-agent in ${claudeMd()}`)
+      expect((await run(['status'])).stdout).toContain(`Identity line: current (${claudeMd()})`)
       expect((await run(['doctor'])).stdout).toContain(`PASS identity-line: @claude-agent in ${claudeMd()}`)
     })
 
@@ -278,11 +280,14 @@ describe('a CLAUDE.md written by the previous release', () => {
     })
   }
 
-  it('a stale second AgentChat block is removed; the first is replaced where it stands', { timeout: 30_000 }, async () => {
+  it('two AgentChat blocks are left whole, with a warning: which are this agent\'s is not certain', { timeout: 30_000 }, async () => {
     giveClaudeAnIdentity()
-    fs.writeFileSync(claudeMd(), `${BEFORE}${PREVIOUS_RELEASE_BLOCK('claude-agent')}\n\n${AFTER}\n${PREVIOUS_RELEASE_BLOCK('claude-agent')}\n`)
-    expect((await run([])).code).toBe(0)
-    expect(fs.readFileSync(claudeMd(), 'utf-8')).toBe(refreshed(SERVED_LINE))
+    const two = `${BEFORE}${PREVIOUS_RELEASE_BLOCK('claude-agent')}\n\n${AFTER}\n${PREVIOUS_RELEASE_BLOCK('claude-agent')}\n`
+    fs.writeFileSync(claudeMd(), two)
+    const out = await run([])
+    expect(out.code).toBe(0)
+    expect(fs.readFileSync(claudeMd(), 'utf-8')).toBe(two)
+    expect(out.stdout).toContain('holds more than one AgentChat block, so they are left; to have the served line, delete them, then run')
   })
 })
 
@@ -624,23 +629,35 @@ describe('doctor', () => {
     fs.writeFileSync(claudeMd(), '<!-- agentchat:start -->\nI am @codex-agent on AgentChat (api.agentchat.me).\n<!-- agentchat:end -->\n')
     const before = snapshot(codexDir())
 
+    const corrupted = '<!-- agentchat:start -->\nI am @codex-agent on AgentChat (api.agentchat.me).\n<!-- agentchat:end -->\n'
     const seen = await run(['doctor'])
-    expect(seen.stdout).toContain('says @codex-agent but this agent is @claude-agent')
-
-    const fixed = await run(['doctor', '--fix'])
-    expect(fixed.stdout).toContain('repaired → @claude-agent')
+    // No handle line and not a served text: not plainly AgentChat's, so it is the person's to delete; it names the other agent.
+    expect(seen.stdout).toContain(
+      `WARN identity-line: the AgentChat block in ${claudeMd()} was edited by hand (no handle line, and not a text AgentChat served), so it is left (it names @codex-agent, not @claude-agent); to have the served line, delete that block, then run \`npx -y @agentchatme/claude-code doctor --fix\``,
+    )
+    // doctor --fix writes nothing over it.
+    await run(['doctor', '--fix'])
+    expect(fs.readFileSync(claudeMd(), 'utf-8')).toBe(corrupted)
+    // Deleted by the person: the next --fix places this agent's line.
+    fs.writeFileSync(claudeMd(), '')
+    expect((await run(['doctor', '--fix'])).stdout).toContain('repaired → @claude-agent')
     const md = fs.readFileSync(claudeMd(), 'utf-8')
     expect(md).toContain('I am @claude-agent on AgentChat')
     expect(md).not.toContain('@codex-agent')
     expect(snapshot(codexDir())).toEqual(before)
   })
 
-  it('refreshes an identity line from an older release', { timeout: 30_000 }, async () => {
+  it('an identity line in an older release\'s own words is left to the person; deleted, doctor --fix places the served one', { timeout: 30_000 }, async () => {
     giveClaudeAnIdentity()
     await run([])
+    // An old wording no release served, with no handle line: the user's as far as anything unattended goes;
+    // doctor says so, and `doctor --fix` leaves it until the person deletes it.
     fs.writeFileSync(claudeMd(), '<!-- agentchat:start -->\nYou are **@claude-agent** on AgentChat.\n<!-- agentchat:end -->\n')
     const seen = await run(['doctor'])
-    expect(seen.stdout).toContain('carries an older identity text')
+    expect(seen.stdout).toContain('was edited by hand (no handle line, and not a text AgentChat served), so it is left; to have the served line, delete that block, then run `npx -y @agentchatme/claude-code doctor --fix`')
+    await run(['doctor', '--fix'])
+    expect(fs.readFileSync(claudeMd(), 'utf-8')).toContain('You are **@claude-agent** on AgentChat.')
+    fs.writeFileSync(claudeMd(), '')
     await run(['doctor', '--fix'])
     expect(fs.readFileSync(claudeMd(), 'utf-8')).toContain('I am @claude-agent on AgentChat')
   })
@@ -932,7 +949,7 @@ describe('a CLAUDE.md that cannot be read', () => {
     fs.writeFileSync(claudeMd(), NOT_UTF8)
 
     const status = (await run(['status'])).stdout
-    expect(status).toMatch(/✗ identity: cannot read .*not UTF-8/)
+    expect(status).toMatch(/Identity line: unreadable — .*not UTF-8/)
     expect(status).toContain('mcp:')
     expect(status).toContain('manual:')
 
@@ -950,4 +967,46 @@ describe('a CLAUDE.md that cannot be read', () => {
     expect(uninstall.stdout).toMatch(/✗ identity: could not remove the AgentChat block from .*not UTF-8/)
     expect(fs.readFileSync(claudeMd()).equals(NOT_UTF8)).toBe(true)
   })
+})
+
+// ─── Removing AgentChat removes only what AgentChat placed for this agent ───
+describe('logout and uninstall remove only this agent\'s block', () => {
+  const USER = '# My notes\n\nAlways answer in English.'
+  const handEdited = ['<!-- agentchat:start -->', 'My rules for AgentChat (written by me): I am @claude-agent there; answer briefly.', '<!-- agentchat:end -->'].join('\n')
+  const otherAgent = BLOCK('codex-agent')
+  const KEPT = /left (your edited|@codex-agent's) AgentChat block in .*CLAUDE\.md.*; remove it by hand if you no longer want it/
+
+  for (const [how, argv] of [['logout', ['logout']], ['uninstall', ['uninstall']]] as const) {
+    it(`${how}: a block the user wrote, and another agent's, stay byte for byte, and the step says so`, { timeout: 60_000 }, async () => {
+      for (const block of [handEdited, otherAgent]) {
+        giveClaudeAnIdentity()
+        expect((await run([])).code).toBe(0)
+        const text = `${USER}\n\n${block}\n`
+        fs.writeFileSync(claudeMd(), text)
+        const out = await run([...argv])
+        expect(out.code, out.stdout + out.stderr).toBe(0)
+        expect(fs.readFileSync(claudeMd(), 'utf-8')).toBe(text)
+        expect(out.stdout + out.stderr).toMatch(KEPT)
+      }
+    })
+
+    it(`${how}: this agent's block goes, current or stale; the setup offer goes on uninstall`, { timeout: 60_000 }, async () => {
+      for (const line of [SERVED_LINE, (h: string) => `I am @${h} on AgentChat. A line served long ago.`]) {
+        giveClaudeAnIdentity()
+        expect((await run([])).code).toBe(0)
+        fs.writeFileSync(claudeMd(), `${USER}\n\n${BLOCK('claude-agent', line)}\n`)
+        expect((await run([...argv])).code).toBe(0)
+        const md = fs.readFileSync(claudeMd(), 'utf-8')
+        expect(md).not.toContain('@claude-agent')
+        expect(md.startsWith(USER)).toBe(true)
+        // logout puts the setup offer back where nothing is left; uninstall leaves no block.
+        expect(md.includes('agentchat:start')).toBe(how === 'logout')
+      }
+      if (how === 'uninstall') {
+        fs.writeFileSync(claudeMd(), `${USER}\n\n${renderUnregisteredBlock({ invoke: 'npx -y @agentchatme/claude-code', label: 'Claude Code' })}\n`)
+        expect((await run(['uninstall'])).code).toBe(0)
+        expect(fs.readFileSync(claudeMd(), 'utf-8')).toBe(`${USER}\n`)
+      }
+    })
+  }
 })

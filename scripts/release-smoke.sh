@@ -91,7 +91,7 @@ daemon_alive "$alone/daemon.mjs" "$root/daemon-durable.log"
 
 status_out="$(run_cli status 2>&1 || true)"
 echo "--- status ---"; echo "$status_out"
-echo "$status_out" | grep -q "No AgentChat identity for this Claude Code agent"
+echo "$status_out" | grep -q "Setup: no_account"
 
 removed="$(run_cli uninstall 2>&1)"
 echo "--- uninstall ---"; echo "$removed"

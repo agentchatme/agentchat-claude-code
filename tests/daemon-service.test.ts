@@ -397,6 +397,24 @@ describe.skipIf(!serviceOs)('switched off on purpose: stopped is reported before
     expect(unanswered.out).toMatch(/– listener: could not tell AgentChat it stopped \(.+\); AgentChat shows it as offline instead/)
     expect(fs.existsSync(definitionPath('agentchatd-claude-code'))).toBe(false)
   })
+
+  it('an exported key the home does not hold is not this listener\'s agent: nothing is sent for it', async () => {
+    const definition = definitionPath('agentchatd-claude-code')
+    const server = await listenerServer(definition)
+    try {
+      await run(CLI, ['daemon', 'install'])
+      const home = path.join(sandbox, '.claude', 'agentchat')
+      fs.mkdirSync(home, { recursive: true })
+      fs.writeFileSync(path.join(home, 'listener-id'), 'cc_listener_0000000000\n')
+      const off = await run(CLI, ['daemon', 'disable'], { AGENTCHAT_API_KEY: 'ac_live_' + 'e'.repeat(40), AGENTCHAT_API_BASE: server.url })
+      expect(off.code).toBe(0)
+      expect(server.reports).toHaveLength(0)
+      expect(off.out).not.toContain('listener:')
+      expect(fs.existsSync(definition)).toBe(false)
+    } finally {
+      await server.close()
+    }
+  })
 })
 
 // ─── Runs work BESIDE the identity home, never inside it ────────────────────

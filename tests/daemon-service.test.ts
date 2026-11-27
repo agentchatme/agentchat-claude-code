@@ -314,6 +314,91 @@ describe.skipIf(!serviceOs)('daemon install captures the switches into the servi
   })
 })
 
+// ─── Switched off on purpose: AgentChat is told, before the service goes ─────
+//
+// The listener report (contract v1 §3.13): `uninstall` and `daemon disable`
+// say `stopped` under this home's listener id while the key and the service
+// are still there, so the agent reads as switched off, not as a computer that
+// is off. A loopback server stands in for AgentChat and notes, as each report
+// arrives, whether the service definition still exists.
+
+interface StopReport {
+  readonly body: unknown
+  readonly definitionThere: boolean
+}
+
+async function listenerServer(definition: string): Promise<{ url: string; reports: StopReport[]; close: () => Promise<void> }> {
+  const http = await import('node:http')
+  const reports: StopReport[] = []
+  const server = http.createServer((req, res) => {
+    let raw = ''
+    req.on('data', (chunk: Buffer) => (raw += chunk.toString('utf-8')))
+    req.on('end', () => {
+      res.setHeader('content-type', 'application/json')
+      if (req.method !== 'PUT' || req.url !== '/v1/agents/me/listener') {
+        res.statusCode = 404
+        res.end('{}')
+        return
+      }
+      reports.push({ body: JSON.parse(raw) as unknown, definitionThere: fs.existsSync(definition) })
+      const at = new Date().toISOString()
+      res.end(JSON.stringify({ listener: { ...(JSON.parse(raw) as object), reason_kind: null, state_since: at, reported_at: at } }))
+    })
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+  const address = server.address()
+  if (address === null || typeof address === 'string') throw new Error('no address')
+  return { url: `http://127.0.0.1:${address.port}`, reports, close: () => new Promise<void>((resolve) => server.close(() => resolve())) }
+}
+
+describe.skipIf(!serviceOs)('switched off on purpose: stopped is reported before the service goes', () => {
+  const LISTENER_ID = 'cc_listener_0000000000'
+  const signedIn = (apiBase: string, withListener: boolean): void => {
+    const home = path.join(sandbox, '.claude', 'agentchat')
+    fs.mkdirSync(home, { recursive: true })
+    fs.writeFileSync(path.join(home, 'credentials'), JSON.stringify({ api_key: 'ac_live_' + 'a'.repeat(40), handle: 'cc-agent', api_base: apiBase }))
+    if (withListener) fs.writeFileSync(path.join(home, 'listener-id'), `${LISTENER_ID}\n`)
+  }
+
+  it.each([[['uninstall']], [['daemon', 'disable']], [['daemon', 'uninstall']]])('%j: one stopped report under the home\'s listener id while the service is still there, then the service goes', async (args) => {
+    const definition = definitionPath('agentchatd-claude-code')
+    const server = await listenerServer(definition)
+    try {
+      expect((await run(CLI, ['daemon', 'install'])).code).toBe(0)
+      expect(fs.existsSync(definition)).toBe(true)
+      signedIn(server.url, true)
+      const { out } = await run(CLI, args)
+      expect(server.reports).toEqual([{ body: { instance_id: LISTENER_ID, state: 'stopped' }, definitionThere: true }])
+      expect(fs.existsSync(definition)).toBe(false)
+      expect(out).toContain('✓ listener: AgentChat was told it stopped on purpose')
+    } finally {
+      await server.close()
+    }
+  })
+
+  it('no listener of this home ever reported (no id): nothing is sent, nothing is said; AgentChat not answering never fails the command', async () => {
+    const definition = definitionPath('agentchatd-claude-code')
+    const server = await listenerServer(definition)
+    try {
+      await run(CLI, ['daemon', 'install'])
+      signedIn(server.url, false)
+      const quiet = await run(CLI, ['daemon', 'disable'])
+      expect(quiet.code).toBe(0)
+      expect(server.reports).toHaveLength(0)
+      expect(quiet.out).not.toContain('listener:')
+    } finally {
+      await server.close()
+    }
+    // Nothing listens there now: the command says so and still succeeds.
+    await run(CLI, ['daemon', 'install'])
+    signedIn(server.url, true)
+    const unanswered = await run(CLI, ['daemon', 'disable'])
+    expect(unanswered.code).toBe(0)
+    expect(unanswered.out).toMatch(/– listener: could not tell AgentChat it stopped \(.+\); AgentChat shows it as offline instead/)
+    expect(fs.existsSync(definitionPath('agentchatd-claude-code'))).toBe(false)
+  })
+})
+
 // ─── Runs work BESIDE the identity home, never inside it ────────────────────
 //
 // Every run's file tools are denied the identity home. The default workdir

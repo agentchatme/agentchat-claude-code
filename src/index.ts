@@ -5,9 +5,11 @@ import {
   clearAlwaysOnWanted,
   clearAlwaysOnOptOut,
   clearIntegrationStatus,
+  describeListenerStopped,
   formatIntegrationStatus,
   markAlwaysOnOptOut,
   readIntegrationStatus,
+  reportListenerStopped,
   resolveRunProfile,
   PEER_RUN_WARNING,
   serviceStatus,
@@ -17,7 +19,7 @@ import {
   INTEGRATION_ENV_LEGACY,
   INTEGRATION_ENV_LEGACY_REMOVAL,
 } from '@agentchatme/agent-core'
-import { identityHome, invocation, serviceLabel, LABEL } from './host.js'
+import { CLIENT, identityHome, invocation, serviceLabel, LABEL } from './host.js'
 import { formatPlacement, placeAll, removePlacement } from './placement.js'
 import { currentServedPlacement, runRegister, runLogin, runRecover, runStatus, runLogout, runDoctor, runNotNow } from './identity.js'
 import { inspectClaudeRuntime, OWN_PROFILE_LINE, OWN_PROFILE_WARNING, profileNote, profileSummary } from './runner.js'
@@ -211,9 +213,22 @@ async function runInstall(): Promise<number> {
   return failed || skipped || service === 'failed' ? 1 : 0
 }
 
-function runUninstall(): number {
+/**
+ * Before the service goes, while the key is still here: AgentChat is told
+ * this listener stops on purpose (contract v1 §3.13), so the agent reads as
+ * switched off, not as a computer that is off. One bounded attempt; it never
+ * fails the command. The line to print, or null when there was nothing to tell.
+ */
+async function tellListenerStopped(home: string): Promise<string | null> {
+  const result = await reportListenerStopped({ home, client: CLIENT, identity: homeIdentity(home) })
+  const line = describeListenerStopped(result)
+  return line === null ? null : `  ${result.outcome === 'reported' ? '✓' : '–'} ${line}`
+}
+
+async function runUninstall(): Promise<number> {
   const home = identityHome()
   const warnings: string[] = []
+  const stopped = await tellListenerStopped(home)
   let serviceRemoved = true
   try {
     removeListenerService()
@@ -257,6 +272,7 @@ function runUninstall(): number {
       serviceRemoved
         ? `  ✓ service: integration daemon removed`
         : '  ✗ service: the durable daemon bundle was preserved because the service could not be verified as stopped',
+      ...(stopped !== null ? [stopped] : []),
       '',
       `Your AgentChat identity file was preserved (${home}). Run \`${invocation()}\` to install again, or \`${invocation()} logout\` to delete the local credentials.`,
     ].join('\n'),
@@ -265,7 +281,7 @@ function runUninstall(): number {
   return warnings.length > 0 ? 1 : 0
 }
 
-function runDaemonCmd(sub: string | undefined): number {
+async function runDaemonCmd(sub: string | undefined): Promise<number> {
   const home = identityHome()
   switch (sub) {
     case 'install':
@@ -283,6 +299,7 @@ function runDaemonCmd(sub: string | undefined): number {
     }
     case 'disable':
     case 'uninstall': {
+      const stopped = await tellListenerStopped(home)
       try {
         removeListenerService()
       } catch (err) {
@@ -291,7 +308,9 @@ function runDaemonCmd(sub: string | undefined): number {
       }
       clearAlwaysOnWanted(home)
       markAlwaysOnOptOut(home)
-      console.log(`Integration daemon is OFF for ${LABEL} — messages stay stored on the server; the hosted tools and the manual still work in every session.`)
+      console.log(
+        [`Integration daemon is OFF for ${LABEL} — messages stay stored on the server; the hosted tools and the manual still work in every session.`, ...(stopped !== null ? [stopped] : [])].join('\n'),
+      )
       return 0
     }
     case 'status': {

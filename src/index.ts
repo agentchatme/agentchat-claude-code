@@ -20,7 +20,7 @@ import {
 } from '@agentchatme/agent-core'
 import { identityHome, invocation, serviceLabel, LABEL } from './host.js'
 import { formatPlacement, placeAll, placementProblemOf, removePlacement } from './placement.js'
-import { confirmSetup, currentServedPlacement, listenerEnsureOf, runRegister, runLogin, runRecover, runStatus, runLogout, runDoctor, runNotNow } from './identity.js'
+import { confirmSetup, currentServedPlacement, listenerEnsureOf, reportSetup, runRegister, runLogin, runRecover, runStatus, runLogout, runDoctor, runNotNow } from './identity.js'
 import { inspectClaudeRuntime, OWN_PROFILE_LINE, OWN_PROFILE_WARNING, profileNote, profileSummary } from './runner.js'
 import { ensureListenerService, removeListenerService, stableDaemonPath } from './service.js'
 import { claudeConfigOverride } from './host.js'
@@ -170,6 +170,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
  * or a bounded wait; without one, how to get one.
  */
 async function runInstall(): Promise<number> {
+  const startedAt = Date.now()
   const runtime = await inspectClaudeRuntime(claudeConfigOverride())
   if (!runtime.ok) {
     console.log(`${LABEL}: not installed — ${runtime.detail}`)
@@ -204,7 +205,10 @@ async function runInstall(): Promise<number> {
     ].join('\n'),
   )
   await confirmSetup({ ensure: ensured === null ? null : listenerEnsureOf(ensured), tools, replacedPid })
-  return failed || skipped || ensured?.outcome === 'failed' ? 1 : 0
+  const code = failed || skipped || ensured?.outcome === 'failed' ? 1 : 0
+  // What install said, to AgentChat (one bounded, silent request; AGENTCHAT_TELEMETRY=off sends nothing).
+  await reportSetup({ command: 'install', exitCode: code, startedAt })
+  return code
 }
 
 function runUninstall(): number {

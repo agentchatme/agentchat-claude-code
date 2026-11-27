@@ -12,6 +12,12 @@ The version number is set at the release step (`VERSIONING.md`). Needs the agent
 - **Every command says what is left.** `status` prints the verdict first and as `.setup` in `--json`; install ends with it instead of a checklist for a person ("Open a new Claude Code session … Ask Claude Code: …"). It says whether setup is done, the exact command to run next, or the one thing to ask the person you work with (the emailed code, signing Claude Code in, turning the listener back on).
 - **A user-scope `agentchat` MCP server this integration did not write** is said as `tools_missing`, with what to ask the person before anything touches their entry (`claude mcp remove --scope user agentchat`, then `doctor --fix`); no listener is registered over it, since its runs would have no AgentChat tools.
 
+- **What this install says about itself.**
+  - Every request, the daemon's socket included, names Claude Code's version, a random install id (owner-only `install-id` in the identity home, kept through logout) and `npx` when it runs from npm's exec cache.
+  - Every command that prints a `Setup:` line sends one `setup_verdict` event: the state and reason, the command, whether the next step is yours, the exit code and the duration. No key in the body, no email, handle, path or text.
+  - `AGENTCHAT_TELEMETRY=off` turns both off (see "What it tells AgentChat about this install").
+- `doctor` ends with the setup verdict; the hosted-tools probe is now one of its checks.
+
 ### Changed
 
 - Install, `login`, `register`, `recover` and `doctor --fix` never replace a listener service that a newer release registered (an older `npx` cache could downgrade it); `daemon install` still installs this release, so a deliberate rollback stays possible.

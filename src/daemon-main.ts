@@ -1,6 +1,6 @@
 import { parseArgs } from 'node:util'
 import * as path from 'node:path'
-import { log, resolveRunProfile } from '@agentchatme/agent-core'
+import { log, resolveRunProfile, ensureInstallId, readRememberedHost, telemetryOff, type IntegrationClient } from '@agentchatme/agent-core'
 import { runIntegration, type RunnerFactory, type RunnerIdentity } from '@agentchatme/agent-core/daemon'
 import { anchorFile, CLIENT, claudeConfigOverride, identityHome, LABEL, resolveRunWorkdir, skillPath } from './host.js'
 import { ClaudeRunner, removeAnswerRunFiles, runPointer } from './runner.js'
@@ -41,6 +41,21 @@ import { ClaudeRunner, removeAnswerRunFiles, runPointer } from './runner.js'
 // run's tool config holds a key; an answer or own run's identity line): this daemon holds the home's lock, and no run of
 // the new runner has started yet; one of the previous runner's that is still
 // stopping already read its files.
+
+/**
+ * What the daemon names itself with on every request and on the socket's
+ * hello: this integration, the home's install id (none under
+ * AGENTCHAT_TELEMETRY=off) and the runtime's version as a command last read
+ * it (`readRememberedHost`: the daemon does not run `--version` before it
+ * starts). The service runs a copy in the identity home, so no install
+ * method is known here.
+ */
+function daemonClient(home: string): IntegrationClient {
+  const installId = telemetryOff() ? null : ensureInstallId(home)
+  const host = readRememberedHost(home)
+  const { installMethod: _method, ...client } = CLIENT
+  return { ...client, ...(installId !== null ? { installId } : {}), ...(host !== null ? { host } : {}) }
+}
 
 async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   let values: { home?: string | undefined; workdir?: string | undefined }
@@ -83,7 +98,7 @@ async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
     workdir,
     profile,
     runner,
-    client: CLIENT,
+    client: daemonClient(home),
     manualPointer: runPointer(profile, skillPath()),
     manualPath: skillPath(),
     anchorPath: anchorFile(),

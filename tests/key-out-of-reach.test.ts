@@ -284,7 +284,7 @@ describe('another agent’s key exported in the shell', () => {
     signIn()
     const out = await run([], { AGENTCHAT_API_KEY: OTHER })
     expect(out.code, out.stdout + out.stderr).toBe(0)
-    expect(out.stdout).toContain('Connected as @claude-agent')
+    expect(out.stdout).toMatch(/^Setup: /m)
     expect(userStateText()).not.toContain(OTHER)
     expect(runHelper()).toEqual({ Authorization: `Bearer ${KEY}` })
   })

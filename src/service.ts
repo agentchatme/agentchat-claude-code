@@ -19,6 +19,7 @@ import {
   readAlwaysOnInstalledVersion,
   markAlwaysOnInstalledVersion,
   clearAlwaysOnInstalledVersion,
+  newerRelease,
 } from '@agentchatme/agent-core'
 import { identityHome, serviceEnv, serviceLabel, supersededServiceLabels } from './host.js'
 import { VERSION } from './version.js'
@@ -49,6 +50,12 @@ export function copyDaemonBundle(): string {
 
 export interface EnsureResult {
   ok: boolean
+  /**
+   * installed: registered now; current: already registered (this release, or
+   * a newer one left as it is); opted_out: the person switched it off, nothing
+   * done; failed: could not be registered (`detail` says why).
+   */
+  outcome: 'installed' | 'current' | 'opted_out' | 'failed'
   detail?: string
 }
 
@@ -60,43 +67,45 @@ function serviceOpts() {
  * Register the listener service: the resident daemon that holds the socket and
  * starts a headless run on each wake. Idempotent, best-effort,
  * credential-free. Never throws — it must not fail whatever called it.
+ *
+ * Install, `login`, `register`, `recover` and `doctor --fix` call it without
+ * `force`: it never replaces a service a NEWER release registered (an older
+ * `npx` cache running `login` must not downgrade it). An explicit
+ * `daemon install` (`force`) installs this release whatever is there, so a
+ * deliberate rollback stays possible.
  */
 export function ensureListenerService(opts: { force?: boolean } = {}): EnsureResult {
   const home = identityHome()
   // A deliberate `daemon disable` outranks any implicit re-registration. Only
   // an explicit `daemon install` clears it.
-  if (!opts.force && alwaysOnOptedOut(home)) return { ok: false, detail: 'switched off by the user' }
+  if (!opts.force && alwaysOnOptedOut(home)) return { ok: false, outcome: 'opted_out', detail: 'switched off by the user' }
   try {
     const service = serviceOpts()
-    if (
-      !opts.force &&
-      alwaysOnWanted(home) &&
-      readAlwaysOnInstalledVersion(home) === VERSION &&
-      fs.existsSync(service.entry) &&
-      serviceDefinitionCurrent(service)
-    ) {
-      return { ok: true }
+    if (!opts.force && alwaysOnWanted(home) && fs.existsSync(service.entry)) {
+      const installed = readAlwaysOnInstalledVersion(home)
+      if (installed !== null && newerRelease(installed, VERSION)) {
+        return { ok: true, outcome: 'current', detail: `${serviceLabel()}; a newer release (${installed}) registered it, left as it is` }
+      }
+      if (installed === VERSION && serviceDefinitionCurrent(service)) return { ok: true, outcome: 'current', detail: serviceLabel() }
     }
     const entry = copyDaemonBundle()
     installService({ ...service, entry })
     markAlwaysOnInstalledVersion(home, VERSION)
     markAlwaysOnWanted(home)
-    return { ok: true }
+    return { ok: true, outcome: 'installed', detail: serviceLabel() }
   } catch (err) {
-    return { ok: false, detail: String(err instanceof Error ? err.message : err) }
+    return { ok: false, outcome: 'failed', detail: String(err instanceof Error ? err.message : err) }
   }
 }
 
-/** Is the installed service current (definition, durable bundle, version marker)? */
+/** Is the installed service current (definition, durable bundle, version marker)? One a newer release registered counts: it is left as it is. */
 export function listenerServiceCurrent(): boolean {
   const home = identityHome()
   const service = serviceOpts()
-  return (
-    alwaysOnWanted(home) &&
-    fs.existsSync(service.entry) &&
-    readAlwaysOnInstalledVersion(home) === VERSION &&
-    serviceDefinitionCurrent(service)
-  )
+  if (!alwaysOnWanted(home) || !fs.existsSync(service.entry)) return false
+  const installed = readAlwaysOnInstalledVersion(home)
+  if (installed !== null && newerRelease(installed, VERSION)) return true
+  return installed === VERSION && serviceDefinitionCurrent(service)
 }
 
 /**

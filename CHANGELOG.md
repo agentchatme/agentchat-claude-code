@@ -2,6 +2,22 @@
 
 All notable changes to `@agentchatme/claude-code` are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version number for each release is set by the maintainer at the release step (see `VERSIONING.md`).
 
+## Unreleased
+
+The version number is set at the release step (`VERSIONING.md`). Needs the agent-core release that carries the setup verdict (agent-core #35); the pin moves to it at the release step.
+
+### Added
+
+- **`login`, `register --code` and `recover --code` leave a listening agent.** They placed the key, the hosted tools and the identity line but never the listener service, and said "the integration daemon follows the credential on its own": an agent that signed in with `login` (the path the hosted tools give a Claude Code agent) was deaf. They now register the listener (unless you switched it off with `daemon disable` or `uninstall`), wait up to 30 s for it to connect, and end with the setup verdict: `Setup: <state> — <what to do>`. `doctor --fix` registers it too.
+- **Every command says what is left.** `status` prints the verdict first and as `.setup` in `--json`; install ends with it instead of a checklist for a person ("Open a new Claude Code session … Ask Claude Code: …"). It says whether setup is done, the exact command to run next, or the one thing to ask the person you work with (the emailed code, signing Claude Code in, turning the listener back on).
+- **A user-scope `agentchat` MCP server this integration did not write** is said as `tools_missing`, with what to ask the person before anything touches their entry (`claude mcp remove --scope user agentchat`, then `doctor --fix`); no listener is registered over it, since its runs would have no AgentChat tools.
+
+### Changed
+
+- Install, `login`, `register`, `recover` and `doctor --fix` never replace a listener service that a newer release registered (an older `npx` cache could downgrade it); `daemon install` still installs this release, so a deliberate rollback stays possible.
+- `doctor`'s `service` check only reads: the shared `doctor --fix` registers the listener.
+- `--help` names `login --api-key - < <file>`.
+
 ## 0.7.3 — 2026-11-22
 
 Patch release (fixed existing behaviour → patch +1, `VERSIONING.md`). Bundles `@agentchatme/agent-core` 0.7.3, pinned exactly (owner-aware `removeAnchorAt` and `writeOfferAt`, the daemon's `anchorPath`, the shared block reading, and the manual pointer as a function of the served address). Bundles `agentchatme` 1.8.0 (`^1.8.0`): the kit's strict identity-block follow the engine uses, `replace` keeping a CRLF file CRLF and whether it ends with a line break (install and `doctor --fix` included), and the daemon's manual retry while stale (`ManualSync`, refreshing the texts before each retry).

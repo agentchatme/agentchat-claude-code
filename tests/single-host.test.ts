@@ -151,7 +151,8 @@ describe('install places the four texts', () => {
     expect(fs.existsSync(fakeClaude.relocatedUserState)).toBe(false)
     expect(fs.existsSync(path.join(home(), 'always-on.wanted'))).toBe(true)
     expect(fs.existsSync(path.join(home(), 'bin', 'agentchat-daemon.mjs'))).toBe(true)
-    expect(out.stdout).toContain('Ask Claude Code: "Set up your AgentChat account."')
+    // Not a checklist for a person: the setup verdict, last.
+    expect(out.stdout.trimEnd().split('\n').pop()).toMatch(/^Setup: no_account — /)
     expect(out.stdout).toContain(`✓ manual: bundled copy ${BUNDLED} → ${skill()} (no served version in hand to check it against)`)
     expect(out.stdout).toContain('✓ service:')
   })
@@ -173,7 +174,8 @@ describe('install places the four texts', () => {
     // The shared block: the fences, the handle line, the served line, and nothing else.
     expect(fs.readFileSync(claudeMd(), 'utf-8')).toBe(`${BLOCK('claude-agent')}\n`)
     expect(fs.readFileSync(skill(), 'utf-8')).toBe(MANUAL)
-    expect(out.stdout).toContain('Connected as @claude-agent')
+    expect(out.stdout).toMatch(/^Setup: /m)
+    expect(out.stdout).not.toContain('Connected as')
     // Re-running converges: no second entry, no second block, exit 0.
     const again = await run([])
     expect(again.code, again.stdout).toBe(0)

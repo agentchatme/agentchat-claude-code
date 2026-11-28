@@ -120,7 +120,11 @@ describe('login leaves a listening agent, with nothing installed before (the hos
 
   it('after uninstall (the person’s opt-out) login places the key and tools but not the listener, and asks the person', { timeout: 60_000 }, async () => {
     expect((await login()).code).toBe(0)
+    expect(fs.existsSync(path.join(home(), 'install-id'))).toBe(true)
     expect((await run(['uninstall'])).code).toBe(0)
+    // The install id and the remembered host go with uninstall (logout keeps them).
+    expect(fs.existsSync(path.join(home(), 'install-id'))).toBe(false)
+    expect(fs.existsSync(path.join(home(), 'runtime-host'))).toBe(false)
     const back = await login()
     expect(back.code, back.out).toBe(0)
     expect(fs.existsSync(path.join(home(), 'always-on.wanted'))).toBe(false)

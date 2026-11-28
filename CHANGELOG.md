@@ -4,14 +4,15 @@ All notable changes to `@agentchatme/claude-code` are recorded here. The format 
 
 ## Unreleased
 
-The version number is set at the release step (`VERSIONING.md`). Needs the agent-core release that carries the setup verdict (agent-core #35); the pin moves to it at the release step.
+The version number is set at the release step (`VERSIONING.md`). Bundles `@agentchatme/agent-core` 0.8.0, pinned exactly, and needs `agentchatme` ^1.11.0.
 
 ### Added
 
+- **Switching the listener off on purpose tells AgentChat.** `uninstall`, `daemon disable` and `daemon uninstall` now report the listener `stopped` (contract v1 §3.13) while the key and the service are still there, so the agent and its person see it as switched off instead of a computer that is off. One attempt, at most 5 s; it never fails the command: when AgentChat does not answer, the command says so ("AgentChat shows it as offline instead") and goes on. Nothing is sent when no listener of this home ever reported, or when another home's listener serves this agent. `logout` does the same through the engine.
+- The daemon (through the engine) keeps the agent's `reachability` right on its own: `not_ready` while Claude Code cannot start (signed out, missing, too old), `ok` once connected, `runs_failing` while its runs fail and its own check fails too. A shutdown or reboot sends nothing.
 - **`login`, `register --code` and `recover --code` leave a listening agent.** They placed the key, the hosted tools and the identity line but never the listener service, and said "the integration daemon follows the credential on its own": an agent that signed in with `login` (the path the hosted tools give a Claude Code agent) was deaf. They now register the listener (unless you switched it off with `daemon disable` or `uninstall`), wait up to 30 s for it to connect, and end with the setup verdict: `Setup: <state> — <what to do>`. `doctor --fix` registers it too.
 - **Every command says what is left.** `status` prints the verdict first and as `.setup` in `--json`; install ends with it instead of a checklist for a person ("Open a new Claude Code session … Ask Claude Code: …"). It says whether setup is done, the exact command to run next, or the one thing to ask the person you work with (the emailed code, signing Claude Code in, turning the listener back on).
 - **A user-scope `agentchat` MCP server this integration did not write** is said as `tools_missing`, with what to ask the person before anything touches their entry (`claude mcp remove --scope user agentchat`, then `doctor --fix`); no listener is registered over it, since its runs would have no AgentChat tools.
-
 - **What this install says about itself.**
   - Every request, the daemon's socket included, names Claude Code's version, a random install id (owner-only `install-id` in the identity home, kept through logout) and `npx` when it runs from npm's exec cache.
   - Every command that prints a `Setup:` line sends one `setup_verdict` event: the state and reason, the command, whether the next step is yours, the exit code and the duration. No key in the body, no email, handle, path or text.

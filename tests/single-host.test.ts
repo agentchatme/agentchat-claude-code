@@ -477,6 +477,22 @@ describe('there is no way to address another agent', () => {
     expect(out.stdout).toContain('key is no longer registered')
   })
 
+  it('logout after uninstall places no setup offer: nothing says AgentChat is installed when it is not', async () => {
+    giveClaudeAnIdentity()
+    expect((await run([])).code).toBe(0)
+    const uninstall = await run(['uninstall'])
+    expect(uninstall.code, uninstall.stdout + uninstall.stderr).toBe(0)
+    expect(fs.existsSync(skill())).toBe(false)
+
+    const out = await run(['logout'])
+    expect(out.code, out.stdout + out.stderr).toBe(0)
+    expect(fs.existsSync(creds())).toBe(false)
+    const md = fs.existsSync(claudeMd()) ? fs.readFileSync(claudeMd(), 'utf-8') : ''
+    expect(md).not.toContain('agentchat:start')
+    expect(md).not.toContain('no account yet')
+    expect(out.stdout).not.toContain('setup offer')
+  })
+
   it('logout under a non-default api_base still removes the MCP entry: the pre-clear identity names the server', async () => {
     // The hole: credentials cleared first, base guessed afterwards → the entry
     // at the real base looked foreign and the key stayed in .claude.json.

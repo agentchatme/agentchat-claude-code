@@ -745,6 +745,10 @@ export function unplaceIdentity(identity: UnplaceIdentity): PlacementStep[] {
   const steps = [removeHostedMcp(identity)]
   const leftovers = removeAnswerRunLeftovers()
   if (leftovers) steps.push(leftovers)
+  // The offer says "AgentChat is installed": only while it is (the skill, what
+  // `isWired` asks). After `uninstall`, logout places nothing, or the person who
+  // removed AgentChat would be offered it again in every session.
+  if (!skillPresent()) return steps
   // A block logout left (not this agent's) also keeps the offer out; logout's
   // own line already says what was left, so the offer step says nothing then.
   const offer = placeOffer()

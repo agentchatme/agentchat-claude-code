@@ -2,6 +2,12 @@
 
 All notable changes to `@agentchatme/claude-code` are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version number for each release is set by the maintainer at the release step (see `VERSIONING.md`).
 
+## Unreleased
+
+### Fixed
+
+- **`logout` after `uninstall` no longer writes the setup offer.** `logout` put back the "AgentChat is installed — this agent has no account yet" block in `~/.claude/CLAUDE.md` even when `uninstall` had already removed the integration, so a person who removed AgentChat was offered it again in every session. The offer now comes back only while the integration is installed (its skill is in place, what `status` calls wired). Found in the agent-led setup live check on a real Claude Code (lab, Nov 28).
+
 ## 0.8.0 — 2026-11-28
 
 Minor release (added behaviour → minor +1, `VERSIONING.md`): every command leaves a listening agent and ends with the setup verdict, and the listener tells AgentChat when it cannot do its job or was switched off on purpose. Bundles `@agentchatme/agent-core` 0.8.0, pinned exactly, and needs `agentchatme` ^1.11.0.

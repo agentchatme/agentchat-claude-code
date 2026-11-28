@@ -4,7 +4,7 @@ All notable changes to `@agentchatme/claude-code` are recorded here. The format 
 
 ## Unreleased
 
-The version number is set at the release step (`VERSIONING.md`). Needs `@agentchatme/agent-core` with `reportListenerStopped` (the release after 0.7.3) and `agentchatme` 1.11.0; the pins move at the release step.
+The version number is set at the release step (`VERSIONING.md`). Bundles `@agentchatme/agent-core` 0.8.0, pinned exactly, and needs `agentchatme` ^1.11.0.
 
 ### Added
 

@@ -12,7 +12,10 @@ import {
   INTEGRATION_ENV,
   integrationStatusAge,
   isRunProfile,
+  hostIdentityOf,
+  newerRelease,
   probeHostedMcp,
+  readAlwaysOnInstalledVersion,
   readCredentials,
   readIntegrationStatus,
   recordOfferDeclined,
@@ -27,15 +30,17 @@ import {
   type DoctorOpts,
   type HostProfile,
   type IntegrationUnservable,
+  type ListenerEnsure,
+  type PlacementReport,
   type RunProfile,
   type ServedManual,
   type StatusContext,
 } from '@agentchatme/agent-core'
 import { claudeAnswerFallbackWorkdir, inexpressibleDenyPaths } from '@agentchatme/agent-core/presets'
 import { CLIENT, identityHome, anchorFile, claudeConfigOverride, invocation, LABEL, legacyRunWorkdirFor, resolveRunWorkdir, runWorkdirFor } from './host.js'
-import { checkPlacement, placeAll, placementMark, skillPresent, unplaceIdentity, type PlacementIdentity } from './placement.js'
+import { checkPlacement, hostedToolsProblem, placeAll, placementMark, placementProblemOf, skillPresent, unplaceIdentity, type PlacementIdentity } from './placement.js'
 import { ClaudeRunner, claudeSignIn, deniedAncestorOf, denyReadPathsFor, guardsHomeWorkdir, inspectClaudeRuntime, OWN_PROFILE_LINE, OWN_PROFILE_WARNING, profileNote, profileSummary } from './runner.js'
-import { ensureListenerService, listenerServiceCurrent } from './service.js'
+import { ensureListenerService, listenerServiceCurrent, type EnsureResult } from './service.js'
 import { VERSION } from './version.js'
 import { homeIdentity } from './home-identity.js'
 
@@ -96,8 +101,13 @@ const profile: HostProfile = {
   place: async (handle, apiKey, identityLine, manual) => {
     const identity = homeIdentity(identityHome())
     const steps = await placeAll({ handle, apiKey, apiBase: identity?.apiBase ?? 'https://api.agentchat.me', identityLine, identityLineTemplate: null }, manual)
-    return steps.map((s) => `  ${s.status === 'failed' ? 'FAILED' : s.name}: ${s.detail}`)
+    // With the hosted tools not in place, the setup verdict says so and no listener is registered over it.
+    return { lines: steps.map((s) => `  ${s.status === 'failed' ? 'FAILED' : s.name}: ${s.detail}`), problem: placementProblemOf(steps) }
   },
+  // The listener service, after every key change and on `doctor --fix`: never over the person's opt-out, never a downgrade.
+  ensureListener: () => listenerEnsureOf(ensureListenerService()),
+  // The runtime this integration serves and its version (X-AgentChat-Platform `host`), from its own `--version`.
+  host: async () => hostIdentityOf('claude-code', (await inspectClaudeRuntime(claudeConfigOverride())).detail),
   // agent-core resolves the identity BEFORE it clears the credential and hands
   // it here: the MCP entry is recognised by this key and this server.
   unplace: (identity) =>
@@ -118,12 +128,14 @@ const profile: HostProfile = {
       ...(runtime.every((c) => c.verdict === 'PASS') ? [await preflightCheck()] : []),
       integrationCheck(),
       ...[leaseCheck()].filter((c): c is DoctorCheck => c !== null),
+      // Last of the checks, so the shared doctor's setup verdict is the last line and its exit code the command's.
+      await hostedMcpReachCheck(),
     ]
   },
   // The shared status already fetched the served texts once; the placement
   // checks reuse the identity line, its template and the announced manual
   // rather than fetching `/v1/texts` again.
-  extraStatus: async (ctx: StatusContext): Promise<string[]> => {
+  extraStatus: async (ctx: StatusContext): Promise<PlacementReport> => {
     const identity = currentPlacementIdentity(ctx)
     const lines = ['Placement:', ...checkPlacement(identity, ctx.manual).map((c) => `  ${placementMark(c)} ${c.name}: ${c.detail}`)]
     const workdir = workdirCheck(false)
@@ -132,7 +144,8 @@ const profile: HostProfile = {
       const reach = await hostedMcpReachCheck()
       lines.push(`  ${reach.verdict === 'PASS' ? '✓' : '✗'} hosted MCP: ${reach.detail}`)
     }
-    return lines
+    // What keeps runs from having this agent's tools: the setup verdict's `tools_missing`.
+    return { lines, problem: hostedToolsProblem(identity) }
   },
 }
 
@@ -188,18 +201,21 @@ export async function hostedMcpReachCheck(): Promise<DoctorCheck> {
     : { name: 'hosted-mcp-reach', verdict: 'FAIL', detail: probe.error ?? `HTTP ${probe.status ?? '?'}` }
 }
 
+/**
+ * The listener service as it is. `doctor --fix` has already registered it
+ * (agent-core's shared doctor calls `ensureListener`), so this only reads.
+ */
 function serviceCheck(fix: boolean): DoctorCheck {
   const home = identityHome()
   if (alwaysOnOptedOut(home)) return { name: 'service', verdict: 'PASS', detail: 'disabled by the user (`daemon install` re-enables)' }
-  if (fix && !listenerServiceCurrent()) {
-    const repaired = ensureListenerService()
-    if (!repaired.ok) return { name: 'service', verdict: 'FAIL', detail: `repair failed: ${repaired.detail ?? 'unknown error'}` }
-  }
   if (!listenerServiceCurrent()) {
+    if (fix) return { name: 'service', verdict: 'FAIL', detail: `still missing or stale after the repair — run \`${invocation()} daemon install\`` }
     return { name: 'service', verdict: 'WARN', detail: `service, durable daemon bundle or version marker is missing/stale — run \`${invocation()} doctor --fix\`` }
   }
   const state = alwaysOnState(home)
-  return { name: 'service', verdict: state === 'down' ? 'FAIL' : 'PASS', detail: `${state}; service definition and daemon bundle match ${VERSION}` }
+  const installed = readAlwaysOnInstalledVersion(home)
+  const which = installed !== null && newerRelease(installed, VERSION) ? `registered by a newer release (${installed}), left as it is` : `service definition and daemon bundle match ${VERSION}`
+  return { name: 'service', verdict: state === 'down' ? 'FAIL' : 'PASS', detail: `${state}; ${which}` }
 }
 
 /**
@@ -404,6 +420,11 @@ function leaseCheck(): DoctorCheck | null {
   }
 }
 
+/** What `ensureListenerService` did, as the engine's setup flow reads it. */
+export function listenerEnsureOf(result: EnsureResult): ListenerEnsure {
+  return { outcome: result.outcome, detail: result.outcome === 'opted_out' ? null : (result.detail ?? null) }
+}
+
 const commands = createIdentityCommands(profile)
 
 /** Persist a declined setup offer so the always-loaded CLAUDE.md does not nag. */
@@ -423,13 +444,9 @@ export function runNotNow(): number {
 }
 
 /** `status` prints the shared lines, then this host's placement checks and the hosted-MCP probe (`extraStatus`, one texts fetch for both). */
-export const { runRegister, runLogin, runRecover, runLogout, runStatus } = commands
+export const { runRegister, runLogin, runRecover, runLogout, runStatus, confirmSetup, reportSetup } = commands
 
-export async function runDoctor(opts: DoctorOpts = {}): Promise<number> {
-  const base = await commands.runDoctor(opts)
-  const reach = await hostedMcpReachCheck()
-  console.log(`${reach.verdict.padEnd(4)} ${reach.name}: ${reach.detail}`)
-  return base !== 0 || reach.verdict === 'FAIL' ? 1 : 0
-}
+/** `doctor`: the shared checks, this host's (the hosted-tools probe last among them), then the setup verdict. */
+export const runDoctor = (opts: DoctorOpts = {}): Promise<number> => commands.runDoctor(opts)
 
 export type { RegisterOpts, DoctorOpts } from '@agentchatme/agent-core'

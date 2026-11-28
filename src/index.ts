@@ -1,7 +1,9 @@
 import * as fs from 'node:fs'
+import * as path from 'node:path'
 import { parseArgs } from 'node:util'
 import {
   alwaysOnState,
+  daemonPidOf,
   clearAlwaysOnWanted,
   clearAlwaysOnOptOut,
   clearIntegrationStatus,
@@ -18,10 +20,12 @@ import {
   INTEGRATION_ENV,
   INTEGRATION_ENV_LEGACY,
   INTEGRATION_ENV_LEGACY_REMOVAL,
+  clearInstallId,
+  HOST_FILE,
 } from '@agentchatme/agent-core'
 import { CLIENT, identityHome, invocation, serviceLabel, LABEL } from './host.js'
-import { formatPlacement, placeAll, removePlacement } from './placement.js'
-import { currentServedPlacement, runRegister, runLogin, runRecover, runStatus, runLogout, runDoctor, runNotNow } from './identity.js'
+import { formatPlacement, placeAll, placementProblemOf, removePlacement } from './placement.js'
+import { confirmSetup, currentServedPlacement, listenerEnsureOf, reportSetup, runRegister, runLogin, runRecover, runStatus, runLogout, runDoctor, runNotNow } from './identity.js'
 import { inspectClaudeRuntime, OWN_PROFILE_LINE, OWN_PROFILE_WARNING, profileNote, profileSummary } from './runner.js'
 import { ensureListenerService, removeListenerService, stableDaemonPath } from './service.js'
 import { claudeConfigOverride } from './host.js'
@@ -35,7 +39,7 @@ Usage:
   ${invocation()} register --email <e> --handle <h>
   ${invocation()} register --code <6-digit-code>
   ${invocation()} register --not-now                stop offering to set this up
-  ${invocation()} login                            already have an account: paste the key when asked (or pipe it: login --api-key - < key.txt)
+  ${invocation()} login --api-key - < <file>      already have an account: the key from a file on stdin (in a terminal: login, then paste it)
   ${invocation()} recover --handle <h> --email <e>  lost your key (rotates it; --handle defaults to yours)
   ${invocation()} recover --code <6-digit-code>
   ${invocation()} status [--json]
@@ -166,9 +170,12 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
  * without an identity the instruction file gets the setup offer instead) and
  * registers the resident integration service. The manual is the one the served
  * texts announce, downloaded when the skill file is not at that version.
- * Idempotent; an upgrade re-runs it.
+ * Idempotent; an upgrade re-runs it. The last line is the setup verdict
+ * (agent-core's `confirmSetup`): with an account, after the listener connects
+ * or a bounded wait; without one, how to get one.
  */
 async function runInstall(): Promise<number> {
+  const startedAt = Date.now()
   const runtime = await inspectClaudeRuntime(claudeConfigOverride())
   if (!runtime.ok) {
     console.log(`${LABEL}: not installed — ${runtime.detail}`)
@@ -178,18 +185,11 @@ async function runInstall(): Promise<number> {
   const steps = await placeAll(identity, manual)
   const failed = steps.some((s) => s.status === 'failed')
   const skipped = steps.some((s) => s.status === 'skipped')
-
-  let service: 'enabled' | 'off-by-choice' | 'failed' = 'enabled'
-  let serviceDetail = ''
-  if (!failed) {
-    const ensured = ensureListenerService()
-    if (ensured.ok) service = 'enabled'
-    else if (ensured.detail === 'switched off by the user') service = 'off-by-choice'
-    else {
-      service = 'failed'
-      serviceDetail = ensured.detail ?? 'unknown error'
-    }
-  }
+  // Runs need the hosted tools: with them not in place, no listener is registered over it.
+  const tools = placementProblemOf(steps)
+  // The daemon running now, if any: registering the service again replaces it, and its words are not the new one's.
+  const replacedPid = daemonPidOf(identityHome())
+  const ensured = failed || tools !== null ? null : ensureListenerService()
 
   const profile = resolveRunProfile()
   console.log(
@@ -197,20 +197,23 @@ async function runInstall(): Promise<number> {
       `AgentChat integration for ${LABEL} ${VERSION}`,
       '',
       ...formatPlacement(steps),
-      ...(failed
-        ? [`  ✗ service: not registered until the failed step above is resolved — re-run \`${invocation()}\``]
-        : service === 'enabled'
-          ? [`  ✓ service: integration daemon registered (${serviceLabel()}); profile ${profile}${profileNote(profile)}${integrationDisabled() ? `; ${integrationDisabledBy()}=off — holding no socket` : ''}`]
-          : service === 'off-by-choice'
+      ...(ensured === null
+        ? [`  ✗ service: not registered until the step above is resolved — re-run \`${invocation()}\``]
+        : ensured.outcome === 'installed' || ensured.outcome === 'current'
+          ? [
+              `  ✓ service: integration daemon registered (${ensured.detail ?? serviceLabel()}); profile ${profile}${profileNote(profile)}${integrationDisabled() ? `; ${integrationDisabledBy()}=off — holding no socket` : ''}`,
+            ]
+          : ensured.outcome === 'opted_out'
             ? ['  ○ service: integration daemon off (your choice; `daemon install` turns it on)']
-            : [`  ✗ service: could not be registered (${serviceDetail}) — \`${invocation()} daemon install\` retries it`]),
+            : [`  ✗ service: could not be registered (${ensured.detail ?? 'unknown error'}) — \`${invocation()} daemon install\` retries it`]),
       '',
-      ...(identity
-        ? [`Connected as @${identity.handle}. Open a new Claude Code session for the tools to load.`]
-        : ['Next:', '  1. Open a new Claude Code session', '  2. Ask Claude Code: "Set up your AgentChat account."']),
     ].join('\n'),
   )
-  return failed || skipped || service === 'failed' ? 1 : 0
+  await confirmSetup({ ensure: ensured === null ? null : listenerEnsureOf(ensured), tools, replacedPid })
+  const code = failed || skipped || ensured?.outcome === 'failed' ? 1 : 0
+  // What install said, to AgentChat (one bounded, silent request; AGENTCHAT_TELEMETRY=off sends nothing).
+  await reportSetup({ command: 'install', exitCode: code, startedAt })
+  return code
 }
 
 /**
@@ -263,6 +266,10 @@ async function runUninstall(): Promise<number> {
     // running would only write them again): its status file, the one an older
     // daemon wrote, and the could-not-process ledger (the engine's list).
     clearIntegrationStatus(home)
+    // The install id and the host a command last read go with the integration (they survive logout, not
+    // uninstall). After the listener's `stopped` above, which is sent while the service is still there.
+    clearInstallId(home)
+    fs.rmSync(path.join(home, HOST_FILE), { force: true })
   }
 
   console.log(

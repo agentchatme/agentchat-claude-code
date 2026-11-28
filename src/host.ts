@@ -1,6 +1,7 @@
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { INTEGRATION_ENV, INTEGRATION_ENV_LEGACY, MANUAL_FILENAME, MANUAL_SKILL_NAME, RUN_BUDGET_ENV, RUN_PROFILE_ENV, serviceLabelFor, type IntegrationClient } from '@agentchatme/agent-core'
+import { fileURLToPath } from 'node:url'
+import { INTEGRATION_ENV, INTEGRATION_ENV_LEGACY, MANUAL_FILENAME, MANUAL_SKILL_NAME, RUN_BUDGET_ENV, RUN_PROFILE_ENV, serviceLabelFor, installMethodOf, type IntegrationClient } from '@agentchatme/agent-core'
 import { CLAUDE_MCP_SERVER_NAME, claudeUserStatePathFor as presetUserStatePathFor } from '@agentchatme/agent-core/presets'
 import { VERSION } from './version.js'
 
@@ -97,13 +98,21 @@ export function skillPath(): string {
 
 export const LABEL = 'Claude Code'
 
+/** How this bundle was installed, when that is certain (`installMethodOf`). */
+const installMethodHere = installMethodOf(fileURLToPath(import.meta.url))
+
 /**
  * How this integration names itself to the server: the runtime as the texts
  * endpoint spells it (`GET /v1/texts?runtime=claude-code`) and this package's
  * version, sent as the client identity on every request and on the socket.
  * Nothing branches on it.
  */
-export const CLIENT: IntegrationClient = { runtime: 'claude-code', version: VERSION }
+export const CLIENT: IntegrationClient = {
+  runtime: 'claude-code',
+  version: VERSION,
+  // `npx` when this bundle runs from npm's exec cache; otherwise left out (never guessed).
+  ...(installMethodHere !== null ? { installMethod: installMethodHere } : {}),
+}
 
 /** The service label of the default config (`~/.claude`) — the label every install before per-home labels used. */
 export const SERVICE_BASE_LABEL = 'agentchatd-claude-code'

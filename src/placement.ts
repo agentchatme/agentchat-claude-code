@@ -19,6 +19,7 @@ import {
   writeAnchor,
   writeOfferAt,
   type ManualSyncResult,
+  type PlacementProblem,
   type ServedManual,
 } from '@agentchatme/agent-core'
 import {
@@ -854,6 +855,67 @@ export function checkPlacement(identity: PlacementIdentity | null, manual: Serve
     detail: leftovers.length === 0 ? 'no pre-0.1.0 wiring left' : `pre-0.1.0 wiring still present: ${leftovers.join(', ')}`,
   })
   return checks
+}
+
+// ─── What keeps runs from having this agent's tools (the setup verdict) ─────
+//
+// A headless run reaches the hosted tools through the user-scope MCP server
+// `agentchat`. When that is not this integration's entry, or its helper
+// cannot hand over the key, the run has no AgentChat tools: the setup verdict
+// says `tools_missing` in these words, and no listener is registered over it.
+// An entry this integration did not write is the person's: it is never
+// changed without asking them.
+
+const REMOVE_THEIRS = `claude mcp remove --scope user ${MCP_SERVER_NAME}`
+
+/** The user-scope "agentchat" entry is someone else's: only the person decides what happens to it. */
+function theirEntryProblem(detail: string): PlacementProblem {
+  return {
+    text: `the hosted AgentChat tools are not set up for Claude Code: ${detail} (in ${claudeUserStatePath()}), so runs AgentChat starts would not get this agent's tools. It is the person's own entry: never change it without asking the person you work with. If they agree, run \`${REMOVE_THEIRS}\`, then \`${invocation()} doctor --fix\`.`,
+    needsPerson: true,
+    ask: `Claude Code has an MCP server named "${MCP_SERVER_NAME}" that the AgentChat integration did not set up (${detail}). May I remove it (\`${REMOVE_THEIRS}\`) so the integration can register this agent's own?`,
+    detail,
+  }
+}
+
+function repairProblem(detail: string): PlacementProblem {
+  return {
+    text: `the hosted AgentChat tools are not set up for Claude Code (${detail}), so runs AgentChat starts would not get this agent's tools. Run \`${invocation()} doctor --fix\`; if it fails the same way, show the person you work with this line.`,
+    command: `${invocation()} doctor --fix`,
+    detail,
+  }
+}
+
+/** From what a placement just did: the hosted-tools step failed, or was left because the entry is not ours. Null when the tools are in place. */
+export function placementProblemOf(steps: readonly PlacementStep[]): PlacementProblem | null {
+  const mcp = steps.find((s) => s.name === 'mcp')
+  if (mcp === undefined) return null
+  if (mcp.status === 'skipped') return theirEntryProblem(mcp.detail.replace(/ — left untouched; rename or remove it, then re-run$/, ''))
+  if (mcp.status === 'failed') return repairProblem(mcp.detail)
+  return null
+}
+
+/** From the entry as it is now (`status`): null when runs get this agent's tools. */
+export function hostedToolsProblem(identity: PlacementIdentity | null): PlacementProblem | null {
+  if (identity === null) return null
+  const mcp = inspectHostedMcp(identity.apiKey, identity.apiBase)
+  switch (mcp.state) {
+    case 'foreign':
+      return theirEntryProblem(mcp.detail)
+    case 'unavailable':
+      return repairProblem(mcp.detail)
+    case 'missing':
+      return repairProblem(`no user-scope MCP server "${MCP_SERVER_NAME}"`)
+    case 'legacy':
+      return repairProblem(`the user-scope MCP server "${MCP_SERVER_NAME}" is the old local stdio server`)
+    case 'ours': {
+      // An earlier release's static key still works while it is this agent's; a different key or no helper does not.
+      if (mcp.staticKey) return mcp.currentKey ? null : repairProblem(`the user-scope MCP server "${MCP_SERVER_NAME}" carries a different key than this agent's credentials`)
+      if (mcp.helper !== 'current') return repairProblem(`the user-scope MCP server "${MCP_SERVER_NAME}" has no current headers helper, so no key reaches the hosted tools`)
+      const helperProblem = headersHelperProblem(readEntryField('headersHelper'), identity.apiKey)
+      return helperProblem === null ? null : repairProblem(helperProblem)
+    }
+  }
 }
 
 /** ✓ done / current, – not done but nothing broken (a stale manual, an unchecked one), ✗ failed / missing. */

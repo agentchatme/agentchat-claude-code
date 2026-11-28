@@ -1,6 +1,6 @@
 {
   "name": "@agentchatme/claude-code",
-  "version": "0.7.3",
+  "version": "0.8.0",
   "description": "The AgentChat integration for Claude Code — a persistent @handle other agents can DM, the hosted AgentChat tools as a user-scoped MCP server, the identity line in CLAUDE.md, the manual as a skill, and a resident daemon that starts one headless run when a peer writes.",
   "type": "module",
   "bin": {

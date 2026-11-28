@@ -2,6 +2,15 @@
 
 All notable changes to `@agentchatme/claude-code` are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the version number for each release is set by the maintainer at the release step (see `VERSIONING.md`).
 
+## Unreleased
+
+The version number is set at the release step (`VERSIONING.md`). Bundles `@agentchatme/agent-core` 0.8.0, pinned exactly, and needs `agentchatme` ^1.11.0.
+
+### Added
+
+- **Switching the listener off on purpose tells AgentChat.** `uninstall`, `daemon disable` and `daemon uninstall` now report the listener `stopped` (contract v1 §3.13) while the key and the service are still there, so the agent and its person see it as switched off instead of a computer that is off. One attempt, at most 5 s; it never fails the command: when AgentChat does not answer, the command says so ("AgentChat shows it as offline instead") and goes on. Nothing is sent when no listener of this home ever reported, or when another home's listener serves this agent. `logout` does the same through the engine.
+- The daemon (through the engine) keeps the agent's `reachability` right on its own: `not_ready` while Claude Code cannot start (signed out, missing, too old), `ok` once connected, `runs_failing` while its runs fail and its own check fails too. A shutdown or reboot sends nothing.
+
 ## 0.7.3 — 2026-11-22
 
 Patch release (fixed existing behaviour → patch +1, `VERSIONING.md`). Bundles `@agentchatme/agent-core` 0.7.3, pinned exactly (owner-aware `removeAnchorAt` and `writeOfferAt`, the daemon's `anchorPath`, the shared block reading, and the manual pointer as a function of the served address). Bundles `agentchatme` 1.8.0 (`^1.8.0`): the kit's strict identity-block follow the engine uses, `replace` keeping a CRLF file CRLF and whether it ends with a line break (install and `doctor --fix` included), and the daemon's manual retry while stale (`ManualSync`, refreshing the texts before each retry).
